@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .model import (
     Teacher, TeacherUnavailability, Discipline, Lesson,
     Room, TimeSlot, CalendarEntry
@@ -11,17 +11,35 @@ class DataLoader:
     def __init__(self, input_dir: str):
         self.input_dir = input_dir
 
+    def _to_int(self, val: Any) -> int:
+        """Safe conversion to int, handling '1.0' from pandas."""
+        if pd.isna(val):
+            return 0
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return 0
+
+    def _to_optional_int(self, val: Any) -> Optional[int]:
+        """Safe conversion to optional int."""
+        if pd.isna(val):
+            return None
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return None
+
     def load_teachers(self) -> List[Teacher]:
         df = pd.read_csv(os.path.join(self.input_dir, 'teachers.csv'))
         return [
             Teacher(
-                teacher_id=row['teacher_id'],
+                teacher_id=self._to_int(row['teacher_id']),
                 last_name=row['last_name'],
                 first_name=row['first_name'],
                 middle_name=row['middle_name'],
                 position=row['position'],
-                max_hours_per_week=row['max_hours_per_week'],
-                seniority=row['seniority']
+                max_hours_per_week=self._to_int(row['max_hours_per_week']),
+                seniority=self._to_int(row['seniority'])
             ) for _, row in df.iterrows()
         ]
 
@@ -34,16 +52,19 @@ class DataLoader:
         def parse_date(val):
             if pd.isna(val) or val == '':
                 return None
-            return datetime.strptime(val, '%Y-%m-%d').date()
+            try:
+                return datetime.strptime(str(val), '%Y-%m-%d').date()
+            except ValueError:
+                return None
 
         def parse_days(val):
             if pd.isna(val) or val == '':
                 return []
-            return val.split(';')
+            return [d.strip() for d in str(val).split(';') if d.strip()]
 
         return [
             TeacherUnavailability(
-                teacher_id=row['teacher_id'],
+                teacher_id=self._to_int(row['teacher_id']),
                 start_date=parse_date(row['start_date']),
                 end_date=parse_date(row['end_date']),
                 reason=row['reason'],
@@ -57,19 +78,23 @@ class DataLoader:
         def parse_ids(val):
             if pd.isna(val) or str(val).strip() == '':
                 return []
-            return [int(x) for x in str(val).split(';') if x.strip()]
+            # IDs might be like "3.0; 4.0" or just "3;4"
+            try:
+                return [int(float(x.strip())) for x in str(val).split(';') if x.strip()]
+            except (ValueError, TypeError):
+                return []
 
         return [
             Discipline(
-                discipline_id=row['discipline_id'],
+                discipline_id=self._to_int(row['discipline_id']),
                 discipline_name=row['discipline_name'],
                 group_name=row['group_name'],
-                group_size=row['group_size'],
-                semester=row['semester'],
-                lecture_hours=row['lecture_hours'],
-                practice_hours=row['practice_hours'],
-                lab_hours=row['lab_hours'],
-                lecturer_id=row['lecturer_id'],
+                group_size=self._to_int(row['group_size']),
+                semester=self._to_int(row['semester']),
+                lecture_hours=self._to_int(row['lecture_hours']),
+                practice_hours=self._to_int(row['practice_hours']),
+                lab_hours=self._to_int(row['lab_hours']),
+                lecturer_id=self._to_int(row['lecturer_id']),
                 practice_teacher_ids=parse_ids(row['practice_teacher_ids']),
                 lab_teacher_ids=parse_ids(row['lab_teacher_ids'])
             ) for _, row in df.iterrows()
@@ -79,13 +104,13 @@ class DataLoader:
         df = pd.read_csv(os.path.join(self.input_dir, 'thematic_plans.csv'))
         return [
             Lesson(
-                discipline_id=row['discipline_id'],
+                discipline_id=self._to_int(row['discipline_id']),
                 lesson_type=row['lesson_type'],
-                lesson_number=row['lesson_number'],
+                lesson_number=self._to_int(row['lesson_number']),
                 topic=row['topic'],
-                duration_minutes=row['duration_minutes'],
+                duration_minutes=self._to_int(row['duration_minutes']),
                 required_room_type=row['required_room_type'],
-                min_capacity=row['min_capacity']
+                min_capacity=self._to_int(row['min_capacity'])
             ) for _, row in df.iterrows()
         ]
 
@@ -95,15 +120,15 @@ class DataLoader:
         def parse_equipment(val):
             if pd.isna(val) or val == '':
                 return []
-            return val.split(';')
+            return [e.strip() for e in str(val).split(';') if e.strip()]
 
         return [
             Room(
-                room_id=row['room_id'],
+                room_id=self._to_int(row['room_id']),
                 room_name=row['room_name'],
                 building=row['building'],
                 room_type=row['room_type'],
-                capacity=row['capacity'],
+                capacity=self._to_int(row['capacity']),
                 equipment=parse_equipment(row.get('equipment', ''))
             ) for _, row in df.iterrows()
         ]
@@ -112,12 +137,12 @@ class DataLoader:
         df = pd.read_csv(os.path.join(self.input_dir, 'timeslots.csv'))
         return [
             TimeSlot(
-                slot_id=row['slot_id'],
+                slot_id=self._to_int(row['slot_id']),
                 day_of_week=row['day_of_week'],
-                start_time=datetime.strptime(row['start_time'], '%H:%M').time(),
-                end_time=datetime.strptime(row['end_time'], '%H:%M').time(),
-                duration_minutes=row['duration_minutes'],
-                slot_number=row['slot_number']
+                start_time=datetime.strptime(str(row['start_time']), '%H:%M').time(),
+                end_time=datetime.strptime(str(row['end_time']), '%H:%M').time(),
+                duration_minutes=self._to_int(row['duration_minutes']),
+                slot_number=self._to_int(row['slot_number'])
             ) for _, row in df.iterrows()
         ]
 
@@ -125,7 +150,7 @@ class DataLoader:
         df = pd.read_csv(os.path.join(self.input_dir, 'calendar.csv'))
         return [
             CalendarEntry(
-                date=datetime.strptime(row['date'], '%Y-%m-%d').date(),
+                date=datetime.strptime(str(row['date']), '%Y-%m-%d').date(),
                 is_holiday=bool(row['is_holiday']),
                 is_working_day=bool(row['is_working_day']),
                 description=row['description']

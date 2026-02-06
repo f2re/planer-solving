@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Tuple
 from .model import Teacher, Room, Discipline, Lesson, TimeSlot
 
-class DataValidator:
+class Validator:
     def __init__(self, data: Dict[str, Any]):
         self.data = data
         self.errors = []
@@ -13,6 +13,14 @@ class DataValidator:
         self._check_disciplines()
         self._check_lessons()
         return len(self.errors) == 0, self.errors, self.warnings
+
+    def validate_all(self) -> bool:
+        success, errors, warnings = self.validate()
+        for err in errors:
+            print(f"Error: {err}")
+        for warn in warnings:
+            print(f"Warning: {warn}")
+        return success
 
     def _check_teachers(self):
         teachers = self.data['teachers']

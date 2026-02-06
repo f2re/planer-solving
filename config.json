@@ -3,7 +3,7 @@
   "output_directory": "./output/",
   "schedule_start_date": "2026-02-10",
   "schedule_end_date": "2026-06-30",
-  "solver_time_limit_seconds": 300,
+  "solver_time_limit_seconds": 60,
   "number_of_solutions": 1,
   "soft_constraints": {
     "minimize_student_gaps": {"enabled": true, "weight": 10},
