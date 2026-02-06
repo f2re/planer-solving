@@ -214,7 +214,9 @@ class ConstraintManager:
                     self.model.Add(last >= vars['end'] - M * (1 - presence))
                 
                 any_lesson = self.model.NewBoolVar(f'{entity_type}_{entity}_d{d_idx}_any')
-                self.model.Add(any_lesson == (sum(p for _, _, p in relevant_lessons) >= 1))
+                sum_p = sum(p for _, _, p in relevant_lessons)
+                self.model.Add(sum_p >= 1).OnlyEnforceIf(any_lesson)
+                self.model.Add(sum_p == 0).OnlyEnforceIf(any_lesson.Not())
                 
                 total_duration = self.model.NewIntVar(0, M, f'{entity_type}_{entity}_d{d_idx}_dur')
                 self.model.Add(total_duration == sum(p * v['duration'] for _, v, p in relevant_lessons))
@@ -241,8 +243,38 @@ class ConstraintManager:
             self.objective_terms.append(max_daily_slots * (-weight))
 
     def _add_consecutive_lessons_constraints(self, weight: int):
-        # Rely on gap minimization for now, as it pushes lessons together.
-        pass
+        # If two lessons of the same discipline for the same group are on the same day,
+        # we reward them being consecutive.
+        group_disc_lessons = collections.defaultdict(list)
+        for l_idx, vars in self.variables['lessons'].items():
+            key = (vars['discipline'].group_name, vars['discipline'].discipline_id)
+            group_disc_lessons[key].append(vars)
+            
+        for key, lessons in group_disc_lessons.items():
+            if len(lessons) < 2: continue
+            for d_idx in range(self.num_days):
+                for i in range(len(lessons)):
+                    for j in range(i + 1, len(lessons)):
+                        v1, v2 = lessons[i], lessons[j]
+                        both_on_day = self.model.NewBoolVar(f'cons_{key}_{d_idx}_{i}_{j}_both')
+                        self.model.AddMultiplicationEquality(both_on_day, [v1['day_bools'][d_idx], v2['day_bools'][d_idx]])
+                        
+                        # Are they consecutive? 
+                        # v1.end == v2.start OR v2.end == v1.start
+                        is_cons = self.model.NewBoolVar(f'cons_{key}_{d_idx}_{i}_{j}_is')
+                        c1 = self.model.NewBoolVar(f'cons_{key}_{d_idx}_{i}_{j}_c1')
+                        c2 = self.model.NewBoolVar(f'cons_{key}_{d_idx}_{i}_{j}_c2')
+                        self.model.Add(v1['end'] == v2['start']).OnlyEnforceIf(c1)
+                        self.model.Add(v1['end'] != v2['start']).OnlyEnforceIf(c1.Not())
+                        self.model.Add(v2['end'] == v1['start']).OnlyEnforceIf(c2)
+                        self.model.Add(v2['end'] != v1['start']).OnlyEnforceIf(c2.Not())
+                        
+                        self.model.Add(c1 + c2 >= 1).OnlyEnforceIf(is_cons)
+                        self.model.Add(c1 + c2 == 0).OnlyEnforceIf(is_cons.Not())
+                        
+                        reward = self.model.NewBoolVar(f'cons_{key}_{d_idx}_{i}_{j}_reward')
+                        self.model.AddMultiplicationEquality(reward, [both_on_day, is_cons])
+                        self.objective_terms.append(reward * weight)
 
     def _add_building_transition_constraints(self, weight: int):
         buildings = sorted(list(set(r.building for r in self.data['rooms'])))

@@ -47,15 +47,12 @@ class ScheduleSolver:
         self.teacher_to_idx = {t.teacher_id: i for i, t in enumerate(self.teachers)}
 
     def build_model(self):
-        # Global slots
-        self.valid_global_slots = [] # List of (date_obj, slot_obj)
-        global_idx = 0
+        self.valid_global_slots = [] 
         for date_entry in self.working_dates:
             day_name = date_entry.date.strftime('%A')
             day_slots = sorted([s for s in self.all_slots if s.day_of_week == day_name], key=lambda s: s.slot_number)
             for slot in day_slots:
                 self.valid_global_slots.append((date_entry.date, slot))
-                global_idx += 1
                 
         self.num_global_slots = len(self.valid_global_slots)
         
@@ -64,7 +61,6 @@ class ScheduleSolver:
             discipline = self.disciplines.get(lesson.discipline_id)
             if not discipline: continue
             
-            # Duration in 90-min slots
             duration_slots = (lesson.duration_minutes + 89) // 90
             if duration_slots < 1: duration_slots = 1
             
@@ -72,7 +68,7 @@ class ScheduleSolver:
             
             # Compatible Rooms
             comp_rooms = [r for r in self.rooms if r.capacity >= discipline.group_size and r.room_type == lesson.required_room_type]
-            if not comp_rooms: comp_rooms = self.rooms # Fallback
+            if not comp_rooms: comp_rooms = self.rooms 
             comp_room_indices = [self.room_to_idx[r.room_id] for r in comp_rooms]
             room_var = self.model.NewIntVarFromDomain(cp_model.Domain.FromValues(comp_room_indices), f'room_{l_idx}')
             
@@ -106,7 +102,8 @@ class ScheduleSolver:
             'teacher_to_idx': self.teacher_to_idx,
             'room_to_idx': self.room_to_idx,
             'teacher_unavailability': self.data['teacher_unavailability'],
-            'teachers': self.teachers
+            'teachers': self.teachers,
+            'rooms': self.rooms
         })
         self.constraints.add_hard_constraints()
         self.constraints.add_soft_constraints(self.config)
@@ -114,6 +111,14 @@ class ScheduleSolver:
     def solve(self) -> List[ScheduleAssignment]:
         self.build_model()
         status = self.solver.Solve(self.model)
+        
+        self.config['stats'] = {
+            'status': self.solver.StatusName(status),
+            'objective_value': self.solver.ObjectiveValue() if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else 0,
+            'solve_time': self.solver.WallTime(),
+            'warnings': []
+        }
+        
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return self._extract_solution()
         return []
@@ -122,10 +127,13 @@ class ScheduleSolver:
         assignments = []
         for l_idx, vars in self.variables['lessons'].items():
             start_val = self.solver.Value(vars['start'])
+            duration = vars['duration']
             room_idx = self.solver.Value(vars['room'])
             teacher_idx = self.solver.Value(vars['teacher'])
             
-            date_obj, slot_obj = self.valid_global_slots[start_val]
+            date_obj, start_slot_obj = self.valid_global_slots[start_val]
+            _, end_slot_obj = self.valid_global_slots[start_val + duration - 1]
+            
             room = self.rooms[room_idx]
             teacher = self.teachers[teacher_idx]
             lesson = vars['lesson']
@@ -134,10 +142,10 @@ class ScheduleSolver:
             assignments.append(ScheduleAssignment(
                 week_number=date_obj.isocalendar()[1],
                 assignment_date=date_obj,
-                day_of_week=slot_obj.day_of_week,
-                start_time=slot_obj.start_time,
-                end_time=slot_obj.end_time,
-                slot_number=slot_obj.slot_number,
+                day_of_week=start_slot_obj.day_of_week,
+                start_time=start_slot_obj.start_time,
+                end_time=end_slot_obj.end_time,
+                slot_number=start_slot_obj.slot_number,
                 discipline_name=discipline.discipline_name,
                 lesson_type=lesson.lesson_type,
                 topic=lesson.topic,

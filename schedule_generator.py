@@ -61,6 +61,8 @@ def main():
     solver = ScheduleSolver(data, config)
     try:
         assignments = solver.solve()
+        # Add solver-computed slots back to data for exporter
+        data['valid_global_slots'] = solver.valid_global_slots
     except Exception as e:
         logger.error(f"Error during solving: {e}")
         sys.exit(1)
