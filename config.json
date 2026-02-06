@@ -1,0 +1,18 @@
+{
+  "input_directory": "./input/",
+  "output_directory": "./output/",
+  "schedule_start_date": "2026-02-10",
+  "schedule_end_date": "2026-06-30",
+  "solver_time_limit_seconds": 300,
+  "number_of_solutions": 1,
+  "soft_constraints": {
+    "minimize_student_gaps": {"enabled": true, "weight": 10},
+    "minimize_teacher_gaps": {"enabled": true, "weight": 5},
+    "balance_workload": {"enabled": true, "weight": 3},
+    "group_consecutive_lessons": {"enabled": true, "weight": 7},
+    "minimize_building_transitions": {"enabled": true, "weight": 4},
+    "teacher_seniority_priority": {"enabled": false, "weight": 2},
+    "avoid_late_slots": {"enabled": true, "weight": 3}
+  },
+  "logging_level": "INFO"
+}
