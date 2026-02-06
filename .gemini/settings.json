@@ -1,0 +1,38 @@
+{
+  "experimental": {
+    "enableAgents": true,
+    "agentSettings": {
+      "enabled": true,
+      "orchestratorSettings": {
+        "enabled": true,
+        "autoDelegate": true
+      },
+      "developerSettings": {
+        "enabled": true,
+        "pythonVersion": "3.11",
+        "formatter": "black",
+        "linter": "ruff"
+      },
+      "testerSettings": {
+        "enabled": true,
+        "framework": "pytest",
+        "minCoverage": 80
+      }
+    }
+  },
+  "codeExecution": {
+    "enabled": true,
+    "timeout": 300
+  },
+  "fileSearch": {
+    "enabled": true,
+    "excludePatterns": [
+      "*.pyc",
+      "__pycache__",
+      ".git",
+      "venv",
+      "*.xlsx",
+      "*.csv"
+    ]
+  }
+}

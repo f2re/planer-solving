@@ -1,0 +1,4 @@
+discipline_id,discipline_name,group_name,group_size,semester,lecture_hours,practice_hours,lab_hours,lecturer_id,practice_teacher_ids,lab_teacher_ids
+101,Высшая математика,ИВТ-21,25,3,36,36,0,1,2,
+102,Программирование,ИВТ-21,25,3,36,18,36,2,2,3
+103,Базы данных,ИВТ-22,30,3,36,36,18,1,3,3

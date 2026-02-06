@@ -1,0 +1,9 @@
+slot_id,day_of_week,start_time,end_time,duration_minutes,slot_number
+1,Monday,08:30,10:00,90,1
+2,Monday,10:10,11:40,90,2
+3,Monday,12:00,13:30,90,3
+4,Monday,13:50,15:20,90,4
+5,Tuesday,08:30,10:00,90,1
+6,Tuesday,10:10,11:40,90,2
+7,Tuesday,12:00,13:30,90,3
+8,Tuesday,13:50,15:20,90,4
