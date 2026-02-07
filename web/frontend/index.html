@@ -3,31 +3,182 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Планировщик расписания</title>
+    <title>Генератор Расписания Преподавателей</title>
     <link rel="stylesheet" href="assets/bootstrap.min.css">
-    <script src="assets/vue.global.prod.js"></script>
-    <script src="assets/axios.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #0d6efd;
+        }
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            margin-bottom: 2rem;
+        }
+        .table-responsive {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        [v-cloak] { display: none; }
+        .drop-zone {
+            border: 2px dashed #dee2e6;
+            border-radius: 0.5rem;
+            padding: 2rem;
+            text-align: center;
+            transition: border-color 0.15s ease-in-out;
+            cursor: pointer;
+        }
+        .drop-zone:hover {
+            border-color: var(--primary-color);
+        }
+    </style>
 </head>
 <body>
-    <div id="app" class="container mt-5">
-        <h1>Система формирования сводного расписания</h1>
-        <hr>
+    <div id="app" class="container py-5" v-cloak>
+        <header class="mb-5 text-center">
+            <h1 class="display-5 fw-bold">📅 Планировщик Расписания</h1>
+            <p class="lead">Управление преподавателями и генерация индивидуальных графиков</p>
+        </header>
+
         <div class="row">
-            <div class="col-md-6">
-                <h3>Загрузка данных</h3>
-                <div class="mb-3">
-                    <label for="formFileMultiple" class="form-label">Выберите файлы расписания (Excel)</label>
-                    <input class="form-control" type="file" id="formFileMultiple" multiple>
+            <!-- Управление Преподавателями -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Список преподавателей</h5>
+                        <span class="badge bg-primary">{{ teachers.length }} человек</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Краткое имя</th>
+                                        <th>Полное имя</th>
+                                        <th>Должность</th>
+                                        <th class="text-end">Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="teacher in teachers" :key="teacher.id">
+                                        <td><strong>{{ teacher.short_name }}</strong></td>
+                                        <td>{{ teacher.full_name }}</td>
+                                        <td><small class="text-muted">{{ teacher.position || '—' }}</small></td>
+                                        <td class="text-end">
+                                            <button @click="editTeacher(teacher)" class="btn btn-sm btn-outline-primary me-1">
+                                                ✏️
+                                            </button>
+                                            <button @click="deleteTeacher(teacher.id)" class="btn btn-sm btn-outline-danger">
+                                                🗑️
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <tr v-if="teachers.length === 0">
+                                        <td colspan="4" class="text-center py-4 text-muted">Преподаватели не найдены</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-                <button class="btn btn-primary">Сформировать</button>
             </div>
-            <div class="col-md-6">
-                <h3>Управление преподавателями</h3>
-                <p>Здесь будет список преподавателей из teachers.json</p>
-                <!-- Vue component will be here -->
+
+            <!-- Форма добавления/редактирования -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0">{{ isEditing ? 'Редактировать' : 'Добавить' }} преподавателя</h5>
+                    </div>
+                    <div class="card-body">
+                        <form @submit.prevent="saveTeacher">
+                            <div class="mb-3">
+                                <label class="form-label">Краткое имя</label>
+                                <input v-model="form.short_name" type="text" class="form-control" placeholder="Иванов И.И." required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Полное имя</label>
+                                <input v-model="form.full_name" type="text" class="form-control" placeholder="Иванов Иван Иванович" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Должность</label>
+                                <input v-model="form.position" type="text" class="form-control">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Звание</label>
+                                <input v-model="form.rank" type="text" class="form-control">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Степень</label>
+                                <input v-model="form.academic_degree" type="text" class="form-control">
+                            </div>
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-primary" :disabled="isSaving">
+                                    <span v-if="isSaving" class="spinner-border spinner-border-sm me-2"></span>
+                                    {{ isEditing ? 'Обновить' : 'Добавить' }}
+                                </button>
+                                <button v-if="isEditing" @click="resetForm" type="button" class="btn btn-light">
+                                    Отмена
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Секция генерации -->
+                <div class="card border-primary bg-light">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary">Сформировать расписание</h5>
+                        <p class="small text-muted">Выберите файл Excel (.xlsx) со сводным расписанием.</p>
+                        
+                        <div v-if="!downloadLink">
+                            <input type="file" ref="fileInput" @change="handleFileUpload" class="d-none" accept=".xlsx,.xls">
+                            <div class="drop-zone" @click="$refs.fileInput.click()">
+                                <div v-if="!isUploading">
+                                    <span class="fs-4">📤</span><br>
+                                    Выбрать файл
+                                </div>
+                                <div v-else>
+                                    <div class="spinner-border text-primary mb-2" role="status"></div>
+                                    <div class="small fw-bold">Обработка данных...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="downloadLink" class="alert alert-success mt-2 mb-0">
+                            <h6 class="alert-heading">Успешно! ✨</h6>
+                            <p class="small">Файл готов к скачиванию.</p>
+                            <a :href="downloadLink" class="btn btn-success btn-sm w-100 mb-2" download>
+                                💾 Скачать результат
+                            </a>
+                            <button @click="downloadLink = null" class="btn btn-link btn-sm w-100 text-decoration-none p-0 text-muted">
+                                Сбросить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Уведомления -->
+        <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+            <div v-for="(toast, index) in toasts" :key="index" class="toast show mb-2" role="alert">
+                <div class="toast-header" :class="toast.type === 'error' ? 'bg-danger text-white' : 'bg-primary text-white'">
+                    <strong class="me-auto">{{ toast.title }}</strong>
+                    <button @click="removeToast(index)" type="button" class="btn-close btn-close-white"></button>
+                </div>
+                <div class="toast-body">
+                    {{ toast.message }}
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- Зависимости -->
+    <script src="assets/vue.global.prod.js"></script>
+    <script src="assets/axios.min.js"></script>
     <script src="assets/app.js"></script>
 </body>
 </html>
