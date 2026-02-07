@@ -17,6 +17,8 @@ class Lesson:
     teacher: str
     date_day: int
     month: str
+    semester_info: str = ""
+    year_info: str = ""
 
 class DataLoader:
     def __init__(self, teachers_config_path: str):
@@ -24,12 +26,16 @@ class DataLoader:
             self.teachers_config = json.load(f)
         self.teacher_names = [t['short_name'] for t in self.teachers_config]
         
-    def load_group_schedule(self, file_path: str) -> List[Lesson]:
+    def load_group_schedule(self, file_path: str, group_name: Optional[str] = None) -> List[Lesson]:
         file_path = Path(file_path)
-        group_name = file_path.stem
+        if group_name is None: group_name = file_path.stem
         
         # Load the whole sheet
         df = pd.read_excel(file_path, header=None)
+        
+        # 0. Extract Semester and Year info
+        semester_text = str(df.iloc[1, 0]).strip() if pd.notna(df.iloc[1, 0]) else ""
+        year_text = str(df.iloc[2, 0]).strip() if pd.notna(df.iloc[2, 0]) else ""
         
         # 1. Parse Calendar (Weeks and Months)
         # Row 4 (index 4) contains week numbers starting from col 3
@@ -110,7 +116,9 @@ class DataLoader:
                             pair_num=pair_idx,
                             teacher=assigned_teacher,
                             date_day=day_dates.get(col_idx, 0),
-                            month=months.get(col_idx, 'Unknown')
+                            month=months.get(col_idx, 'Unknown'),
+                            semester_info=semester_text,
+                            year_info=year_text
                         ))
             
         return lessons
@@ -124,7 +132,7 @@ class DataLoader:
 
 if __name__ == '__main__':
     import os
-    base_path = '/home/YaremenkoIA/planner-solving'
+    base_path = '~/planner-solving'
     loader = DataLoader(os.path.join(base_path, 'teachers.json'))
     sample_file = os.path.join(base_path, 'obrazec/522.xlsx')
     if os.path.exists(sample_file):

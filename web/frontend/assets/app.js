@@ -6,6 +6,8 @@ createApp({
         const isEditing = ref(false);
         const isSaving = ref(false);
         const isUploading = ref(false);
+        const isDragging = ref(false);
+        const showSettings = ref(false);
         const downloadLink = ref(null);
         const toasts = ref([]);
         
@@ -43,16 +45,16 @@ createApp({
             }
         };
 
-        // Save teacher (Create or Update)
+        // Save teacher
         const saveTeacher = async () => {
             isSaving.value = true;
             try {
                 if (isEditing.value) {
                     await axios.put(`/api/teachers/${form.id}`, form);
-                    addToast('Успех', 'Данные преподавателя обновлены');
+                    addToast('Успех', 'Данные преподавателя обновлены', 'success');
                 } else {
                     await axios.post('/api/teachers', form);
-                    addToast('Успех', 'Преподаватель добавлен');
+                    addToast('Успех', 'Преподаватель добавлен', 'success');
                 }
                 resetForm();
                 await fetchTeachers();
@@ -64,19 +66,18 @@ createApp({
             }
         };
 
-        // Edit teacher
         const editTeacher = (teacher) => {
             isEditing.value = true;
             Object.assign(form, teacher);
+            showSettings.value = true; // Open accordion automatically
         };
 
-        // Delete teacher
         const deleteTeacher = async (id) => {
             if (!confirm('Вы уверены, что хотите удалить этого преподавателя?')) return;
             
             try {
                 await axios.delete(`/api/teachers/${id}`);
-                addToast('Удалено', 'Преподаватель удален из базы');
+                addToast('Удалено', 'Преподаватель удален из базы', 'success');
                 await fetchTeachers();
             } catch (error) {
                 addToast('Ошибка', 'Не удалось удалить преподавателя', 'error');
@@ -88,13 +89,18 @@ createApp({
             Object.assign(form, initialForm);
         };
 
-        // File Upload and Schedule Generation
-        const handleFileUpload = async (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
+        const resetDownload = () => {
+            downloadLink.value = null;
+        };
+
+        // Upload Logic
+        const uploadFiles = async (files) => {
+            if (!files || files.length === 0) return;
 
             const formData = new FormData();
-            formData.append('file', file);
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
 
             isUploading.value = true;
             downloadLink.value = null;
@@ -105,38 +111,46 @@ createApp({
                 });
                 
                 if (response.data.status === 'success') {
-                    // We assume there's a route to serve files from output directory
-                    // If not, we'd need to add one. For now, we point to the API.
                     downloadLink.value = `/api/download/${response.data.filename}`;
-                    addToast('Готово', 'Расписание успешно сформировано');
+                    addToast('Готово', 'Расписание успешно сформировано', 'success');
+                } else {
+                    addToast('Внимание', response.data.message || 'Ошибка при обработке', 'info');
                 }
             } catch (error) {
-                const errorMsg = error.response?.data?.detail || 'Произошла ошибка при обработке файла';
-                addToast('Ошибка', errorMsg, 'error');
+                addToast('Ошибка', 'Ошибка при загрузке или обработке файлов', 'error');
                 console.error(error);
             } finally {
                 isUploading.value = false;
-                // Clear input
-                event.target.value = '';
+                isDragging.value = false;
             }
+        };
+
+        const handleFileUpload = (event) => {
+            uploadFiles(event.target.files);
+        };
+
+        // Drag and Drop handlers
+        const onDragOver = () => {
+            isDragging.value = true;
+        };
+
+        const onDragLeave = () => {
+            isDragging.value = false;
+        };
+
+        const onDrop = (event) => {
+            isDragging.value = false;
+            const files = event.dataTransfer.files;
+            uploadFiles(files);
         };
 
         onMounted(fetchTeachers);
 
         return {
-            teachers,
-            form,
-            isEditing,
-            isSaving,
-            isUploading,
-            downloadLink,
-            toasts,
-            saveTeacher,
-            editTeacher,
-            deleteTeacher,
-            resetForm,
-            handleFileUpload,
-            removeToast
+            teachers, form, isEditing, isSaving, isUploading, isDragging,
+            showSettings, downloadLink, toasts,
+            saveTeacher, editTeacher, deleteTeacher, resetForm, resetDownload,
+            handleFileUpload, onDragOver, onDragLeave, onDrop, removeToast
         };
     }
 }).mount('#app');

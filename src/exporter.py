@@ -27,7 +27,21 @@ def export_to_excel(transformed_data: Dict[str, Any], teachers_config: List[Dict
     
     # Row 1: Title
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5 + len(dates))
-    title_cell = ws.cell(row=1, column=1, value='На осенний семестр 2024-2025 учебного года')
+    
+    # Form dynamic title
+    semester_part = transformed_data.get('semester_info', 'На семестр')
+    # Clean up "Расписание учебных занятий" prefix if present
+    if "расписание учебных занятий" in semester_part.lower():
+        semester_part = semester_part.lower().replace("расписание учебных занятий", "").strip()
+        semester_part = semester_part.capitalize()
+    
+    if "на " not in semester_part.lower() and semester_part:
+        semester_part = f"На {semester_part.lower()}"
+    
+    year_part = transformed_data.get('year_info', '')
+    title_text = f"{semester_part} {year_part}".strip()
+    
+    title_cell = ws.cell(row=1, column=1, value=title_text)
     title_cell.font = header_font
     title_cell.alignment = Alignment(horizontal='left', vertical='center')
 
@@ -98,7 +112,7 @@ def export_to_excel(transformed_data: Dict[str, Any], teachers_config: List[Dict
             ws.merge_cells(start_row=current_row, start_column=c.column, end_row=current_row + 3, end_column=c.column)
 
         for p in range(1, 5):
-            pair_label = {1: '1.2', 2: '3.4', 3: '5.6', 4: '7.8'}[p]
+            pair_label = {1: '1-2', 2: '3-4', 3: '5-6', 4: '7-8'}[p]
             p_cell = ws.cell(row=current_row + p - 1, column=5, value=pair_label)
             p_cell.font = header_font
             p_cell.alignment = header_alignment

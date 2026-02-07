@@ -1,0 +1,14 @@
+[Unit]
+Description=Educational Schedule Planner Web Service
+After=network.target
+
+[Service]
+User=user
+Group=user
+WorkingDirectory=/home/user/planner-solving
+ExecStart=/home/user/planner-solving/start_web.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

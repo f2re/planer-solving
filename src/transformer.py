@@ -25,6 +25,10 @@ def transform_to_teacher_grid(lessons: List[Lesson], teachers_config: List[Dict]
     
     sorted_dates = sorted(list(dates), key=date_key)
     
+    # Extract metadata from the first available lesson
+    semester_info = lessons[0].semester_info if lessons else ""
+    year_info = lessons[0].year_info if lessons else ""
+
     # 2. Build the grid
     # Structure: { (teacher_name, pair_num, month, day): {groups: [], subject: str, type: str, room: str} }
     grid = {}
@@ -46,5 +50,7 @@ def transform_to_teacher_grid(lessons: List[Lesson], teachers_config: List[Dict]
     return {
         'grid': grid,
         'dates': sorted_dates,
-        'teachers': [t['short_name'] for t in teachers_config]
+        'teachers': [t['short_name'] for t in teachers_config],
+        'semester_info': semester_info,
+        'year_info': year_info
     }

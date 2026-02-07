@@ -3,6 +3,7 @@ import json
 import shutil
 import uuid
 from typing import List
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -69,29 +70,41 @@ def delete_teacher(teacher_id: int):
     return {"status": "success"}
 
 @app.post("/api/upload", response_model=ScheduleUploadResponse)
-async def upload_schedule(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an Excel file.")
-    
-    # Save uploaded file
+async def upload_schedule(files: List[UploadFile] = File(...)):
+    all_lessons = []
     file_id = str(uuid.uuid4())
-    input_filename = f"{file_id}_{file.filename}"
-    input_path = os.path.join(INPUT_DIR, input_filename)
-    
-    with open(input_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    input_paths = []
     
     try:
-        # Process schedule
-        loader = DataLoader(TEACHERS_JSON)
-        lessons = loader.load_group_schedule(input_path)
-        
+        for file in files:
+            if not file.filename.endswith(('.xlsx', '.xls')):
+                raise HTTPException(status_code=400, detail=f"Invalid file type: {file.filename}")
+            
+            # Original group name (filename without extension)
+            group_name = Path(file.filename).stem
+            
+            # Save uploaded file
+            input_filename = f"{file_id}_{file.filename}"
+            input_path = os.path.join(INPUT_DIR, input_filename)
+            input_paths.append(input_path)
+            
+            with open(input_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            # Process schedule for this file
+            loader = DataLoader(TEACHERS_JSON)
+            lessons = loader.load_group_schedule(input_path, group_name=group_name)
+            all_lessons.extend(lessons)
+
+        if not all_lessons:
+             raise HTTPException(status_code=400, detail="No lessons found in uploaded files")
+
         # Load teachers config for transformation
         with open(TEACHERS_JSON, 'r', encoding='utf-8') as f:
             teachers_config = json.load(f)
             
         # Filter and transform
-        lessons_filtered = [l for l in lessons if l.teacher != 'Unknown']
+        lessons_filtered = [l for l in all_lessons if l.teacher != 'Unknown']
         transformed_data = transform_to_teacher_grid(lessons_filtered, teachers_config)
         
         # Export
@@ -102,16 +115,19 @@ async def upload_schedule(file: UploadFile = File(...)):
         return ScheduleUploadResponse(
             filename=output_filename,
             status="success",
-            message="Schedule processed successfully"
+            message=f"Schedule processed successfully from {len(files)} files"
         )
     except Exception as e:
-        # Log error or print it for debugging if needed
         print(f"Error processing schedule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Optionally delete input file after processing
-        if os.path.exists(input_path):
-            os.remove(input_path)
+        # Cleanup input files
+        for path in input_paths:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except:
+                    pass
 
 @app.get("/api/download/{filename}")
 def download_file(filename: str):
@@ -121,5 +137,4 @@ def download_file(filename: str):
     return FileResponse(path=file_path, filename=filename, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 # Mount static files
-# Make sure the path is absolute or correct relative to where the server is started
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "web/frontend"), html=True), name="frontend")
