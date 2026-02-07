@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Планировщик расписания</title>
+    <link rel="stylesheet" href="assets/bootstrap.min.css">
+    <script src="assets/vue.global.prod.js"></script>
+    <script src="assets/axios.min.js"></script>
+</head>
+<body>
+    <div id="app" class="container mt-5">
+        <h1>Система формирования сводного расписания</h1>
+        <hr>
+        <div class="row">
+            <div class="col-md-6">
+                <h3>Загрузка данных</h3>
+                <div class="mb-3">
+                    <label for="formFileMultiple" class="form-label">Выберите файлы расписания (Excel)</label>
+                    <input class="form-control" type="file" id="formFileMultiple" multiple>
+                </div>
+                <button class="btn btn-primary">Сформировать</button>
+            </div>
+            <div class="col-md-6">
+                <h3>Управление преподавателями</h3>
+                <p>Здесь будет список преподавателей из teachers.json</p>
+                <!-- Vue component will be here -->
+            </div>
+        </div>
+    </div>
+    <script src="assets/app.js"></script>
+</body>
+</html>

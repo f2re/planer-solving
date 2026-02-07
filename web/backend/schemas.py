@@ -1,0 +1,29 @@
+from pydantic import BaseModel
+from typing import List, Optional
+
+class Teacher(BaseModel):
+    id: int
+    short_name: str
+    full_name: str
+    position: Optional[str] = None
+    rank: Optional[str] = None
+    academic_degree: Optional[str] = None
+
+class TeacherCreate(BaseModel):
+    short_name: str
+    full_name: str
+    position: Optional[str] = None
+    rank: Optional[str] = None
+    academic_degree: Optional[str] = None
+
+class TeacherUpdate(BaseModel):
+    short_name: Optional[str] = None
+    full_name: Optional[str] = None
+    position: Optional[str] = None
+    rank: Optional[str] = None
+    academic_degree: Optional[str] = None
+
+class ScheduleUploadResponse(BaseModel):
+    filename: str
+    status: str
+    message: str
