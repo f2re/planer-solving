@@ -11,6 +11,7 @@ The primary coordinator for the schedule planning project. Manages the developme
 - Requirements analysis and project state assessment.
 - Decomposition of complex tasks into manageable subtasks.
 - Delegation of work to developer and tester agents.
+- Analysis of multiple group schedule files (Excel) and coordinating summary generation.
 - Quality control and result validation.
 - Documentation maintenance.
 

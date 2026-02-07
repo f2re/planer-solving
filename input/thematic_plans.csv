@@ -1,5 +1,0 @@
-discipline_id,lesson_type,lesson_number,topic,duration_minutes,required_room_type,min_capacity
-101,lecture,1,Введение в математический анализ,90,lecture_hall,25
-101,lecture,2,Пределы и непрерывность,90,lecture_hall,25
-101,practice,1,Решение задач на пределы,90,classroom,25
-102,lab,1,Основы Python,90,computer_lab,15

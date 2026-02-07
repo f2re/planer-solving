@@ -1,0 +1,34 @@
+[
+  {
+    "id": 1,
+    "short_name": "Иванов",
+    "full_name": "Иванов Иван Иванович",
+    "position": "Начальник кафедры",
+    "rank": "доцент",
+    "academic_degree": "к.т.н."
+  },
+  {
+    "id": 2,
+    "short_name": "Петров",
+    "full_name": "Петров Петр Петрович",
+    "position": "Заместитель начальника кафедры",
+    "rank": "-",
+    "academic_degree": "к.т.н."
+  },
+  {
+    "id": 3,
+    "short_name": "Сидоров",
+    "full_name": "Сидоров Сидор Сидорович",
+    "position": "Профессор",
+    "rank": "профессор",
+    "academic_degree": "д.т.н."
+  },
+  {
+    "id": 4,
+    "short_name": "Соловьев",
+    "full_name": "Соловьев Алексей Павлович",
+    "position": "Доцент",
+    "rank": "-",
+    "academic_degree": "к.г.н."
+  }
+]

@@ -1,169 +1,127 @@
+import json
 import pandas as pd
-import os
-from datetime import datetime
-from typing import List, Dict, Any, Optional
-from .model import (
-    Teacher, TeacherUnavailability, Discipline, Lesson,
-    Room, TimeSlot, CalendarEntry
-)
+from pathlib import Path
+from dataclasses import dataclass
+from typing import List, Dict, Optional
+
+@dataclass
+class Lesson:
+    group: str
+    subject: str
+    lesson_type_code: str  # e.g., Л/Т.01
+    room: str
+    week: int
+    day_of_week: str  # Пн, Вт, ...
+    pair_num: int     # 1, 2, 3, 4 (where 1 is 9:00-10:35, etc.)
+    teacher: str
 
 class DataLoader:
-    def __init__(self, input_dir: str):
-        self.input_dir = input_dir
-
-    def _to_int(self, val: Any) -> int:
-        """Safe conversion to int, handling '1.0' from pandas."""
-        if pd.isna(val):
-            return 0
-        try:
-            return int(float(val))
-        except (ValueError, TypeError):
-            return 0
-
-    def _to_optional_int(self, val: Any) -> Optional[int]:
-        """Safe conversion to optional int."""
-        if pd.isna(val):
-            return None
-        try:
-            return int(float(val))
-        except (ValueError, TypeError):
-            return None
-
-    def load_teachers(self) -> List[Teacher]:
-        df = pd.read_csv(os.path.join(self.input_dir, 'teachers.csv'))
-        return [
-            Teacher(
-                teacher_id=self._to_int(row['teacher_id']),
-                last_name=row['last_name'],
-                first_name=row['first_name'],
-                middle_name=row['middle_name'],
-                position=row['position'],
-                max_hours_per_week=self._to_int(row['max_hours_per_week']),
-                seniority=self._to_int(row['seniority'])
-            ) for _, row in df.iterrows()
-        ]
-
-    def load_teacher_unavailability(self) -> List[TeacherUnavailability]:
-        file_path = os.path.join(self.input_dir, 'teacher_unavailability.csv')
-        if not os.path.exists(file_path):
-            return []
-        df = pd.read_csv(file_path)
+    def __init__(self, teachers_config_path: str):
+        with open(teachers_config_path, 'r', encoding='utf-8') as f:
+            self.teachers_config = json.load(f)
+        self.teacher_names = [t['short_name'] for t in self.teachers_config]
         
-        def parse_date(val):
-            if pd.isna(val) or val == '':
-                return None
-            try:
-                return datetime.strptime(str(val), '%Y-%m-%d').date()
-            except ValueError:
-                return None
-
-        def parse_days(val):
-            if pd.isna(val) or val == '':
-                return []
-            return [d.strip() for d in str(val).split(';') if d.strip()]
-
-        return [
-            TeacherUnavailability(
-                teacher_id=self._to_int(row['teacher_id']),
-                start_date=parse_date(row['start_date']),
-                end_date=parse_date(row['end_date']),
-                reason=row['reason'],
-                unavailable_days=parse_days(row.get('unavailable_days', ''))
-            ) for _, row in df.iterrows()
-        ]
-
-    def load_disciplines(self) -> List[Discipline]:
-        df = pd.read_csv(os.path.join(self.input_dir, 'disciplines.csv'))
+    def load_group_schedule(self, file_path: str) -> List[Lesson]:
+        file_path = Path(file_path)
+        group_name = file_path.stem
         
-        def parse_ids(val):
-            if pd.isna(val) or str(val).strip() == '':
-                return []
-            # IDs might be like "3.0; 4.0" or just "3;4"
-            try:
-                return [int(float(x.strip())) for x in str(val).split(';') if x.strip()]
-            except (ValueError, TypeError):
-                return []
-
-        return [
-            Discipline(
-                discipline_id=self._to_int(row['discipline_id']),
-                discipline_name=row['discipline_name'],
-                group_name=row['group_name'],
-                group_size=self._to_int(row['group_size']),
-                semester=self._to_int(row['semester']),
-                lecture_hours=self._to_int(row['lecture_hours']),
-                practice_hours=self._to_int(row['practice_hours']),
-                lab_hours=self._to_int(row['lab_hours']),
-                lecturer_id=self._to_int(row['lecturer_id']),
-                practice_teacher_ids=parse_ids(row['practice_teacher_ids']),
-                lab_teacher_ids=parse_ids(row['lab_teacher_ids'])
-            ) for _, row in df.iterrows()
-        ]
-
-    def load_thematic_plans(self) -> List[Lesson]:
-        df = pd.read_csv(os.path.join(self.input_dir, 'thematic_plans.csv'))
-        return [
-            Lesson(
-                discipline_id=self._to_int(row['discipline_id']),
-                lesson_type=row['lesson_type'],
-                lesson_number=self._to_int(row['lesson_number']),
-                topic=row['topic'],
-                duration_minutes=self._to_int(row['duration_minutes']),
-                required_room_type=row['required_room_type'],
-                min_capacity=self._to_int(row['min_capacity'])
-            ) for _, row in df.iterrows()
-        ]
-
-    def load_rooms(self) -> List[Room]:
-        df = pd.read_csv(os.path.join(self.input_dir, 'rooms.csv'))
+        # Load the whole sheet
+        df = pd.read_excel(file_path, header=None)
         
-        def parse_equipment(val):
-            if pd.isna(val) or val == '':
-                return []
-            return [e.strip() for e in str(val).split(';') if e.strip()]
+        # 1. Parse Calendar (Weeks)
+        # Row 4 (index 4) contains week numbers starting from col 3
+        weeks = {}
+        for col in range(3, df.shape[1]):
+            val = df.iloc[4, col]
+            if pd.notna(val) and isinstance(val, (int, float)):
+                weeks[col] = int(val)
+        
+        # 2. Parse Teacher Mapping from the bottom
+        # Look for "Обозн" in column 0 to find the start of the table
+        mapping_start_idx = df[df[0] == "Обозн"].index
+        teacher_mapping = {}
+        if not mapping_start_idx.empty:
+            idx = mapping_start_idx[0] + 3 # Skip header rows
+            while idx < len(df) and pd.notna(df.iloc[idx, 0]):
+                abbr = str(df.iloc[idx, 0]).strip()
+                lecturer = str(df.iloc[idx, 9]) if pd.notna(df.iloc[idx, 9]) else ""
+                others = str(df.iloc[idx, 13]) if pd.notna(df.iloc[idx, 13]) else ""
+                
+                teacher_mapping[abbr] = {
+                    'Л': self._extract_teachers(lecturer),
+                    'П': self._extract_teachers(others),
+                    'С': self._extract_teachers(others),
+                    'У': self._extract_teachers(others),
+                    'ЛР': self._extract_teachers(others),
+                    'ЗО': self._extract_teachers(others),
+                    'Экз': self._extract_teachers(others),
+                }
+                idx += 1
 
-        return [
-            Room(
-                room_id=self._to_int(row['room_id']),
-                room_name=row['room_name'],
-                building=row['building'],
-                room_type=row['room_type'],
-                capacity=self._to_int(row['capacity']),
-                equipment=parse_equipment(row.get('equipment', ''))
-            ) for _, row in df.iterrows()
-        ]
+        # 3. Parse Schedule Grid
+        lessons = []
+        days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+        # Monday starts at row 7. Each day has 4 pairs, each pair is 3 rows.
+        # Day blocks are separated by a "Даты" row (like row 19)
+        
+        current_row = 7
+        for day in days:
+            # Check if this row is indeed a day start (has day name or we just follow the pattern)
+            for pair_idx in range(1, 5): # 4 pairs per day
+                for col_idx, week_num in weeks.items():
+                    # Lesson data is in 3 rows
+                    code = df.iloc[current_row, col_idx]
+                    subj = df.iloc[current_row + 1, col_idx]
+                    room = df.iloc[current_row + 2, col_idx]
+                    
+                    if pd.notna(code) and pd.notna(subj):
+                        code = str(code).strip()
+                        subj = str(subj).strip()
+                        room = str(room).strip() if pd.notna(room) else ""
+                        
+                        # Determine teacher
+                        lesson_type = 'Л' if code.startswith('Л/') else 'П'
+                        potential_teachers = teacher_mapping.get(subj, {}).get(lesson_type, [])
+                        
+                        # If there's only one teacher from our config, use them.
+                        # If multiple, it's ambiguous, but let's take the first one found in config for now.
+                        assigned_teacher = "Unknown"
+                        for pt in potential_teachers:
+                            if pt in self.teacher_names:
+                                assigned_teacher = pt
+                                break
+                        
+                        lessons.append(Lesson(
+                            group=group_name,
+                            subject=subj,
+                            lesson_type_code=code,
+                            room=room,
+                            week=week_num,
+                            day_of_week=day,
+                            pair_num=pair_idx,
+                            teacher=assigned_teacher
+                        ))
+                current_row += 3
+            current_row += 1 # Skip the "Даты" row
+            
+        return lessons
 
-    def load_timeslots(self) -> List[TimeSlot]:
-        df = pd.read_csv(os.path.join(self.input_dir, 'timeslots.csv'))
-        return [
-            TimeSlot(
-                slot_id=self._to_int(row['slot_id']),
-                day_of_week=row['day_of_week'],
-                start_time=datetime.strptime(str(row['start_time']), '%H:%M').time(),
-                end_time=datetime.strptime(str(row['end_time']), '%H:%M').time(),
-                duration_minutes=self._to_int(row['duration_minutes']),
-                slot_number=self._to_int(row['slot_number'])
-            ) for _, row in df.iterrows()
-        ]
+    def _extract_teachers(self, text: str) -> List[str]:
+        # Simple extraction: look for names from the config in the text
+        found = []
+        for name in self.teacher_names:
+            if name in text:
+                found.append(name)
+        return found
 
-    def load_calendar(self) -> List[CalendarEntry]:
-        df = pd.read_csv(os.path.join(self.input_dir, 'calendar.csv'))
-        return [
-            CalendarEntry(
-                date=datetime.strptime(str(row['date']), '%Y-%m-%d').date(),
-                is_holiday=bool(row['is_holiday']),
-                is_working_day=bool(row['is_working_day']),
-                description=row['description']
-            ) for _, row in df.iterrows()
-        ]
-
-    def load_all(self) -> Dict[str, Any]:
-        return {
-            'teachers': self.load_teachers(),
-            'teacher_unavailability': self.load_teacher_unavailability(),
-            'disciplines': self.load_disciplines(),
-            'lessons': self.load_thematic_plans(),
-            'rooms': self.load_rooms(),
-            'timeslots': self.load_timeslots(),
-            'calendar': self.load_calendar()
-        }
+if __name__ == "__main__":
+    # Test loading
+    import os
+    base_path = "/home/YaremenkoIA/planner-solving"
+    loader = DataLoader(os.path.join(base_path, "teachers.json"))
+    sample_file = os.path.join(base_path, "obrazec/522.xlsx")
+    if os.path.exists(sample_file):
+        lessons = loader.load_group_schedule(sample_file)
+        print(f"Loaded {len(lessons)} lessons from {sample_file}")
+        for l in lessons[:5]:
+            print(l)

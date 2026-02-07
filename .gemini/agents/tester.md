@@ -11,7 +11,9 @@ Specialized QA Engineer for the schedule planning project. Creates comprehensive
 - Writing unit tests with pytest.
 - Creating integration tests for module interaction.
 - Verifying OR-Tools constraints.
-- Generating realistic test data (CSV).
+- Validating Excel report content and formatting (openpyxl).
+- Verifying data consistency between input group schedules and output summary reports.
+- Generating realistic test data (CSV and Excel).
 - Performance and scalability testing.
 - Code coverage analysis.
 
