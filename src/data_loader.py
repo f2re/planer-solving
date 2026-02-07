@@ -1,5 +1,6 @@
 import json
 import pandas as pd
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Dict, Optional
@@ -24,8 +25,58 @@ class DataLoader:
     def __init__(self, teachers_config_path: str):
         with open(teachers_config_path, 'r', encoding='utf-8') as f:
             self.teachers_config = json.load(f)
-        self.teacher_names = [t['short_name'] for t in self.teachers_config]
         
+        # Group teachers by surname to handle same-surname cases
+        self.teachers_by_surname = {}
+        for t in self.teachers_config:
+            full_name_parts = t['full_name'].split()
+            surname = full_name_parts[0].lower()
+            if surname not in self.teachers_by_surname:
+                self.teachers_by_surname[surname] = []
+            
+            # Prepare precise pattern (surname + initials)
+            precise_patterns = []
+            if len(full_name_parts) >= 3:
+                i1 = full_name_parts[1][0]
+                i2 = full_name_parts[2][0]
+                # Pattern for "Surname I.I." or "I.I. Surname"
+                precise_patterns.append(rf"{surname}\s+{i1}\.?\s*{i2}\.?")
+                precise_patterns.append(rf"{i1}\.?\s*{i2}\.?\s+{surname}")
+            
+            self.teachers_by_surname[surname].append({
+                'short_name': t['short_name'],
+                'surname': surname,
+                'precise_pattern': re.compile("|".join(precise_patterns), re.IGNORECASE) if precise_patterns else None
+            })
+
+    def _extract_teachers(self, text: str) -> List[str]:
+        found = []
+        text_lower = text.lower()
+        
+        for surname, variations in self.teachers_by_surname.items():
+            # 1. Check if surname exists in text at all
+            if re.search(rf"\b{surname}\b", text_lower):
+                # 2. Try precise match for each variation
+                matched_variations = []
+                for v in variations:
+                    if v['precise_pattern'] and v['precise_pattern'].search(text):
+                        matched_variations.append(v['short_name'])
+                
+                if matched_variations:
+                    # Found specific teacher(s) with initials
+                    found.extend(matched_variations)
+                elif len(variations) == 1:
+                    # Only one teacher with this surname in config, 
+                    # and no initials found in text for anyone with this surname.
+                    # Assume it's this one (handles "Иванов, доц")
+                    found.append(variations[0]['short_name'])
+                else:
+                    # Multiple teachers with same surname, but no matching initials found in text
+                    # Ambiguous - don't match any to avoid wrong assignment
+                    pass
+                    
+        return found
+
     def load_group_schedule(self, file_path: str, group_name: Optional[str] = None) -> List[Lesson]:
         file_path = Path(file_path)
         if group_name is None: group_name = file_path.stem
@@ -122,13 +173,6 @@ class DataLoader:
                         ))
             
         return lessons
-
-    def _extract_teachers(self, text: str) -> List[str]:
-        found = []
-        for name in self.teacher_names:
-            if name in text:
-                found.append(name)
-        return found
 
 if __name__ == '__main__':
     import os
