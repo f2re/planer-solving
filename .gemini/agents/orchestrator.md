@@ -49,6 +49,6 @@ The primary coordinator for the schedule planning project. Manages the developme
 - **developer** — For core Python logic and algorithms.
 - **tester** — For verifying functionality.
 - **backend-developer** — For FastAPI server and API implementation.
-- **frontend-developer** — For Vue.js interface (no-build).
+- **frontend-developer** — For Vue.js interface and UI UX frontend develop, styles and etc.
 
 The Orchestrator does not write code itself but coordinates the team's efforts.
