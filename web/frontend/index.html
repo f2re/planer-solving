@@ -323,6 +323,26 @@
                             </div>
                         </div>
 
+                        <!-- Conflict Warnings -->
+                        <div v-if="uploadWarnings && uploadWarnings.length > 0" class="mb-4">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="fs-5 me-2">⚠️</span>
+                                <h5 class="fw-bold m-0 text-white">Обнаруженные накладки ({{ uploadWarnings.length }})</h5>
+                            </div>
+                            <div class="bg-white rounded-3 overflow-hidden text-dark shadow-sm">
+                                <div class="p-0" style="max-height: 250px; overflow-y: auto;">
+                                    <ul class="list-group list-group-flush small">
+                                        <li v-for="(warn, wIdx) in uploadWarnings" :key="wIdx" class="list-group-item list-group-item-warning border-0 mb-1 rounded-0">
+                                            {{ warn }}
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div class="bg-light p-2 text-center border-top">
+                                    <small class="text-muted">Эти занятия были автоматически объединены в итоговом файле</small>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Actions -->
                         <div class="d-grid gap-2 d-md-flex justify-content-md-center">
                             <a v-if="downloadLink" :href="downloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>

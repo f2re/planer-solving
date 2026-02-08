@@ -33,3 +33,4 @@ class ScheduleUploadResponse(BaseModel):
     status: str
     message: str
     details: List[FileUploadDetail]
+    warnings: List[str] = []

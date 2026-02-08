@@ -10,6 +10,7 @@ const app = createApp({
         const showSettings = ref(false);
         const downloadLink = ref(null);
         const uploadResults = ref(null);
+        const uploadWarnings = ref([]);
         const toasts = ref([]);
         
         const initialForm = {
@@ -103,6 +104,7 @@ const app = createApp({
         const resetUpload = () => {
             downloadLink.value = null;
             uploadResults.value = null;
+            uploadWarnings.value = [];
         };
 
         // Upload Logic
@@ -124,6 +126,7 @@ const app = createApp({
                 
                 // Extract details regardless of status
                 uploadResults.value = response.data.details || [];
+                uploadWarnings.value = response.data.warnings || [];
 
                 if (response.data.filename) {
                     downloadLink.value = `/api/download/${response.data.filename}`;
@@ -166,7 +169,7 @@ const app = createApp({
 
         return {
             teachers, form, isEditing, isSaving, isUploading, isDragging,
-            showSettings, downloadLink, uploadResults, uploadSummary, toasts,
+            showSettings, downloadLink, uploadResults, uploadSummary, uploadWarnings, toasts,
             saveTeacher, editTeacher, deleteTeacher, resetForm, resetUpload,
             handleFileUpload, onDragOver, onDragLeave, onDrop, removeToast
         };

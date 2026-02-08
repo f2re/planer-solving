@@ -76,6 +76,8 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
     input_paths = []
     details = []
     
+    loader = DataLoader(TEACHERS_JSON)
+    
     try:
         for file in files:
             detail = FileUploadDetail(filename=file.filename, status="pending", message="")
@@ -99,7 +101,6 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
                     shutil.copyfileobj(file.file, buffer)
                 
                 # Process schedule for this file
-                loader = DataLoader(TEACHERS_JSON)
                 lessons = loader.load_group_schedule(input_path, group_name=group_name)
                 
                 if lessons:
@@ -143,7 +144,8 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
             filename=output_filename,
             status="success",
             message="Schedule processed successfully",
-            details=details
+            details=details,
+            warnings=loader.warnings
         )
             
     except Exception as e:
