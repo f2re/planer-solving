@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class Teacher(BaseModel):
     id: int
@@ -23,7 +23,13 @@ class TeacherUpdate(BaseModel):
     rank: Optional[str] = None
     academic_degree: Optional[str] = None
 
-class ScheduleUploadResponse(BaseModel):
+class FileUploadDetail(BaseModel):
     filename: str
     status: str
     message: str
+
+class ScheduleUploadResponse(BaseModel):
+    filename: Optional[str] = None
+    status: str
+    message: str
+    details: List[FileUploadDetail]

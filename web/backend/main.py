@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from web.backend.schemas import Teacher, TeacherCreate, TeacherUpdate, ScheduleUploadResponse
+from web.backend.schemas import Teacher, TeacherCreate, TeacherUpdate, ScheduleUploadResponse, FileUploadDetail
 from src.data_loader import DataLoader
 from src.transformer import transform_to_teacher_grid
 from src.exporter import export_to_excel
@@ -74,11 +74,17 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
     all_lessons = []
     file_id = str(uuid.uuid4())
     input_paths = []
+    details = []
     
     try:
         for file in files:
+            detail = FileUploadDetail(filename=file.filename, status="pending", message="")
+            
             if not file.filename.endswith(('.xlsx', '.xls')):
-                raise HTTPException(status_code=400, detail=f"Invalid file type: {file.filename}")
+                detail.status = "error"
+                detail.message = f"Invalid file type: {file.filename}"
+                details.append(detail)
+                continue
             
             # Original group name (filename without extension)
             group_name = Path(file.filename).stem
@@ -88,16 +94,37 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
             input_path = os.path.join(INPUT_DIR, input_filename)
             input_paths.append(input_path)
             
-            with open(input_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+            try:
+                with open(input_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                # Process schedule for this file
+                loader = DataLoader(TEACHERS_JSON)
+                lessons = loader.load_group_schedule(input_path, group_name=group_name)
+                
+                if lessons:
+                    all_lessons.extend(lessons)
+                    detail.status = "success"
+                    detail.message = "OK"
+                else:
+                    detail.status = "warning"
+                    detail.message = "No lessons found in file"
+                    
+            except Exception as e:
+                print(f"Error processing {file.filename}: {e}")
+                detail.status = "error"
+                detail.message = str(e)
             
-            # Process schedule for this file
-            loader = DataLoader(TEACHERS_JSON)
-            lessons = loader.load_group_schedule(input_path, group_name=group_name)
-            all_lessons.extend(lessons)
+            details.append(detail)
 
         if not all_lessons:
-             raise HTTPException(status_code=400, detail="No lessons found in uploaded files")
+             # If no lessons collected from any file, return error response
+             return ScheduleUploadResponse(
+                 filename=None, 
+                 status="error", 
+                 message="No lessons parsed from any uploaded files",
+                 details=details
+             )
 
         # Load teachers config for transformation
         with open(TEACHERS_JSON, 'r', encoding='utf-8') as f:
@@ -110,16 +137,25 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
         # Export
         output_filename = f"schedule_{file_id}.xlsx"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
-        export_to_excel(transformed_data, teachers_config, output_path)
+        export_to_excel(transformed_data, output_path)
         
         return ScheduleUploadResponse(
             filename=output_filename,
             status="success",
-            message=f"Schedule processed successfully from {len(files)} files"
+            message="Schedule processed successfully",
+            details=details
         )
+            
     except Exception as e:
-        print(f"Error processing schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Global error processing schedule: {e}")
+        # Return error response instead of 500 so client sees details
+        return ScheduleUploadResponse(
+            filename=None,
+            status="error",
+            message=f"Global processing error: {str(e)}",
+            details=details
+        )
+        
     finally:
         # Cleanup input files
         for path in input_paths:

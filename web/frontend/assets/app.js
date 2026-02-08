@@ -1,4 +1,4 @@
-const { createApp, ref, onMounted, reactive } = Vue;
+const { createApp, ref, computed, onMounted, reactive } = Vue;
 
 createApp({
     setup() {
@@ -9,6 +9,7 @@ createApp({
         const isDragging = ref(false);
         const showSettings = ref(false);
         const downloadLink = ref(null);
+        const uploadResults = ref(null);
         const toasts = ref([]);
         
         const initialForm = {
@@ -21,6 +22,16 @@ createApp({
         };
 
         const form = reactive({ ...initialForm });
+
+        // Computed
+        const uploadSummary = computed(() => {
+            if (!uploadResults.value) return null;
+            const total = uploadResults.value.length;
+            const success = uploadResults.value.filter(r => r.status === 'success').length;
+            const warning = uploadResults.value.filter(r => r.status === 'warning').length;
+            const error = uploadResults.value.filter(r => r.status === 'error').length;
+            return { total, success, warning, error };
+        });
 
         // Notifications
         const addToast = (title, message, type = 'info') => {
@@ -89,8 +100,9 @@ createApp({
             Object.assign(form, initialForm);
         };
 
-        const resetDownload = () => {
+        const resetUpload = () => {
             downloadLink.value = null;
+            uploadResults.value = null;
         };
 
         // Upload Logic
@@ -103,21 +115,27 @@ createApp({
             }
 
             isUploading.value = true;
-            downloadLink.value = null;
+            resetUpload();
 
             try {
                 const response = await axios.post('/api/upload', formData, {
                     headers: { 'Content-Type': 'multipart/form-data' }
                 });
                 
-                if (response.data.status === 'success') {
+                // Extract details regardless of status
+                uploadResults.value = response.data.details || [];
+
+                if (response.data.filename) {
                     downloadLink.value = `/api/download/${response.data.filename}`;
-                    addToast('Готово', 'Расписание успешно сформировано', 'success');
+                }
+
+                if (response.data.status === 'success') {
+                    addToast('Готово', 'Обработка завершена', 'success');
                 } else {
-                    addToast('Внимание', response.data.message || 'Ошибка при обработке', 'info');
+                    addToast('Внимание', response.data.message || 'Есть ошибки при обработке', 'warning');
                 }
             } catch (error) {
-                addToast('Ошибка', 'Ошибка при загрузке или обработке файлов', 'error');
+                addToast('Ошибка', 'Критическая ошибка при загрузке', 'error');
                 console.error(error);
             } finally {
                 isUploading.value = false;
@@ -148,8 +166,8 @@ createApp({
 
         return {
             teachers, form, isEditing, isSaving, isUploading, isDragging,
-            showSettings, downloadLink, toasts,
-            saveTeacher, editTeacher, deleteTeacher, resetForm, resetDownload,
+            showSettings, downloadLink, uploadResults, uploadSummary, toasts,
+            saveTeacher, editTeacher, deleteTeacher, resetForm, resetUpload,
             handleFileUpload, onDragOver, onDragLeave, onDrop, removeToast
         };
     }
