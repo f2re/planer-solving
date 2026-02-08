@@ -4,12 +4,12 @@ from src.data_loader import DataLoader
 
 @pytest.fixture
 def loader():
-    base_path = '/home/YaremenkoIA/planner-solving'
+    base_path = '/home/user/planner-solving'
     config_path = os.path.join(base_path, 'teachers.json')
     return DataLoader(config_path)
 
 def test_load_group_schedule_structure(loader):
-    base_path = '/home/YaremenkoIA/planner-solving'
+    base_path = '/home/user/planner-solving'
     sample_file = os.path.join(base_path, 'obrazec/522.xlsx')
     
     if not os.path.exists(sample_file):
@@ -35,7 +35,7 @@ def test_extract_teachers(loader):
     assert isinstance(found, list)
 
 def test_teacher_mapping_not_empty(loader):
-    base_path = '/home/YaremenkoIA/planner-solving'
+    base_path = '/home/user/planner-solving'
     sample_file = os.path.join(base_path, 'obrazec/522.xlsx')
     
     if not os.path.exists(sample_file):

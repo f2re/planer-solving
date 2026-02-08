@@ -84,3 +84,56 @@ python3 main.py
 ```bash
 pytest tests/
 ```
+
+## 🌍 Развертывание в Production
+
+### 1. Запуск Backend (Uvicorn / Gunicorn)
+
+**Базовый вариант (один процесс):**
+```bash
+uvicorn web.backend.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --proxy-headers \
+    --forwarded-allow-ips '*'
+```
+
+**Production вариант с Gunicorn (несколько воркеров):**
+```bash
+gunicorn web.backend.main:app \
+    --workers 4 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8000 \
+    --proxy-protocol \
+    --forwarded-allow-ips '*' \
+    --access-logfile - \
+    --error-logfile -
+```
+
+### 2. Настройка Nginx
+Конфигурационный файл находится в `deploy/nginx.conf`.
+
+**Основные шаги:**
+1. Создать симлинк на конфигурацию:
+   ```bash
+   sudo ln -s /home/user/planner-solving/deploy/nginx.conf /etc/nginx/sites-available/fastapi
+   sudo ln -s /etc/nginx/sites-available/fastapi /etc/nginx/sites-enabled/
+   ```
+2. Удалить дефолтную конфигурацию (опционально):
+   ```bash
+   sudo rm /etc/nginx/sites-enabled/default
+   ```
+3. Проверить конфигурацию на ошибки:
+   ```bash
+   sudo nginx -t
+   ```
+4. Перезагрузить Nginx:
+   ```bash
+   sudo systemctl reload nginx
+   # Или перезапустить
+   sudo systemctl restart nginx
+   ```
+5. Включить автозапуск:
+   ```bash
+   sudo systemctl enable nginx
+   ```

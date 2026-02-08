@@ -1,6 +1,6 @@
 const { createApp, ref, computed, onMounted, reactive } = Vue;
 
-createApp({
+const app = createApp({
     setup() {
         const teachers = ref([]);
         const isEditing = ref(false);
@@ -171,4 +171,6 @@ createApp({
             handleFileUpload, onDragOver, onDragLeave, onDrop, removeToast
         };
     }
-}).mount('#app');
+});
+
+app.mount('#app');

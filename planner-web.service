@@ -6,7 +6,11 @@ After=network.target
 User=user
 Group=user
 WorkingDirectory=/home/user/planner-solving
-ExecStart=/home/user/planner-solving/start_web.sh
+Environment="PATH=/home/user/.pyenv/shims:/home/user/.pyenv/bin:$PATH"
+Environment="PATH=/home/user/.pyenv/shims:/home/user/.pyenv/bin:$PATH"
+Environment="PYENV_ROOT=/home/user/.pyenv"
+Environment="PYTHONPATH=/home/user/planner-solving"
+ExecStart=/home/user/.pyenv/shims/python -m uvicorn web.backend.main:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 

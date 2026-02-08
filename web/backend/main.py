@@ -137,7 +137,7 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
         # Export
         output_filename = f"schedule_{file_id}.xlsx"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
-        export_to_excel(transformed_data, output_path)
+        export_to_excel(transformed_data, teachers_config, output_path)
         
         return ScheduleUploadResponse(
             filename=output_filename,

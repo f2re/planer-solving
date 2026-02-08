@@ -5,7 +5,7 @@ from src.transformer import transform_to_teacher_grid
 from src.exporter import export_to_excel
 
 def main():
-    base_path = '/home/YaremenkoIA/planner-solving'
+    base_path = '/home/user/planner-solving'
     input_file = os.path.join(base_path, 'obrazec/522.xlsx')
     teachers_config_path = os.path.join(base_path, 'teachers.json')
     output_file = os.path.join(base_path, 'output/result.xlsx')

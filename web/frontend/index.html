@@ -244,7 +244,7 @@
                         <div 
                             class="drop-zone" 
                             :class="{ 'drag-over': isDragging }"
-                            @click=".fileInput.click()"
+                            @click="$refs.fileInput.click()"
                             @dragover.prevent="onDragOver"
                             @dragleave.prevent="onDragLeave"
                             @drop.prevent="onDrop"
