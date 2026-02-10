@@ -267,20 +267,62 @@ class DataLoader:
         
         # Map column index to month name (usually row below weeks)
         months_row_idx = weeks_row_idx + 1
-        months_row = df.iloc[months_row_idx, week_start_col:].ffill()
-        months_map = {week_start_col + i: str(val) for i, val in enumerate(months_row)}
+        
+        # Normalize and ffill months
+        current_month = "Unknown"
+        months_map = {}
+        
+        # Month name dictionary for normalization
+        month_names_ru = {
+            'янв': 'Январь', 'фев': 'Февраль', 'мар': 'Март', 'апр': 'Апрель', 
+            'май': 'Май', 'июн': 'Июнь', 'июл': 'Июль', 'авг': 'Август',
+            'сен': 'Сентябрь', 'окт': 'Октябрь', 'ноя': 'Ноябрь', 'дек': 'Декабрь'
+        }
+
+        # Scan the entire row to handle merged cells starting before week_start_col
+        months_row_full = df.iloc[months_row_idx, :]
+        for col_idx, val in enumerate(months_row_full):
+            if pd.notna(val):
+                val_str = str(val).strip().lower()
+                # Try to match starting prefix
+                found = False
+                for prefix, full_name in month_names_ru.items():
+                    if val_str.startswith(prefix):
+                        current_month = full_name
+                        found = True
+                        break
+                if not found:
+                    # Fallback to original but capitalized
+                    current_month = val_str.capitalize()
+            
+            if col_idx >= week_start_col:
+                months_map[col_idx] = current_month
         
         # 3. Teacher Mapping from the legend (usually at the bottom)
         teacher_mapping = {}
         # Search for 'Обозн' marker
         mapping_start_idx_list = df[df[0] == 'Обозн'].index
         if not mapping_start_idx_list.empty:
-            idx = mapping_start_idx_list[0] + 3 # Skip header lines (Legend headers are usually 3 rows)
+            header_idx = mapping_start_idx_list[0]
+            header_row = df.iloc[header_idx, :]
+            
+            # Find columns for Lecturer and Others
+            lecturer_col = 9  # Default
+            others_col = 13   # Default
+            
+            for c_idx, val in enumerate(header_row):
+                if pd.notna(val):
+                    val_str = str(val).lower()
+                    if 'лектор' in val_str:
+                        lecturer_col = c_idx
+                    elif 'другие' in val_str:
+                        others_col = c_idx
+            
+            idx = header_idx + 3 # Skip header lines
             while idx < len(df) and pd.notna(df.iloc[idx, 0]):
                 abbr = str(df.iloc[idx, 0]).strip()
-                # Lecturer is usually in column 9, others in column 13 (based on typical template)
-                lecturer_text = str(df.iloc[idx, 9]) if pd.notna(df.iloc[idx, 9]) else ''
-                others_text = str(df.iloc[idx, 13]) if pd.notna(df.iloc[idx, 13]) else ''
+                lecturer_text = str(df.iloc[idx, lecturer_col]) if pd.notna(df.iloc[idx, lecturer_col]) else ''
+                others_text = str(df.iloc[idx, others_col]) if pd.notna(df.iloc[idx, others_col]) else ''
                 
                 # Expand mapping for all lesson types
                 teacher_mapping[abbr] = {
@@ -315,10 +357,16 @@ class DataLoader:
                         if hasattr(date_val, 'day'):
                             day_dates[col_idx] = date_val.day
                         else:
-                            try:
-                                day_dates[col_idx] = int(date_val)
-                            except:
-                                pass
+                            # Try to extract number from string (e.g., "02.09" -> 2)
+                            date_str = str(date_val).strip()
+                            match = re.search(r'(\d+)', date_str)
+                            if match:
+                                day_dates[col_idx] = int(match.group(1))
+                            else:
+                                try:
+                                    day_dates[col_idx] = int(float(date_val))
+                                except:
+                                    pass
 
             # Process each of the 4 pairs
             for pair_idx in range(1, 5):
