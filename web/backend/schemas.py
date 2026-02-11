@@ -29,8 +29,15 @@ class FileUploadDetail(BaseModel):
     message: str
 
 class ScheduleUploadResponse(BaseModel):
+
     filename: Optional[str] = None
+
+    weekly_filename: Optional[str] = None
+
     status: str
+
     message: str
+
     details: List[FileUploadDetail]
+
     warnings: List[str] = []

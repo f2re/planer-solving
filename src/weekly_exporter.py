@@ -97,7 +97,17 @@ def generate_weekly_semester_schedule(
         # Fill teachers
         current_row = 13
         for idx, t_info in enumerate(teachers_config):
+            # Extract surname and initials from full_name
+            full_name_parts = t_info['full_name'].split()
+            if len(full_name_parts) >= 3:
+                name_with_initials = f"{full_name_parts[0]} {full_name_parts[1][0]}.{full_name_parts[2][0]}."
+            elif len(full_name_parts) == 2:
+                name_with_initials = f"{full_name_parts[0]} {full_name_parts[1][0]}."
+            else:
+                name_with_initials = t_info['short_name']
+                
             teacher_short = t_info['short_name']
+            academic_rank = t_info.get('rank', '-')
             
             for p_idx in range(1, 5):
                 row = current_row + p_idx - 1
@@ -110,7 +120,8 @@ def generate_weekly_semester_schedule(
                 # Set values
                 if p_idx == 1:
                     ws.cell(row=row, column=1).value = idx + 1
-                    ws.cell(row=row, column=3).value = teacher_short
+                    ws.cell(row=row, column=2).value = academic_rank
+                    ws.cell(row=row, column=3).value = name_with_initials
                 
                 pair_labels = {1: '1-2', 2: '3-4', 3: '5-6', 4: '7-8'}
                 ws.cell(row=row, column=4).value = pair_labels[p_idx]
@@ -128,6 +139,7 @@ def generate_weekly_semester_schedule(
 
             # Merge
             ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row + 3, end_column=1)
+            ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row + 3, end_column=2)
             ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row + 3, end_column=3)
             current_row += 4
 

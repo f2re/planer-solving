@@ -9,6 +9,7 @@ const app = createApp({
         const isDragging = ref(false);
         const showSettings = ref(false);
         const downloadLink = ref(null);
+        const weeklyDownloadLink = ref(null);
         const uploadResults = ref(null);
         const uploadWarnings = ref([]);
         const toasts = ref([]);
@@ -103,6 +104,7 @@ const app = createApp({
 
         const resetUpload = () => {
             downloadLink.value = null;
+            weeklyDownloadLink.value = null;
             uploadResults.value = null;
             uploadWarnings.value = [];
         };
@@ -130,6 +132,9 @@ const app = createApp({
 
                 if (response.data.filename) {
                     downloadLink.value = `/api/download/${response.data.filename}`;
+                }
+                if (response.data.weekly_filename) {
+                    weeklyDownloadLink.value = `/api/download/${response.data.weekly_filename}`;
                 }
 
                 if (response.data.status === 'success') {
@@ -169,7 +174,7 @@ const app = createApp({
 
         return {
             teachers, form, isEditing, isSaving, isUploading, isDragging,
-            showSettings, downloadLink, uploadResults, uploadSummary, uploadWarnings, toasts,
+            showSettings, downloadLink, weeklyDownloadLink, uploadResults, uploadSummary, uploadWarnings, toasts,
             saveTeacher, editTeacher, deleteTeacher, resetForm, resetUpload,
             handleFileUpload, onDragOver, onDragLeave, onDrop, removeToast
         };

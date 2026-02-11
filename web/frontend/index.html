@@ -346,7 +346,10 @@
                         <!-- Actions -->
                         <div class="d-grid gap-2 d-md-flex justify-content-md-center">
                             <a v-if="downloadLink" :href="downloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>
-                                💾 Скачать сводный файл
+                                📊 Общее расписание
+                            </a>
+                            <a v-if="weeklyDownloadLink" :href="weeklyDownloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>
+                                📅 По неделям
                             </a>
                             <button @click="resetUpload" class="btn btn-outline-light px-4">
                                 Загрузить новые

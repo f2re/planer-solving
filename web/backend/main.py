@@ -13,6 +13,7 @@ from web.backend.schemas import Teacher, TeacherCreate, TeacherUpdate, ScheduleU
 from src.data_loader import DataLoader
 from src.transformer import transform_to_teacher_grid
 from src.exporter import export_to_excel
+from src.weekly_exporter import generate_weekly_semester_schedule
 
 app = FastAPI()
 
@@ -131,17 +132,38 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
         with open(TEACHERS_JSON, 'r', encoding='utf-8') as f:
             teachers_config = json.load(f)
             
+        # Load global config for dates
+        config_path = os.path.join(BASE_DIR, "config.json")
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                global_config = json.load(f)
+        else:
+            global_config = {}
+
         # Filter and transform
         lessons_filtered = [l for l in all_lessons if l.teacher != 'Unknown']
         transformed_data = transform_to_teacher_grid(lessons_filtered, teachers_config)
         
-        # Export
+        # Export general schedule
         output_filename = f"schedule_{file_id}.xlsx"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
         export_to_excel(transformed_data, teachers_config, output_path)
+
+        # Export weekly schedule
+        weekly_output_filename = f"weekly_schedule_{file_id}.xlsx"
+        weekly_output_path = os.path.join(OUTPUT_DIR, weekly_output_filename)
+        generate_weekly_semester_schedule(
+            teachers_config=teachers_config,
+            lessons=all_lessons,
+            template_path=os.path.join(BASE_DIR, 'obrazec/Недельное.xlsx'),
+            output_path=weekly_output_path,
+            start_date_str=global_config.get('schedule_start_date', '2026-02-10'),
+            end_date_str=global_config.get('schedule_end_date', '2026-06-30')
+        )
         
         return ScheduleUploadResponse(
             filename=output_filename,
+            weekly_filename=weekly_output_filename,
             status="success",
             message="Schedule processed successfully",
             details=details,
