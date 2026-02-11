@@ -30,5 +30,13 @@
     "position": "Доцент",
     "rank": "-",
     "academic_degree": "к.г.н."
+  },
+  {
+    "id": 5,
+    "short_name": "Тамочкин",
+    "full_name": "Тамочкин Алексей Павлович",
+    "position": "Доцент",
+    "rank": "-",
+    "academic_degree": "к.г.н."
   }
 ]

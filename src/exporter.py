@@ -53,7 +53,13 @@ def _apply_summary_header(ws, transformed_data, dates):
     current_col = 6
     last_month = None
     month_start_col = 6
-    for i, (month, day) in enumerate(dates):
+    for i, (month, day, week_num) in enumerate(dates):
+        # Fill week number in row 3
+        w_cell = ws.cell(row=3, column=current_col, value=week_num)
+        w_cell.font = header_font
+        w_cell.alignment = header_alignment
+
+        # Fill day in row 4
         cell = ws.cell(row=4, column=current_col, value=day)
         cell.font = header_font
         cell.alignment = header_alignment
@@ -102,7 +108,7 @@ def _fill_summary_rows(ws, start_row, teachers_list, transformed_data):
             p_cell = ws.cell(row=current_row + p - 1, column=5, value=pair_label)
             p_cell.font = header_font
             p_cell.alignment = header_alignment
-            for d_idx, (month, day) in enumerate(dates):
+            for d_idx, (month, day, week_num) in enumerate(dates):
                 item = grid.get((teacher_name, p, month, day))
                 cell = ws.cell(row=current_row + p - 1, column=6 + d_idx)
                 if item:

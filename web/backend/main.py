@@ -142,7 +142,12 @@ async def upload_schedule(files: List[UploadFile] = File(...)):
 
         # Filter and transform
         lessons_filtered = [l for l in all_lessons if l.teacher != 'Unknown']
-        transformed_data = transform_to_teacher_grid(lessons_filtered, teachers_config)
+        transformed_data = transform_to_teacher_grid(
+            lessons_filtered, 
+            teachers_config,
+            start_date_str=global_config.get('schedule_start_date', '2026-02-10'),
+            end_date_str=global_config.get('schedule_end_date', '2026-06-30')
+        )
         
         # Export general schedule
         output_filename = f"schedule_{file_id}.xlsx"
