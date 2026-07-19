@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planner AI | Генератор Расписания</title>
+    <link rel="stylesheet" href="assets/bootstrap.min.css">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #64748b;
+            --accent: #10b981;
+            --bg-body: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --radius: 16px;
+            --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.011em;
+            overflow-y: scroll;
+        }
+
+        [v-cloak] { display: none; }
+
+        .navbar-brand {
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: var(--text-main) !important;
+            font-size: 1.5rem;
+        }
+
+        /* Modern Drop Zone */
+        .drop-zone {
+            border: 2px dashed #e2e8f0;
+            background: #ffffff;
+            border-radius: var(--radius);
+            padding: 4rem 2rem;
+            text-align: center;
+            transition: var(--transition);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--primary);
+            background: #f5f3ff;
+            box-shadow: var(--shadow);
+        }
+
+        .drop-zone.drag-over {
+            transform: scale(1.02);
+        }
+
+        .drop-zone .icon-box {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+            display: inline-block;
+            transition: var(--transition);
+        }
+
+        .drop-zone:hover .icon-box {
+            transform: translateY(-5px);
+        }
+
+        /* Cards */
+        .glass-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+
+        /* Buttons */
+        .btn {
+            border-radius: 10px;
+            padding: 0.6rem 1.2rem;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-primary:hover, .btn-primary:focus {
+            background-color: var(--primary-dark);
+            border-color: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-success {
+            background-color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        /* Accordion Customization */
+        .accordion-item {
+            border: none;
+            background: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .accordion-button {
+            border-radius: var(--radius) !important;
+            background-color: #fff;
+            box-shadow: var(--shadow-sm);
+            font-weight: 600;
+            color: var(--text-main);
+            padding: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            border: none;
+            transition: var(--transition);
+        }
+
+        .accordion-button:not(.collapsed) {
+            background-color: #fff;
+            color: var(--primary);
+            box-shadow: var(--shadow);
+        }
+
+        .accordion-button::after {
+            content: '▼';
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+        }
+        .accordion-button:not(.collapsed)::after {
+            transform: rotate(180deg);
+        }
+
+        .accordion-body {
+            background: #fff;
+            border-radius: 0 0 var(--radius) var(--radius);
+            margin-top: -10px;
+            padding: 2.5rem 1.5rem 1.5rem;
+            box-shadow: var(--shadow);
+        }
+
+        /* Table Styles */
+        .table-custom {
+            font-size: 0.9rem;
+        }
+        .table-custom thead th {
+            background: #f8fafc;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+            color: var(--text-muted);
+            border-bottom: 1px solid #e2e8f0;
+            padding: 1rem;
+        }
+        .table-custom td {
+            padding: 1rem;
+            vertical-align: middle;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        /* Results Card */
+        .result-card {
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            color: white;
+            padding: 3rem 2rem;
+            border-radius: var(--radius);
+        }
+
+        /* Toast Styles */
+        .toast-container {
+            z-index: 2000;
+        }
+        .modern-toast {
+            border: none;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            background: white;
+            min-width: 300px;
+        }
+
+        .badge-soft-primary {
+            background-color: #f5f3ff;
+            color: var(--primary);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" v-cloak>
+        <nav class="navbar navbar-light bg-transparent py-4">
+            <div class="container">
+                <a class="navbar-brand" href="#">
+                    <span style="color: var(--primary)">Planner</span>AI
+                </a>
+                <div class="d-flex align-items-center">
+                    <span class="badge rounded-pill bg-white text-dark px-3 py-2 border shadow-sm">
+                        v2.0
+                    </span>
+                </div>
+            </div>
+        </nav>
+
+        <main class="container mb-5">
+            <div class="row justify-content-center">
+                <!-- Main Action Area -->
+                <div class="col-lg-8 mb-5">
+                    <header class="text-center mb-5">
+                        <h1 class="display-5 fw-bold mb-3">Генерация расписания</h1>
+                        <p class="text-muted lead">Перетащите файлы сводного расписания для мгновенной обработки.</p>
+                    </header>
+
+                    <!-- Upload Section -->
+                    <div v-if="!uploadResults" class="glass-card p-4">
+                        <input type="file" ref="fileInput" @change="handleFileUpload" class="d-none" accept=".xlsx,.xls" multiple>
+                        <div 
+                            class="drop-zone" 
+                            :class="{ 'drag-over': isDragging }"
+                            @click="$refs.fileInput.click()"
+                            @dragover.prevent="onDragOver"
+                            @dragleave.prevent="onDragLeave"
+                            @drop.prevent="onDrop"
+                        >
+                            <div v-if="!isUploading">
+                                <div class="icon-box">📂</div>
+                                <h4 class="fw-bold">Выберите или перетащите файлы</h4>
+                                <p class="text-muted mb-0">Поддерживаются форматы Excel (.xlsx, .xls)</p>
+                            </div>
+                            <div v-else class="py-3">
+                                <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+                                <h5 class="fw-bold">Идет обработка...</h5>
+                                <p class="text-muted">Это может занять несколько секунд</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result Section -->
+                    <div v-else class="result-card shadow-lg text-start p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-4 border-bottom border-white border-opacity-25 pb-3">
+                            <h3 class="fw-bold m-0">Результаты обработки</h3>
+                            <span class="badge bg-light text-dark fs-6 rounded-pill px-3">
+                                {{ uploadSummary.total }} файл(ов)
+                            </span>
+                        </div>
+
+                        <!-- Summary Stats -->
+                        <div class="row mb-4 g-3">
+                            <div class="col-4">
+                                <div class="p-3 rounded bg-white bg-opacity-10 border border-white border-opacity-25 text-center">
+                                    <div class="h4 mb-0 fw-bold">{{ uploadSummary.success }}</div>
+                                    <small class="opacity-75">Успешно</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-3 rounded bg-white bg-opacity-10 border border-white border-opacity-25 text-center">
+                                    <div class="h4 mb-0 fw-bold">{{ uploadSummary.warning }}</div>
+                                    <small class="opacity-75">Внимание</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-3 rounded bg-white bg-opacity-10 border border-white border-opacity-25 text-center">
+                                    <div class="h4 mb-0 fw-bold">{{ uploadSummary.error }}</div>
+                                    <small class="opacity-75">Ошибки</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Details List -->
+                        <div class="bg-white rounded-3 overflow-hidden text-dark mb-4 shadow-sm">
+                            <div class="table-responsive" style="max-height: 300px;">
+                                <table class="table table-hover mb-0" style="font-size: 0.9rem;">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th class="text-center" style="width: 60px;">#</th>
+                                            <th>Файл</th>
+                                            <th>Результат</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(item, idx) in uploadResults" :key="idx">
+                                            <td class="text-center align-middle">
+                                                <span v-if="item.status === 'success'" class="text-success fs-5">✅</span>
+                                                <span v-else-if="item.status === 'warning'" class="text-warning fs-5">⚠️</span>
+                                                <span v-else class="text-danger fs-5">❌</span>
+                                            </td>
+                                            <td class="align-middle fw-bold text-nowrap" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;" :title="item.filename">
+                                                {{ item.filename }}
+                                            </td>
+                                            <td class="align-middle text-muted">
+                                                <small>{{ item.message || 'OK' }}</small>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Conflict Warnings -->
+                        <div v-if="uploadWarnings && uploadWarnings.length > 0" class="mb-4">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="fs-5 me-2">⚠️</span>
+                                <h5 class="fw-bold m-0 text-white">Обнаруженные накладки ({{ uploadWarnings.length }})</h5>
+                            </div>
+                            <div class="bg-white rounded-3 overflow-hidden text-dark shadow-sm">
+                                <div class="p-0" style="max-height: 250px; overflow-y: auto;">
+                                    <ul class="list-group list-group-flush small">
+                                        <li v-for="(warn, wIdx) in uploadWarnings" :key="wIdx" class="list-group-item list-group-item-warning border-0 mb-1 rounded-0">
+                                            {{ warn }}
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div class="bg-light p-2 text-center border-top">
+                                    <small class="text-muted">Эти занятия были автоматически объединены в итоговом файле</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                            <a v-if="downloadLink" :href="downloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>
+                                📊 Общее расписание
+                            </a>
+                            <a v-if="weeklyDownloadLink" :href="weeklyDownloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>
+                                📅 По неделям
+                            </a>
+                            <button @click="resetUpload" class="btn btn-outline-light px-4">
+                                Загрузить новые
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Area -->
+                <div class="col-lg-10">
+                    <div class="accordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button" :class="{ collapsed: !showSettings }" type="button" @click="showSettings = !showSettings">
+                                    <span>⚙️ Управление данными кафедры</span>
+                                </button>
+                            </h2>
+                            <div class="accordion-collapse" v-show="showSettings">
+                                <div class="accordion-body">
+                                    <div class="row g-4">
+                                        <!-- Teacher List -->
+                                        <div class="col-md-7">
+                                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                                <h5 class="fw-bold mb-0">Преподаватели</h5>
+                                                <span class="badge badge-soft-primary px-3 py-2 rounded-pill">
+                                                    {{ teachers.length }} сотрудников
+                                                </span>
+                                            </div>
+                                            <div class="table-responsive" style="max-height: 450px;">
+                                                <table class="table table-custom">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Сотрудник</th>
+                                                            <th>Должность</th>
+                                                            <th class="text-end">Действия</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr v-for="teacher in teachers" :key="teacher.id">
+                                                            <td>
+                                                                <div class="fw-bold">{{ teacher.short_name }}</div>
+                                                                <div class="small text-muted">{{ teacher.full_name }}</div>
+                                                            </td>
+                                                            <td><small class="text-muted">{{ teacher.position || '—' }}</small></td>
+                                                            <td class="text-end">
+                                                                <button @click="editTeacher(teacher)" class="btn btn-sm btn-light border me-1" title="Редактировать">✏️</button>
+                                                                <button @click="deleteTeacher(teacher.id)" class="btn btn-sm btn-light border text-danger" title="Удалить">🗑️</button>
+                                                            </td>
+                                                        </tr>
+                                                        <tr v-if="teachers.length === 0">
+                                                            <td colspan="3" class="text-center py-5 text-muted">
+                                                                <div class="mb-2 fs-2">📭</div>
+                                                                Список преподавателей пуст
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        <!-- Add/Edit Form -->
+                                        <div class="col-md-5">
+                                            <div class="card border-0 bg-light p-3">
+                                                <h6 class="fw-bold mb-3">{{ isEditing ? '✏️ Редактирование' : '➕ Новый преподаватель' }}</h6>
+                                                <form @submit.prevent="saveTeacher">
+                                                    <div class="mb-3">
+                                                        <label class="form-label small fw-bold text-muted">ФИО (кратко)</label>
+                                                        <input v-model="form.short_name" type="text" class="form-control" placeholder="Иванов И.И." required>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label small fw-bold text-muted">ФИО (полностью)</label>
+                                                        <input v-model="form.full_name" type="text" class="form-control" placeholder="Иванов Иван Иванович" required>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label small fw-bold text-muted">Должность</label>
+                                                        <input v-model="form.position" type="text" class="form-control" placeholder="Доцент">
+                                                    </div>
+                                                    <div class="row g-2 mb-4">
+                                                        <div class="col-6">
+                                                            <label class="form-label small fw-bold text-muted">Звание</label>
+                                                            <input v-model="form.rank" type="text" class="form-control">
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <label class="form-label small fw-bold text-muted">Степень</label>
+                                                            <input v-model="form.academic_degree" type="text" class="form-control">
+                                                        </div>
+                                                    </div>
+                                                    <div class="d-grid gap-2">
+                                                        <button type="submit" class="btn btn-primary" :disabled="isSaving">
+                                                            <span v-if="isSaving" class="spinner-border spinner-border-sm me-2"></span>
+                                                            {{ isEditing ? 'Сохранить изменения' : 'Добавить в базу' }}
+                                                        </button>
+                                                        <button v-if="isEditing" @click="resetForm" type="button" class="btn btn-light">
+                                                            Отмена
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div class="toast-container position-fixed bottom-0 end-0 p-4">
+            <div v-for="(toast, index) in toasts" :key="index" class="toast show modern-toast mb-3 shadow" role="alert">
+                <div class="d-flex align-items-center p-3">
+                    <div class="me-3">
+                        <span v-if="toast.type === 'error'" class="text-danger fs-4">❌</span>
+                        <span v-else-if="toast.type === 'success'" class="text-success fs-4">✅</span>
+                        <span v-else-if="toast.type === 'warning'" class="text-warning fs-4">⚠️</span>
+                        <span v-else class="text-primary fs-4">ℹ️</span>
+                    </div>
+                    <div class="flex-grow-1">
+                        <h6 class="mb-0 fw-bold">{{ toast.title }}</h6>
+                        <small class="text-muted">{{ toast.message }}</small>
+                    </div>
+                    <button @click="removeToast(index)" type="button" class="btn-close ms-2"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/vue.global.prod.js"></script>
+    <script src="assets/axios.min.js"></script>
+    <script src="assets/app.js"></script>
+</body>
+</html>

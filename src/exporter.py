@@ -1,271 +1,255 @@
-import os
-import collections
-import pandas as pd
-from datetime import datetime
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-from typing import List, Dict, Any
-from .model import ScheduleAssignment
+import openpyxl
+from openpyxl.styles import Alignment, Border, Side, Font, PatternFill
+from typing import List, Dict, Tuple, Any
 
-class Exporter:
-    def __init__(self, assignments: List[ScheduleAssignment], data: Dict[str, Any], config: Dict[str, Any], output_path: str):
-        self.assignments = sorted(assignments, key=lambda x: (x.assignment_date, x.start_time, x.group_name))
-        self.data = data
-        self.config = config
-        self.output_path = output_path
+def _get_fills():
+    return {
+        'Л': PatternFill(start_color='FFFFE0', end_color='FFFFE0', fill_type='solid'),
+        'П': PatternFill(start_color='E0FFFF', end_color='E0FFFF', fill_type='solid'),
+        'С': PatternFill(start_color='E0FFFF', end_color='E0FFFF', fill_type='solid'),
+        'ЛР': PatternFill(start_color='E0FFE0', end_color='E0FFE0', fill_type='solid'),
+        'Экз': PatternFill(start_color='FFE0E0', end_color='FFE0E0', fill_type='solid'),
+    }
 
-    def export(self):
-        wb = Workbook()
+def _apply_summary_header(ws, transformed_data, dates):
+    header_font = Font(name='Times New Roman', size=8, bold=True)
+    header_alignment = Alignment(horizontal='center', vertical='center')
+    
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5 + len(dates))
+    
+    semester_part = transformed_data.get('semester_info', 'На семестр')
+    if "расписание учебных занятий" in semester_part.lower():
+        semester_part = semester_part.lower().replace("расписание учебных занятий", "").strip().capitalize()
+    
+    if "на " not in semester_part.lower() and semester_part:
+        semester_part = f"На {semester_part.lower()}"
+    
+    year_part = transformed_data.get('year_info', '')
+    title_text = f"{semester_part} {year_part}".strip()
+    
+    title_cell = ws.cell(row=1, column=1, value=title_text)
+    title_cell.font = header_font
+    title_cell.alignment = Alignment(horizontal='left', vertical='center')
+
+    cols = ['№ п/п', 'Должность', 'Звание', 'Фамилия, имя, отчество', 'Месяц']
+    for i, col_name in enumerate(cols):
+        cell = ws.cell(row=2, column=i+1, value=col_name)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        if col_name != 'Месяц':
+             ws.merge_cells(start_row=2, start_column=i+1, end_row=4, end_column=i+1)
+
+    ws.cell(row=3, column=5, value='№ недели').font = header_font
+    ws.cell(row=3, column=5, value='№ недели').alignment = header_alignment
+    ws.cell(row=4, column=5, value='№ часа').font = header_font
+    ws.cell(row=4, column=5, value='№ часа').alignment = header_alignment
+    
+    ws.column_dimensions['A'].width = 8.57
+    ws.column_dimensions['B'].width = 16.43
+    ws.column_dimensions['C'].width = 15.86
+    ws.column_dimensions['D'].width = 24.71
+    ws.column_dimensions['E'].width = 5.71
+
+    current_col = 6
+    last_month = None
+    month_start_col = 6
+    for i, (month, day, week_num) in enumerate(dates):
+        # Fill week number in row 3
+        w_cell = ws.cell(row=3, column=current_col, value=week_num)
+        w_cell.font = header_font
+        w_cell.alignment = header_alignment
+
+        # Fill day in row 4
+        cell = ws.cell(row=4, column=current_col, value=day)
+        cell.font = header_font
+        cell.alignment = header_alignment
+        ws.column_dimensions[openpyxl.utils.get_column_letter(current_col)].width = 13.0
         
-        # Sheet 1: General Schedule
-        self._create_general_schedule(wb.active)
-        wb.active.title = "Общее расписание"
+        if month != last_month:
+            if last_month is not None:
+                ws.merge_cells(start_row=2, start_column=month_start_col, end_row=2, end_column=current_col-1)
+                m_cell = ws.cell(row=2, column=month_start_col, value=last_month.upper())
+                m_cell.font = header_font
+                m_cell.alignment = header_alignment
+            last_month = month
+            month_start_col = current_col
+        current_col += 1
         
-        # Sheet 2: Teachers
-        self._create_teacher_schedule(wb.create_sheet("Расписание по преподавателям"))
+    if last_month is not None:
+        ws.merge_cells(start_row=2, start_column=month_start_col, end_row=2, end_column=current_col-1)
+        m_cell = ws.cell(row=2, column=month_start_col, value=last_month.upper())
+        m_cell.font = header_font
+        m_cell.alignment = header_alignment
+
+def _fill_summary_rows(ws, start_row, teachers_list, transformed_data):
+    dates = transformed_data['dates']
+    grid = transformed_data['grid']
+    data_font = Font(name='Calibri', size=11)
+    header_font = Font(name='Times New Roman', size=8, bold=True)
+    header_alignment = Alignment(horizontal='center', vertical='center')
+    thin_side = Side(style='thin')
+    border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    fills = _get_fills()
+
+    current_row = start_row
+    for idx, t_info in enumerate(teachers_list):
+        teacher_name = t_info['short_name']
+        c1 = ws.cell(row=current_row, column=1, value=idx + 1)
+        c2 = ws.cell(row=current_row, column=2, value=t_info.get('position', ''))
+        c3 = ws.cell(row=current_row, column=3, value=t_info.get('rank', ''))
+        c4 = ws.cell(row=current_row, column=4, value=t_info['full_name'])
+        for c in [c1, c2, c3, c4]:
+            c.font = data_font
+            c.alignment = Alignment(horizontal='center', vertical='center', wrapText=True)
+            ws.merge_cells(start_row=current_row, start_column=c.column, end_row=current_row + 3, end_column=c.column)
+
+        for p in range(1, 5):
+            pair_label = {1: '1-2', 2: '3-4', 3: '5-6', 4: '7-8'}[p]
+            p_cell = ws.cell(row=current_row + p - 1, column=5, value=pair_label)
+            p_cell.font = header_font
+            p_cell.alignment = header_alignment
+            for d_idx, (month, day, week_num) in enumerate(dates):
+                item = grid.get((teacher_name, p, month, day))
+                cell = ws.cell(row=current_row + p - 1, column=6 + d_idx)
+                if item:
+                    groups_str = ", ".join(item['groups'])
+                    cell_val = f"{item['type']}\n{item['subject']}\n{item['room']}\n{groups_str}"
+                    cell.value = cell_val
+                    cell.alignment = Alignment(wrapText=True, horizontal='center', vertical='center', shrinkToFit=True)
+                    cell.font = Font(size=8)
+                    l_type = item['type'].split('/')[0] if '/' in item['type'] else item['type']
+                    if l_type in fills: cell.fill = fills[l_type]
+        current_row += 4
+    for row in ws.iter_rows(min_row=2, max_row=current_row - 1, min_col=1, max_col=5 + len(dates)):
+        for cell in row: cell.border = border
+
+def _fill_teacher_vertical(ws, teacher_info, transformed_data):
+    weeks = transformed_data['weeks']
+    grid_v = transformed_data['grid_vertical']
+    week_to_month = transformed_data['week_to_month']
+    week_day_to_date = transformed_data['week_day_to_date']
+    teacher_name = teacher_info['short_name']
+    
+    header_font = Font(name='Times New Roman', size=10, bold=True)
+    header_alignment = Alignment(horizontal='center', vertical='center')
+    thin_side = Side(style='thin')
+    border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    fills = _get_fills()
+
+    # Layout for teacher:
+    # Row 1: Months
+    # Row 2: Week Numbers
+    # Then for each day: 
+    #   Row Date
+    #   Row Pair 1 (3 sub-rows)
+    #   Row Pair 2 (3 sub-rows)
+    #   ...
+    
+    ws.column_dimensions['A'].width = 15
+    ws.column_dimensions['B'].width = 10
+    ws.cell(row=1, column=1, value="Уч. недели").font = header_font
+    ws.cell(row=2, column=1, value="Месяц").font = header_font
+    
+    # 1. Headers (Weeks and Months)
+    last_month = None
+    month_start_col = 3
+    for i, w in enumerate(weeks):
+        col = 3 + i
+        ws.cell(row=1, column=col, value=w).font = header_font
+        ws.cell(row=1, column=col, value=w).alignment = header_alignment
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 15
         
-        # Sheet 3: Groups
-        self._create_group_schedule(wb.create_sheet("Расписание по группам"))
+        month = week_to_month.get(w, "Unknown")
+        if month != last_month:
+            if last_month is not None:
+                ws.merge_cells(start_row=2, start_column=month_start_col, end_row=2, end_column=col-1)
+                m_cell = ws.cell(row=2, column=month_start_col, value=last_month.upper())
+                m_cell.font = header_font
+                m_cell.alignment = header_alignment
+            last_month = month
+            month_start_col = col
+    if last_month:
+        ws.merge_cells(start_row=2, start_column=month_start_col, end_row=2, end_column=3 + len(weeks) - 1)
+        ws.cell(row=2, column=month_start_col, value=last_month.upper()).font = header_font
+        ws.cell(row=2, column=month_start_col, value=last_month.upper()).alignment = header_alignment
+
+    # 2. Days and Lessons
+    days = [('Пн', 'ПОНЕДЕЛЬНИК'), ('Вт', 'ВТОРНИК'), ('Ср', 'СРЕДА'), ('Чт', 'ЧЕТВЕРГ'), ('Пт', 'ПЯТНИЦА'), ('Сб', 'СУББОТА')]
+    current_row = 3
+    
+    for d_short, d_full in days:
+        # Date row
+        ws.cell(row=current_row, column=1, value="Даты").font = header_font
+        ws.cell(row=current_row, column=1).alignment = header_alignment
+        for i, w in enumerate(weeks):
+            m_d = week_day_to_date.get((w, d_short))
+            if m_d:
+                ws.cell(row=current_row, column=3+i, value=m_d[1]).font = header_font
+                ws.cell(row=current_row, column=3+i, value=m_d[1]).alignment = header_alignment
+        current_row += 1
         
-        # Sheet 4: Rooms
-        self._create_room_usage(wb.create_sheet("Использование аудиторий"))
+        # Day row
+        day_start_row = current_row
+        day_cell = ws.cell(row=current_row, column=1, value=d_full)
+        day_cell.font = header_font
+        day_cell.alignment = Alignment(textRotation=90, vertical='center', horizontal='center')
         
-        # Sheet 5: Metadata
-        self._create_metadata(wb.create_sheet("Метаданные и статистика"))
+        for p in range(1, 5):
+            pair_label = {1: '1-2', 2: '3-4', 3: '5-6', 4: '7-8'}[p]
+            time_label = {1: '9.00-10.35', 2: '10.55-12.30', 3: '12.50-14.25', 4: '15.25-17.00'}[p]
+            
+            p_label_cell = ws.cell(row=current_row, column=2, value=pair_label)
+            p_label_cell.font = Font(size=8, bold=True)
+            p_label_cell.alignment = header_alignment
+            
+            t_label_cell = ws.cell(row=current_row+1, column=2, value=time_label)
+            t_label_cell.font = Font(size=7)
+            t_label_cell.alignment = header_alignment
+            
+            ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row+2, end_column=2)
+
+            for i, w in enumerate(weeks):
+                item = grid_v.get((teacher_name, w, d_short, p))
+                if item:
+                    # 3 sub-rows per lesson
+                    c_type = ws.cell(row=current_row, column=3+i, value=item['type'])
+                    c_subj = ws.cell(row=current_row+1, column=3+i, value=item['subject'])
+                    groups_str = ", ".join(item['groups'])
+                    room_str = f"{item['room']} ({groups_str})" if item['room'] else groups_str
+                    c_room = ws.cell(row=current_row+2, column=3+i, value=room_str)
+                    
+                    for c in [c_type, c_subj, c_room]:
+                        c.font = Font(size=8)
+                        c.alignment = Alignment(wrapText=True, horizontal='center', vertical='center')
+                    
+                    l_type = item['type'].split('/')[0] if '/' in item['type'] else item['type']
+                    if l_type in _get_fills():
+                        for r_off in range(3):
+                            ws.cell(row=current_row+r_off, column=3+i).fill = _get_fills()[l_type]
+            
+            current_row += 3
         
-        wb.save(self.output_path)
-        self._create_warnings_file()
+        ws.merge_cells(start_row=day_start_row, start_column=1, end_row=current_row-1, end_column=1)
+    
+    # Apply borders
+    for r in range(1, current_row):
+        for c in range(1, 3 + len(weeks)):
+            ws.cell(row=r, column=c).border = border
 
-    def _create_general_schedule(self, ws):
-        headers = [
-            "Неделя", "Дата", "День недели", "Время начала", "Время окончания", 
-            "Пара №", "Дисциплина", "Тип занятия", "Тема", "Группа", 
-            "Преподаватель", "Аудитория", "Корпус"
-        ]
-        ws.append(headers)
+def export_to_excel(transformed_data: Dict[str, Any], teachers_config: List[Dict], output_path: str):
+    wb = openpyxl.Workbook()
+    ws_summary = wb.active
+    ws_summary.title = 'Сводное расписание'
+    _apply_summary_header(ws_summary, transformed_data, transformed_data['dates'])
+    _fill_summary_rows(ws_summary, 5, teachers_config, transformed_data)
+
+    for t_info in teachers_config:
+        parts = t_info['full_name'].split()
+        if len(parts) >= 3: sheet_title = f"{parts[0]} {parts[1][0]}.{parts[2][0]}."
+        elif len(parts) == 2: sheet_title = f"{parts[0]} {parts[1][0]}."
+        else: sheet_title = parts[0]
         
-        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-        header_font = Font(bold=True)
-        center_align = Alignment(horizontal="center")
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        
-        for col_num, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col_num)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = center_align
-            cell.border = thin_border
+        ws_teacher = wb.create_sheet(title=sheet_title[:31])
+        _fill_teacher_vertical(ws_teacher, t_info, transformed_data)
 
-        type_colors = {
-            "lecture": "FFF4CC", 
-            "practice": "E2F0D9", 
-            "lab": "DEEBF7" 
-        }
-
-        for i, a in enumerate(self.assignments, 2):
-            row_data = [
-                a.week_number, a.assignment_date, a.day_of_week, 
-                a.start_time.strftime("%H:%M"), a.end_time.strftime("%H:%M"),
-                a.slot_number, a.discipline_name, a.lesson_type, a.topic,
-                a.group_name, a.teacher_name, a.room_name, a.building
-            ]
-            ws.append(row_data)
-            
-            bg_color = "F9F9F9" if i % 2 == 1 else "FFFFFF"
-            row_fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-            
-            type_color = type_colors.get(a.lesson_type.lower(), bg_color)
-            type_fill = PatternFill(start_color=type_color, end_color=type_color, fill_type="solid")
-
-            for col_num in range(1, len(headers) + 1):
-                cell = ws.cell(row=i, column=col_num)
-                cell.border = thin_border
-                cell.fill = type_fill if col_num == 8 else row_fill
-
-        for col in ws.columns:
-            max_length = 0
-            for cell in col:
-                try:
-                    if cell.value:
-                        max_length = max(max_length, len(str(cell.value)))
-                except: pass
-            ws.column_dimensions[col[0].column_letter].width = max_length + 2
-
-    def _create_teacher_schedule(self, ws):
-        teacher_map = collections.defaultdict(list)
-        for a in self.assignments:
-            teacher_map[a.teacher_name].append(a)
-            
-        row_idx = 1
-        headers = ["Дата", "День", "Время", "Дисциплина", "Группа", "Аудитория"]
-        
-        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-        teacher_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        teacher_font = Font(bold=True, color="FFFFFF")
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-
-        for teacher_name in sorted(teacher_map.keys()):
-            ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=len(headers))
-            cell = ws.cell(row=row_idx, column=1, value=teacher_name)
-            cell.fill = teacher_fill
-            cell.font = teacher_font
-            cell.alignment = Alignment(horizontal="center")
-            row_idx += 1
-            
-            for col, h in enumerate(headers, 1):
-                cell = ws.cell(row=row_idx, column=col, value=h)
-                cell.fill = header_fill
-                cell.font = Font(bold=True)
-                cell.border = thin_border
-            row_idx += 1
-            
-            for a in sorted(teacher_map[teacher_name], key=lambda x: (x.assignment_date, x.start_time)):
-                ws.append([
-                    a.assignment_date, a.day_of_week, 
-                    f"{a.start_time.strftime('%H:%M')}-{a.end_time.strftime('%H:%M')}",
-                    a.discipline_name, a.group_name, f"{a.room_name} ({a.building})"
-                ])
-                for col in range(1, len(headers) + 1):
-                    ws.cell(row=row_idx, column=col).border = thin_border
-                row_idx += 1
-            row_idx += 1 
-
-    def _create_group_schedule(self, ws):
-        groups = sorted(list(set(a.group_name for a in self.assignments)))
-        time_points = self.data.get('valid_global_slots', [])
-        
-        if not time_points: return
-
-        # Styles
-        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-        gap_fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        
-        # Header
-        ws.cell(row=1, column=1, value="Дата").fill = header_fill
-        ws.cell(row=1, column=2, value="Пара").fill = header_fill
-        for col, group in enumerate(groups, 3):
-            cell = ws.cell(row=1, column=col, value=group)
-            cell.font = Font(bold=True)
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center")
-            
-        sched_map = {}
-        group_day_range = collections.defaultdict(lambda: (float('inf'), float('-inf')))
-        for a in self.assignments:
-            sched_map[(a.assignment_date, a.slot_number, a.group_name)] = a
-            # Track first and last slot for gaps
-            r = group_day_range[(a.assignment_date, a.group_name)]
-            group_day_range[(a.assignment_date, a.group_name)] = (min(r[0], a.slot_number), max(r[1], a.slot_number))
-            
-        row_idx = 2
-        for date_obj, slot_obj in time_points:
-            ws.cell(row=row_idx, column=1, value=date_obj).border = thin_border
-            ws.cell(row=row_idx, column=2, value=slot_obj.slot_number).border = thin_border
-            
-            for col_idx, group in enumerate(groups, 3):
-                cell = ws.cell(row=row_idx, column=col_idx)
-                cell.border = thin_border
-                a = sched_map.get((date_obj, slot_obj.slot_number, group))
-                if a:
-                    cell.value = f"{a.discipline_name}\n{a.teacher_name}\n{a.room_name}"
-                    cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
-                else:
-                    # Check if it's a gap
-                    first, last = group_day_range.get((date_obj, group), (float('inf'), float('-inf')))
-                    if first < slot_obj.slot_number < last:
-                        cell.fill = gap_fill
-            row_idx += 1
-            
-        # Set column widths
-        ws.column_dimensions['A'].width = 12
-        ws.column_dimensions['B'].width = 6
-        for col_idx in range(3, len(groups) + 3):
-            ws.column_dimensions[get_column_letter(col_idx)].width = 25
-
-    def _create_room_usage(self, ws):
-        headers = ["Аудитория", "Корпус", "Тип", "Вместимость", "Часов занято", "Процент загрузки"]
-        ws.append(headers)
-        
-        # Styles
-        header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-        for col in range(1, len(headers) + 1):
-            cell = ws.cell(row=1, column=col)
-            cell.fill = header_fill
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal="center")
-
-        total_slots = len(self.data.get('valid_global_slots', []))
-        room_usage = collections.defaultdict(int)
-        for a in self.assignments:
-            room_usage[a.room_name] += 1
-            
-        row_idx = 2
-        for room in sorted(self.data['rooms'], key=lambda x: x.room_name):
-            used_slots = room_usage[room.room_name]
-            load_pct = (used_slots / total_slots) * 100 if total_slots > 0 else 0
-            
-            # Color coding for load_pct
-            if load_pct <= 50:
-                color = "E2F0D9" # Green
-            elif load_pct <= 80:
-                color = "FFF4CC" # Yellow
-            else:
-                color = "F8CBAD" # Red/Orange
-                
-            fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
-            
-            ws.append([
-                room.room_name, room.building, room.room_type, room.capacity,
-                used_slots * 1.5, f"{load_pct:.1f}%"
-            ])
-            
-            ws.cell(row=row_idx, column=6).fill = fill
-            row_idx += 1
-
-        for col in ws.columns:
-            ws.column_dimensions[col[0].column_letter].width = 15
-
-    def _create_metadata(self, ws):
-        ws.append(["Параметр", "Значение"])
-        stats = self.config.get("stats", {})
-        
-        metadata = [
-            ("Дата формирования", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("Период", f"{self.config.get('schedule_start_date')} - {self.config.get('schedule_end_date')}"),
-            ("Всего назначено занятий", len(self.assignments)),
-            ("Всего запрошено занятий", len(self.data.get('lessons', []))),
-            ("Статус решения", stats.get("status", "Unknown")),
-            ("Объективная функция", stats.get("objective_value", "N/A")),
-            ("Время решения (сек)", f"{stats.get('solve_time', 0):.2f}"),
-            ("Кол-во групп", len(set(a.group_name for a in self.assignments))),
-            ("Кол-во преподавателей", len(set(a.teacher_name for a in self.assignments))),
-            ("Кол-во аудиторий", len(set(a.room_name for a in self.assignments))),
-        ]
-        
-        for k, v in metadata:
-            ws.append([k, v])
-            
-        if stats.get("warnings"):
-            ws.append([])
-            ws.append(["Предупреждения"])
-            for w in stats["warnings"]:
-                ws.append([w])
-
-    def _create_warnings_file(self):
-        stats = self.config.get("stats", {})
-        warnings_path = os.path.join(self.config['output_directory'], 'warnings.txt')
-        with open(warnings_path, "w", encoding="utf-8") as f:
-            f.write("=== ОТЧЕТ О СОСТАВЛЕНИИ РАСПИСАНИЯ ===\n")
-            f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-            
-            f.write("[ИНФОРМАЦИЯ]\n")
-            f.write(f"- Статус решения: {stats.get('status', 'Unknown')}\n")
-            f.write(f"- Всего запланировано занятий: {len(self.assignments)}\n")
-            f.write(f"- Учтено временных слотов: {len(self.data.get('valid_global_slots', []))}\n")
-            
-            if stats.get("warnings"):
-                f.write("\n[ПРЕДУПРЕЖДЕНИЯ]\n")
-                for w in stats["warnings"]:
-                    f.write(f"- {w}\n")
+    wb.save(output_path)

@@ -1,6 +1,6 @@
 ---
 name: developer
-description: Specialized Python developer for the schedule planning project. Implements modules like data_loader, validator, model, solver, constraints, and exporter.
+description: Specialized Python developer for the schedule planning project. 
 ---
 # Developer Agent 👨‍💻
 
@@ -9,9 +9,11 @@ Specialized Python developer for the schedule planning project. Writes high-qual
 
 ## Capabilities
 - Development of Python modules (data_loader, validator, model, solver, constraints, exporter).
+- Parsing of complex Excel schedules with merged cells and legends.
+- Extraction of teacher-discipline mappings and lesson details.
+- Generation of multi-teacher summary schedules in Excel using openpyxl.
 - Implementation of optimization algorithms using OR-Tools CP-SAT.
-- CSV data processing with pandas.
-- Excel report generation with openpyxl.
+- CSV and Excel data processing with pandas.
 - Code documentation and type hinting.
 
 ## Tech Stack
