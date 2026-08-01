@@ -10,3 +10,6 @@ exec(compile(_core.read_text(encoding="utf-8"), str(_core), "exec"), globals())
 from web.backend.workspace_api import install_workspace_api  # noqa: E402
 
 app = install_workspace_api(app, sys.modules[__name__])
+# A mount at "/" must always remain after all API routes, otherwise StaticFiles
+# intercepts newly added workspace endpoints.
+app.router.routes[:] = [route for route in app.router.routes if route.__class__.__name__ != "Mount"] + [route for route in app.router.routes if route.__class__.__name__ == "Mount"]
