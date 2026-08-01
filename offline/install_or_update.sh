@@ -160,6 +160,9 @@ rollback_failed_update() {
         if [[ -n "$PREVIOUS" ]]; then
             service_start || true
         else
+            systemctl disable planner-solving.service >/dev/null 2>&1 || true
+            rm -f /etc/systemd/system/planner-solving.service
+            systemctl daemon-reload >/dev/null 2>&1 || true
             systemctl start planner-web.service >/dev/null 2>&1 || true
         fi
     fi
@@ -183,6 +186,7 @@ cat > "$STATE/run.sh" <<EOF
 set -Eeuo pipefail
 cd "$INSTALL_ROOT/current"
 export PYTHONPATH="$INSTALL_ROOT/current"
+export PYTHONDONTWRITEBYTECODE=1
 exec "$INSTALL_ROOT/current/.venv/bin/python" -m uvicorn web.backend.main:app --host 0.0.0.0 --port "$PORT" --workers 1
 EOF
 chmod 0755 "$STATE/run.sh"
@@ -200,6 +204,7 @@ User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$INSTALL_ROOT/current
 Environment=PYTHONPATH=$INSTALL_ROOT/current
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=$INSTALL_ROOT/current/.venv/bin/python -m uvicorn web.backend.main:app --host 0.0.0.0 --port $PORT --workers 1
 Restart=on-failure
 RestartSec=5
