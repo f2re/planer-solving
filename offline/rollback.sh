@@ -27,6 +27,7 @@ INSTALL_ROOT="$(cd "$INSTALL_ROOT" && pwd)"
 STATE="$INSTALL_ROOT/state/last-update.json"
 SHARED="$INSTALL_ROOT/shared"
 [[ -f "$STATE" ]] || die "Сведения о предыдущем обновлении не найдены: $STATE"
+SHARED_OWNER="$(stat -c '%u:%g' "$SHARED")"
 
 readarray -t META < <("$PYTHON_BIN" - "$STATE" <<'PY'
 import json, sys
@@ -53,14 +54,17 @@ EMERGENCY="$(backup_shared "$SHARED" "$SHARED/backups" "before-rollback")"
 rollback_rollback() {
     local code=$?
     warn "Откат не завершён, возвращается состояние до попытки отката."
+    [[ $NO_SYSTEMD -eq 1 ]] || service_stop || true
     [[ -d "$CURRENT" ]] && atomic_link "$CURRENT" "$INSTALL_ROOT/current"
     restore_shared "$SHARED" "$EMERGENCY"
+    chown -R "$SHARED_OWNER" "$SHARED" 2>/dev/null || true
     [[ $NO_SYSTEMD -eq 1 ]] || service_start || true
     exit "$code"
 }
 trap rollback_rollback ERR
 
 restore_shared "$SHARED" "$BACKUP"
+chown -R "$SHARED_OWNER" "$SHARED" 2>/dev/null || true
 atomic_link "$PREVIOUS" "$INSTALL_ROOT/current"
 (
     cd "$PREVIOUS"
@@ -74,6 +78,8 @@ if [[ $NO_SYSTEMD -eq 0 ]]; then
         false
     fi
 fi
+ROLLBACK_VERSION="$(cat "$PREVIOUS/VERSION" 2>/dev/null || echo unknown)"
+write_update_state "$STATE" "$CURRENT" "$PREVIOUS" "$EMERGENCY" "$ROLLBACK_VERSION"
 trap - ERR
 log "Откат завершён. Текущий выпуск: $PREVIOUS"
 log "Резервная копия состояния до отката: $EMERGENCY"
