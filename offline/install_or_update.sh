@@ -147,9 +147,21 @@ log "Резервная копия: $BACKUP"
 rollback_failed_update() {
     local code=$?
     warn "Обновление не завершено, выполняется автоматический откат."
-    if [[ -n "$PREVIOUS" && -d "$PREVIOUS" ]]; then atomic_link "$PREVIOUS" "$INSTALL_ROOT/current"; fi
+    if [[ $NO_SYSTEMD -eq 0 ]]; then service_stop || true; fi
+    if [[ -n "$PREVIOUS" && -d "$PREVIOUS" ]]; then
+        atomic_link "$PREVIOUS" "$INSTALL_ROOT/current"
+    else
+        rm -f "$INSTALL_ROOT/current"
+    fi
     restore_shared "$SHARED" "$BACKUP"
-    if [[ $NO_SYSTEMD -eq 0 && -n "$PREVIOUS" ]]; then service_start || true; fi
+    if [[ $NO_SYSTEMD -eq 0 ]]; then
+        chown -R "$SERVICE_USER:$SERVICE_GROUP" "$SHARED" 2>/dev/null || true
+        if [[ -n "$PREVIOUS" ]]; then
+            service_start || true
+        else
+            systemctl start planner-web.service >/dev/null 2>&1 || true
+        fi
+    fi
     exit "$code"
 }
 trap rollback_failed_update ERR
@@ -175,6 +187,7 @@ EOF
 chmod 0755 "$STATE/run.sh"
 
 if [[ $NO_SYSTEMD -eq 0 ]]; then
+    chown -R "$SERVICE_USER:$SERVICE_GROUP" "$SHARED"
     cat > /etc/systemd/system/planner-solving.service <<EOF
 [Unit]
 Description=Planner Solving offline service
@@ -203,6 +216,7 @@ EOF
         warn "Служба запущена, но /api/health не отвечает."
         false
     fi
+    systemctl disable planner-web.service >/dev/null 2>&1 || true
 fi
 
 write_update_state "$STATE/last-update.json" "$PREVIOUS" "$RELEASE" "$BACKUP" "$VERSION"
