@@ -22,10 +22,14 @@ from src.data_migrations import CURRENT_SCHEMA_VERSION
 
 BUNDLE_FORMAT_VERSION = 1
 EXCLUDED_NAMES = {
-    ".git", ".github", ".idea", ".vscode", ".venv", "venv", "env",
-    "__pycache__", ".pytest_cache", "dist", "build", "wheelhouse",
+    ".git", ".github", ".gemini", ".idea", ".vscode", ".venv", "venv", "env",
+    "__pycache__", ".pytest_cache", ".offline-cache", "dist", "build", "backups",
+    "wheelhouse", "tests",
 }
 EXCLUDED_RELATIVE = {Path("data"), Path("input"), Path("output")}
+SENSITIVE_FILENAMES = {
+    "workspaces.json", "teachers.json", "config.json", "config.local.json",
+}
 
 
 def sha256(path: Path) -> str:
@@ -43,7 +47,7 @@ def should_copy(relative: Path) -> bool:
         return False
     if relative.name.endswith((".pyc", ".pyo", ".log", ".tmp")):
         return False
-    if relative.name in {"workspaces.json", "teachers.json"}:
+    if relative.name in SENSITIVE_FILENAMES or relative.name == ".env" or relative.name.startswith(".env."):
         return False
     return True
 
