@@ -1,68 +1,42 @@
-import pytest
 from src.data_loader import Lesson
 from src.transformer import transform_to_teacher_grid
 
-def test_transform_to_teacher_grid_basic():
-    teachers_config = [
-        {"short_name": "Иванов И.И.", "full_name": "Иванов Иван Иванович", "rank": "доцент", "position": "к.т.н."},
-        {"short_name": "Петров П.П.", "full_name": "Петров Петр Петрович", "rank": "профессор", "position": "д.т.н."}
-    ]
-    
-    lessons = [
-        Lesson(
-            group="522", subject="Математика", lesson_type_code="Л/Т.01", 
-            room="101", week=1, day_of_week="Пн", pair_num=1, 
-            teacher="Иванов И.И.", date_day=2, month="Сентябрь"
-        ),
-        Lesson(
-            group="522", subject="Физика", lesson_type_code="П/Т.02", 
-            room="102", week=1, day_of_week="Вт", pair_num=2, 
-            teacher="Петров П.П.", date_day=3, month="Сентябрь"
-        ),
-        Lesson(
-            group="523", subject="Математика", lesson_type_code="Л/Т.01", 
-            room="101", week=1, day_of_week="Пн", pair_num=1, 
-            teacher="Иванов И.И.", date_day=2, month="Сентябрь"
-        )
-    ]
-    
-    result = transform_to_teacher_grid(lessons, teachers_config)
-    
-    assert "grid" in result
-    assert "dates" in result
-    assert "teachers" in result
-    
-    # Check dates
-    assert ("Сентябрь", 2) in result["dates"]
-    assert ("Сентябрь", 3) in result["dates"]
-    assert len(result["dates"]) == 2
-    
-    # Check grid content
-    grid = result["grid"]
-    key_ivanov = ("Иванов И.И.", 1, "Сентябрь", 2)
-    assert key_ivanov in grid
-    assert "522" in grid[key_ivanov]["groups"]
-    assert "523" in grid[key_ivanov]["groups"]
-    
-    key_petrov = ("Петров П.П.", 2, "Сентябрь", 3)
-    assert key_petrov in grid
-    assert grid[key_petrov]["groups"] == ["522"]
-    
-    # Check that it filtered out Unknown (though none here)
-    assert len(result["teachers"]) == 2
-    assert "Иванов И.И." in result["teachers"]
 
-def test_transform_date_sorting():
-    teachers_config = []
+def test_transform_to_teacher_grid_uses_configured_calendar() -> None:
+    teachers = [{"short_name": "Иванов И.И.", "full_name": "Иванов Иван Иванович"}]
     lessons = [
-        Lesson("G", "S", "L", "R", 1, "D", 1, "T1", 5, "Октябрь"),
-        Lesson("G", "S", "L", "R", 1, "D", 1, "T1", 1, "Сентябрь"),
-        Lesson("G", "S", "L", "R", 1, "D", 1, "T1", 10, "Сентябрь"),
+        Lesson("522", "MET", "Л/Т.01", "101", 1, "Пн", 1, "Иванов И.И.", 0, "Unknown"),
+        Lesson("523", "MET", "Л/Т.01", "101", 1, "Пн", 1, "Иванов И.И.", 0, "Unknown"),
+        Lesson("522", "PHYS", "П/Т.02", "102", 1, "Вт", 2, "Unknown", 0, "Unknown"),
     ]
-    
-    result = transform_to_teacher_grid(lessons, teachers_config)
-    dates = result["dates"]
-    
-    assert dates[0] == ("Сентябрь", 1)
-    assert dates[1] == ("Сентябрь", 10)
-    assert dates[2] == ("Октябрь", 5)
+
+    result = transform_to_teacher_grid(
+        lessons,
+        teachers,
+        start_date_str="2026-02-10",
+        end_date_str="2026-02-14",
+    )
+
+    assert result["dates"] == [
+        ("Февраль", 9, 1),
+        ("Февраль", 10, 1),
+        ("Февраль", 11, 1),
+        ("Февраль", 12, 1),
+        ("Февраль", 13, 1),
+        ("Февраль", 14, 1),
+    ]
+    key = ("Иванов И.И.", 1, "Февраль", 9)
+    assert result["grid"][key]["groups"] == ["522", "523"]
+    assert result["grid"][key]["subject"] == "MET"
+    assert not any(key[0] == "Unknown" for key in result["grid"])
+
+
+def test_lesson_outside_configured_week_range_is_ignored() -> None:
+    lesson = Lesson("522", "MET", "Л", "101", 5, "Пн", 1, "Иванов", 0, "Unknown")
+    result = transform_to_teacher_grid(
+        [lesson],
+        [{"short_name": "Иванов"}],
+        start_date_str="2026-02-10",
+        end_date_str="2026-02-14",
+    )
+    assert result["grid"] == {}
