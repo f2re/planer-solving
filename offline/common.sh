@@ -32,6 +32,13 @@ service_start() {
     systemctl enable --now planner-solving.service
 }
 
+set_shared_owner() {
+    local shared="$1" owner="$2"
+    chmod 0755 "$shared" 2>/dev/null || true
+    chown -R "$owner" "$shared/data" "$shared/input" "$shared/output" 2>/dev/null || true
+    chown "$owner" "$shared/teachers.json" "$shared/config.json" 2>/dev/null || true
+}
+
 backup_shared() {
     local shared="$1" backup_dir="$2" label="$3"
     mkdir -p "$backup_dir"
