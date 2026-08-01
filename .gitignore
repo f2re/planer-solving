@@ -23,6 +23,7 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
 
 # IDEs
@@ -32,6 +33,7 @@ ENV/
 # Project specific
 output/*
 !output/.gitkeep
+input/analysis_sessions/
 *.log
 config.local.json
 
