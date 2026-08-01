@@ -127,6 +127,7 @@ ln -s "$SHARED/output" "$RELEASE/output"
 rm -f "$RELEASE/teachers.json" "$RELEASE/config.json"
 ln -s "$SHARED/teachers.json" "$RELEASE/teachers.json"
 ln -s "$SHARED/config.json" "$RELEASE/config.json"
+chmod -R a+rX "$RELEASE"
 
 PREVIOUS=""
 [[ -L "$INSTALL_ROOT/current" ]] && PREVIOUS="$(readlink -f "$INSTALL_ROOT/current")"
@@ -155,7 +156,7 @@ rollback_failed_update() {
     fi
     restore_shared "$SHARED" "$BACKUP"
     if [[ $NO_SYSTEMD -eq 0 ]]; then
-        chown -R "$SERVICE_USER:$SERVICE_GROUP" "$SHARED" 2>/dev/null || true
+        set_shared_owner "$SHARED" "$SERVICE_USER:$SERVICE_GROUP"
         if [[ -n "$PREVIOUS" ]]; then
             service_start || true
         else
@@ -187,7 +188,7 @@ EOF
 chmod 0755 "$STATE/run.sh"
 
 if [[ $NO_SYSTEMD -eq 0 ]]; then
-    chown -R "$SERVICE_USER:$SERVICE_GROUP" "$SHARED"
+    set_shared_owner "$SHARED" "$SERVICE_USER:$SERVICE_GROUP"
     cat > /etc/systemd/system/planner-solving.service <<EOF
 [Unit]
 Description=Planner Solving offline service
