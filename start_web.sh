@@ -12,7 +12,7 @@ else
 fi
 
 export PYTHONPATH="$ROOT"
-DATA_DIR="${PLANNER_DATA_DIR:-$ROOT/data}"
+DATA_DIR="$ROOT/data"
 BACKUP_DIR="${PLANNER_BACKUP_DIR:-$ROOT/data/backups/migrations}"
 PORT="${PLANNER_PORT:-8001}"
 HOST="${PLANNER_HOST:-0.0.0.0}"
