@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,3 +51,9 @@ jobs:
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/schedule-state.js
+
+      - name: Build real offline bundle
+        run: bash offline/build_offline_bundle.sh --output dist
+
+      - name: Verify offline archive checksum
+        run: cd dist && sha256sum -c *.tar.gz.sha256
