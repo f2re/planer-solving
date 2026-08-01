@@ -1,13 +1,26 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
 
-# Ensure we are in the project root
-cd "$(dirname "$0")"
+if [[ -n "${PLANNER_PYTHON:-}" ]]; then
+    PYTHON_BIN="$PLANNER_PYTHON"
+elif [[ -x "$ROOT/.venv/bin/python" ]]; then
+    PYTHON_BIN="$ROOT/.venv/bin/python"
+else
+    PYTHON_BIN="${PYTHON_BIN:-python3}"
+fi
 
-# Set up pyenv environment for the script
-export PYENV_ROOT="$HOME/.pyenv"
-export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init -)"
+export PYTHONPATH="$ROOT"
+DATA_DIR="${PLANNER_DATA_DIR:-$ROOT/data}"
+BACKUP_DIR="${PLANNER_BACKUP_DIR:-$ROOT/data/backups/migrations}"
+PORT="${PLANNER_PORT:-8001}"
+HOST="${PLANNER_HOST:-0.0.0.0}"
 
-echo "Запуск веб-интерфейса планировщика на http://0.0.0.0:8001"
-# Use python -m uvicorn to ensure we use the version from the current pyenv environment
-python -m uvicorn web.backend.main:app --host 0.0.0.0 --port 8001 --workers 1
+"$PYTHON_BIN" -m tools.migrate \
+    --data-dir "$DATA_DIR" \
+    --legacy-teachers "$ROOT/teachers.json" \
+    --backup-dir "$BACKUP_DIR"
+
+echo "Запуск веб-интерфейса на http://$HOST:$PORT"
+exec "$PYTHON_BIN" -m uvicorn web.backend.main:app --host "$HOST" --port "$PORT" --workers 1
