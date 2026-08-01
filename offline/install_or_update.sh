@@ -7,6 +7,7 @@ source "$BUNDLE_ROOT/common.sh"
 INSTALL_ROOT=""
 LEGACY_DIR=""
 SERVICE_USER="${SUDO_USER:-$(id -un)}"
+SERVICE_GROUP=""
 PORT="8001"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 NO_SYSTEMD=0
@@ -134,6 +135,10 @@ if [[ $NO_SYSTEMD -eq 0 && $EUID -ne 0 ]]; then
     warn "Без прав root systemd-служба не устанавливается. Используется режим --no-systemd."
     NO_SYSTEMD=1
 fi
+if [[ $NO_SYSTEMD -eq 0 ]]; then
+    id "$SERVICE_USER" >/dev/null 2>&1 || die "Пользователь службы не существует: $SERVICE_USER"
+    SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
+fi
 
 [[ $NO_SYSTEMD -eq 1 ]] || service_stop
 BACKUP="$(backup_shared "$SHARED" "$BACKUPS" "before-${VERSION}")"
@@ -170,8 +175,6 @@ EOF
 chmod 0755 "$STATE/run.sh"
 
 if [[ $NO_SYSTEMD -eq 0 ]]; then
-    id "$SERVICE_USER" >/dev/null 2>&1 || die "Пользователь службы не существует: $SERVICE_USER"
-    SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
     cat > /etc/systemd/system/planner-solving.service <<EOF
 [Unit]
 Description=Planner Solving offline service
@@ -196,7 +199,10 @@ ReadWritePaths=$INSTALL_ROOT/shared
 WantedBy=multi-user.target
 EOF
     service_start
-    wait_for_health "$PYTHON_BIN" "$PORT" 45 || die "Служба запущена, но /api/health не отвечает."
+    if ! wait_for_health "$PYTHON_BIN" "$PORT" 45; then
+        warn "Служба запущена, но /api/health не отвечает."
+        false
+    fi
 fi
 
 write_update_state "$STATE/last-update.json" "$PREVIOUS" "$RELEASE" "$BACKUP" "$VERSION"
