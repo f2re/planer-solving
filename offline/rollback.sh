@@ -27,7 +27,7 @@ INSTALL_ROOT="$(cd "$INSTALL_ROOT" && pwd)"
 STATE="$INSTALL_ROOT/state/last-update.json"
 SHARED="$INSTALL_ROOT/shared"
 [[ -f "$STATE" ]] || die "Сведения о предыдущем обновлении не найдены: $STATE"
-SHARED_OWNER="$(stat -c '%u:%g' "$SHARED")"
+SHARED_OWNER="$(stat -c '%u:%g' "$SHARED/data")"
 
 readarray -t META < <("$PYTHON_BIN" - "$STATE" <<'PY'
 import json, sys
@@ -57,14 +57,14 @@ rollback_rollback() {
     [[ $NO_SYSTEMD -eq 1 ]] || service_stop || true
     [[ -d "$CURRENT" ]] && atomic_link "$CURRENT" "$INSTALL_ROOT/current"
     restore_shared "$SHARED" "$EMERGENCY"
-    chown -R "$SHARED_OWNER" "$SHARED" 2>/dev/null || true
+    set_shared_owner "$SHARED" "$SHARED_OWNER"
     [[ $NO_SYSTEMD -eq 1 ]] || service_start || true
     exit "$code"
 }
 trap rollback_rollback ERR
 
 restore_shared "$SHARED" "$BACKUP"
-chown -R "$SHARED_OWNER" "$SHARED" 2>/dev/null || true
+set_shared_owner "$SHARED" "$SHARED_OWNER"
 atomic_link "$PREVIOUS" "$INSTALL_ROOT/current"
 (
     cd "$PREVIOUS"
