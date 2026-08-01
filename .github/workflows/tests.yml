@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +29,21 @@ jobs:
         run: PYTHONPATH=. pytest -q tests
 
       - name: Compile Python modules
-        run: python -m py_compile src/schedule_analyzer.py src/data_loader.py src/workspace_store.py web/backend/main.py web/backend/legacy_main.py web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
+        run: |
+          python -m py_compile \
+            src/schedule_analyzer.py src/data_loader.py src/workspace_store.py src/data_migrations.py \
+            tools/migrate.py tools/healthcheck.py \
+            offline/build_bundle.py offline/verify_bundle.py \
+            web/backend/main.py web/backend/legacy_main.py web/backend/workspace_api.py \
+            web/backend/workspace_schedule.py web/backend/schemas.py
+
+      - name: Check shell scripts
+        run: |
+          bash -n start_web.sh
+          bash -n offline/build_offline_bundle.sh
+          bash -n offline/common.sh
+          bash -n offline/install_or_update.sh
+          bash -n offline/rollback.sh
 
       - name: Check frontend JavaScript
         run: |
