@@ -29,7 +29,11 @@ jobs:
         run: PYTHONPATH=. pytest -q tests
 
       - name: Compile Python modules
-        run: python -m py_compile src/schedule_analyzer.py src/data_loader.py web/backend/main.py web/backend/schemas.py
+        run: python -m py_compile src/schedule_analyzer.py src/data_loader.py src/workspace_store.py web/backend/main.py web/backend/legacy_main.py web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
 
       - name: Check frontend JavaScript
-        run: node --check web/frontend/assets/app.js
+        run: |
+          node --check web/frontend/assets/app.js
+          node --check web/frontend/assets/planner-app.js
+          node --check web/frontend/assets/workspace-state.js
+          node --check web/frontend/assets/schedule-state.js
