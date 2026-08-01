@@ -3,482 +3,583 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planner AI | Генератор Расписания</title>
-    <link rel="stylesheet" href="assets/bootstrap.min.css">
-    <style>
-        :root {
-            --primary: #6366f1;
-            --primary-dark: #4f46e5;
-            --secondary: #64748b;
-            --accent: #10b981;
-            --bg-body: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --radius: 16px;
-            --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-            --shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        body {
-            background-color: var(--bg-body);
-            color: var(--text-main);
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            -webkit-font-smoothing: antialiased;
-            letter-spacing: -0.011em;
-            overflow-y: scroll;
-        }
-
-        [v-cloak] { display: none; }
-
-        .navbar-brand {
-            font-weight: 800;
-            letter-spacing: -1px;
-            color: var(--text-main) !important;
-            font-size: 1.5rem;
-        }
-
-        /* Modern Drop Zone */
-        .drop-zone {
-            border: 2px dashed #e2e8f0;
-            background: #ffffff;
-            border-radius: var(--radius);
-            padding: 4rem 2rem;
-            text-align: center;
-            transition: var(--transition);
-            cursor: pointer;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .drop-zone:hover, .drop-zone.drag-over {
-            border-color: var(--primary);
-            background: #f5f3ff;
-            box-shadow: var(--shadow);
-        }
-
-        .drop-zone.drag-over {
-            transform: scale(1.02);
-        }
-
-        .drop-zone .icon-box {
-            font-size: 3.5rem;
-            margin-bottom: 1rem;
-            display: inline-block;
-            transition: var(--transition);
-        }
-
-        .drop-zone:hover .icon-box {
-            transform: translateY(-5px);
-        }
-
-        /* Cards */
-        .glass-card {
-            background: var(--card-bg);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            overflow: hidden;
-        }
-
-        /* Buttons */
-        .btn {
-            border-radius: 10px;
-            padding: 0.6rem 1.2rem;
-            font-weight: 600;
-            transition: var(--transition);
-        }
-
-        .btn-primary {
-            background-color: var(--primary);
-            border-color: var(--primary);
-            box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);
-        }
-
-        .btn-primary:hover, .btn-primary:focus {
-            background-color: var(--primary-dark);
-            border-color: var(--primary-dark);
-            transform: translateY(-1px);
-            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4);
-        }
-
-        .btn-success {
-            background-color: var(--accent);
-            border-color: var(--accent);
-        }
-
-        /* Accordion Customization */
-        .accordion-item {
-            border: none;
-            background: transparent;
-            margin-bottom: 1rem;
-        }
-
-        .accordion-button {
-            border-radius: var(--radius) !important;
-            background-color: #fff;
-            box-shadow: var(--shadow-sm);
-            font-weight: 600;
-            color: var(--text-main);
-            padding: 1.25rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: 100%;
-            border: none;
-            transition: var(--transition);
-        }
-
-        .accordion-button:not(.collapsed) {
-            background-color: #fff;
-            color: var(--primary);
-            box-shadow: var(--shadow);
-        }
-
-        .accordion-button::after {
-            content: '▼';
-            font-size: 0.8rem;
-            transition: transform 0.2s;
-        }
-        .accordion-button:not(.collapsed)::after {
-            transform: rotate(180deg);
-        }
-
-        .accordion-body {
-            background: #fff;
-            border-radius: 0 0 var(--radius) var(--radius);
-            margin-top: -10px;
-            padding: 2.5rem 1.5rem 1.5rem;
-            box-shadow: var(--shadow);
-        }
-
-        /* Table Styles */
-        .table-custom {
-            font-size: 0.9rem;
-        }
-        .table-custom thead th {
-            background: #f8fafc;
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 0.05em;
-            font-weight: 700;
-            color: var(--text-muted);
-            border-bottom: 1px solid #e2e8f0;
-            padding: 1rem;
-        }
-        .table-custom td {
-            padding: 1rem;
-            vertical-align: middle;
-            border-bottom: 1px solid #f1f5f9;
-        }
-
-        /* Results Card */
-        .result-card {
-            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-            color: white;
-            padding: 3rem 2rem;
-            border-radius: var(--radius);
-        }
-
-        /* Toast Styles */
-        .toast-container {
-            z-index: 2000;
-        }
-        .modern-toast {
-            border: none;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            background: white;
-            min-width: 300px;
-        }
-
-        .badge-soft-primary {
-            background-color: #f5f3ff;
-            color: var(--primary);
-        }
-
-        /* Scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f5f9;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-    </style>
+    <title>Planner Solving — разбор расписаний</title>
+    <link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
-    <div id="app" v-cloak>
-        <nav class="navbar navbar-light bg-transparent py-4">
-            <div class="container">
-                <a class="navbar-brand" href="#">
-                    <span style="color: var(--primary)">Planner</span>AI
-                </a>
-                <div class="d-flex align-items-center">
-                    <span class="badge rounded-pill bg-white text-dark px-3 py-2 border shadow-sm">
-                        v2.0
-                    </span>
+<div id="app" v-cloak>
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">П</span>
+            <span>Planner Solving</span>
+        </div>
+        <span class="version">операторский разбор Excel</span>
+    </header>
+
+    <main class="shell">
+        <div class="steps" aria-label="Этапы работы">
+            <span class="step-chip" :class="{ active: step === 1, done: step > 1 }">1 · Загрузка</span>
+            <span class="step-chip" :class="{ active: step === 2, done: step > 2 }">2 · Разметка и проверка</span>
+            <span class="step-chip" :class="{ active: step === 3 }">3 · Результат</span>
+        </div>
+
+        <section v-if="step === 1">
+            <div class="card upload-card">
+                <div class="upload-header">
+                    <h1 class="page-title">Загрузите расписания групп</h1>
+                    <p class="page-lead">
+                        Система сначала найдёт структуру каждого листа, затем покажет оператору
+                        строки и столбцы для проверки. Формирование результата начнётся только
+                        после контрольного разбора.
+                    </p>
+                </div>
+
+                <input
+                    id="schedule-files"
+                    type="file"
+                    hidden
+                    multiple
+                    accept=".xlsx,.xlsm"
+                    @change="handleFileInput"
+                >
+                <label
+                    class="dropzone"
+                    for="schedule-files"
+                    @dragover.prevent
+                    @drop.prevent="handleDrop"
+                >
+                    <div v-if="!uploadBusy">
+                        <div class="drop-icon">📑</div>
+                        <h2>Выберите или перетащите файлы</h2>
+                        <p>Можно загрузить несколько расписаний с разной геометрией листов.</p>
+                    </div>
+                    <div v-else>
+                        <div class="spinner" style="margin: 0 auto 14px;"></div>
+                        <h2>Анализируем книги</h2>
+                        <p>Определяются недели, сетка занятий и блок преподавателей.</p>
+                    </div>
+                </label>
+                <div class="format-note">
+                    Поддерживаются .xlsx и .xlsm. Старые .xls необходимо сохранить в современном формате.
                 </div>
             </div>
-        </nav>
 
-        <main class="container mb-5">
-            <div class="row justify-content-center">
-                <!-- Main Action Area -->
-                <div class="col-lg-8 mb-5">
-                    <header class="text-center mb-5">
-                        <h1 class="display-5 fw-bold mb-3">Генерация расписания</h1>
-                        <p class="text-muted lead">Перетащите файлы сводного расписания для мгновенной обработки.</p>
-                    </header>
-
-                    <!-- Upload Section -->
-                    <div v-if="!uploadResults" class="glass-card p-4">
-                        <input type="file" ref="fileInput" @change="handleFileUpload" class="d-none" accept=".xlsx,.xls" multiple>
-                        <div 
-                            class="drop-zone" 
-                            :class="{ 'drag-over': isDragging }"
-                            @click="$refs.fileInput.click()"
-                            @dragover.prevent="onDragOver"
-                            @dragleave.prevent="onDragLeave"
-                            @drop.prevent="onDrop"
-                        >
-                            <div v-if="!isUploading">
-                                <div class="icon-box">📂</div>
-                                <h4 class="fw-bold">Выберите или перетащите файлы</h4>
-                                <p class="text-muted mb-0">Поддерживаются форматы Excel (.xlsx, .xls)</p>
+            <section class="card teacher-card">
+                <button class="teacher-toggle" type="button" @click="showTeachers = !showTeachers">
+                    <span>Преподаватели кафедры</span>
+                    <span>{{ showTeachers ? 'Скрыть' : teachers.length + ' записей' }}</span>
+                </button>
+                <div v-if="showTeachers" class="teacher-body">
+                    <div style="overflow:auto;">
+                        <table class="teacher-table">
+                            <thead>
+                            <tr>
+                                <th>Краткое имя</th>
+                                <th>Полное ФИО</th>
+                                <th>Должность</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr v-for="teacher in teachers" :key="teacher.id">
+                                <td><strong>{{ teacher.short_name }}</strong></td>
+                                <td>{{ teacher.full_name }}</td>
+                                <td>{{ teacher.position || '—' }}</td>
+                                <td style="white-space:nowrap;">
+                                    <button class="btn btn-secondary btn-small" @click="editTeacher(teacher)">Изменить</button>
+                                    <button class="btn btn-danger btn-small" @click="deleteTeacher(teacher)">Удалить</button>
+                                </td>
+                            </tr>
+                            <tr v-if="!teachers.length">
+                                <td colspan="4">Список пуст.</td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <form @submit.prevent="saveTeacher">
+                        <div class="field-grid">
+                            <div class="field">
+                                <label>Краткое имя</label>
+                                <input class="control" v-model.trim="teacherForm.short_name" required placeholder="Иванов И.И.">
                             </div>
-                            <div v-else class="py-3">
-                                <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
-                                <h5 class="fw-bold">Идет обработка...</h5>
-                                <p class="text-muted">Это может занять несколько секунд</p>
+                            <div class="field">
+                                <label>Полное ФИО</label>
+                                <input class="control" v-model.trim="teacherForm.full_name" required placeholder="Иванов Иван Иванович">
+                            </div>
+                            <div class="field full">
+                                <label>Должность</label>
+                                <input class="control" v-model.trim="teacherForm.position">
+                            </div>
+                            <div class="field">
+                                <label>Звание</label>
+                                <input class="control" v-model.trim="teacherForm.rank">
+                            </div>
+                            <div class="field">
+                                <label>Степень</label>
+                                <input class="control" v-model.trim="teacherForm.academic_degree">
+                            </div>
+                        </div>
+                        <div class="button-row" style="margin-top:12px;">
+                            <button class="btn btn-primary" :disabled="teacherBusy">
+                                {{ editingTeacher ? 'Сохранить' : 'Добавить' }}
+                            </button>
+                            <button v-if="editingTeacher" type="button" class="btn btn-secondary" @click="resetTeacherForm">
+                                Отмена
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </section>
+
+        <section v-else-if="step === 2">
+            <div class="workflow-grid">
+                <aside class="card panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2 class="panel-title">Файлы</h2>
+                            <div class="panel-subtitle">{{ checkedFilesCount }} из {{ enabledFiles.length }} проверено</div>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="file-list">
+                            <div
+                                v-for="file in analyzedFiles"
+                                :key="file.file_id"
+                                class="file-item"
+                                :class="{ selected: selectedFileId === file.file_id, disabled: !file.enabled }"
+                                @click="file.analysis && selectFile(file.file_id)"
+                            >
+                                <input
+                                    type="checkbox"
+                                    v-model="file.enabled"
+                                    :disabled="!file.analysis"
+                                    @click.stop
+                                >
+                                <div style="min-width:0;">
+                                    <div class="file-name" :title="file.filename">{{ file.filename }}</div>
+                                    <div class="file-meta" v-if="file.analysis">
+                                        <span :class="confidenceClass(file.analysis.confidence)">
+                                            {{ confidenceLabel(file.analysis.confidence) }}
+                                        </span>
+                                    </div>
+                                    <div class="file-meta" v-else>{{ file.message }}</div>
+                                    <input
+                                        v-if="file.analysis"
+                                        class="control group-input"
+                                        v-model.trim="file.group_name"
+                                        @click.stop
+                                        @input="markFileDirty(file.file_id)"
+                                        aria-label="Название группы"
+                                    >
+                                </div>
+                                <span class="status-dot" :class="fileStatus(file)"></span>
                             </div>
                         </div>
                     </div>
+                </aside>
 
-                    <!-- Result Section -->
-                    <div v-else class="result-card shadow-lg text-start p-4">
-                        <div class="d-flex justify-content-between align-items-center mb-4 border-bottom border-white border-opacity-25 pb-3">
-                            <h3 class="fw-bold m-0">Результаты обработки</h3>
-                            <span class="badge bg-light text-dark fs-6 rounded-pill px-3">
-                                {{ uploadSummary.total }} файл(ов)
-                            </span>
-                        </div>
-
-                        <!-- Summary Stats -->
-                        <div class="row mb-4 g-3">
-                            <div class="col-4">
-                                <div class="p-3 rounded bg-white bg-opacity-10 border border-white border-opacity-25 text-center">
-                                    <div class="h4 mb-0 fw-bold">{{ uploadSummary.success }}</div>
-                                    <small class="opacity-75">Успешно</small>
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <div class="p-3 rounded bg-white bg-opacity-10 border border-white border-opacity-25 text-center">
-                                    <div class="h4 mb-0 fw-bold">{{ uploadSummary.warning }}</div>
-                                    <small class="opacity-75">Внимание</small>
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <div class="p-3 rounded bg-white bg-opacity-10 border border-white border-opacity-25 text-center">
-                                    <div class="h4 mb-0 fw-bold">{{ uploadSummary.error }}</div>
-                                    <small class="opacity-75">Ошибки</small>
-                                </div>
+                <section class="card panel">
+                    <div class="panel-header preview-toolbar">
+                        <div>
+                            <h2 class="panel-title">{{ currentFile?.filename || 'Предпросмотр' }}</h2>
+                            <div class="panel-subtitle" v-if="preview">
+                                Лист {{ preview.sheet_name }}, строки {{ preview.row_start }}–{{ preview.row_end }},
+                                столбцы {{ colLetter(preview.col_start) }}–{{ colLetter(preview.col_end) }}
                             </div>
                         </div>
-
-                        <!-- Details List -->
-                        <div class="bg-white rounded-3 overflow-hidden text-dark mb-4 shadow-sm">
-                            <div class="table-responsive" style="max-height: 300px;">
-                                <table class="table table-hover mb-0" style="font-size: 0.9rem;">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th class="text-center" style="width: 60px;">#</th>
-                                            <th>Файл</th>
-                                            <th>Результат</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr v-for="(item, idx) in uploadResults" :key="idx">
-                                            <td class="text-center align-middle">
-                                                <span v-if="item.status === 'success'" class="text-success fs-5">✅</span>
-                                                <span v-else-if="item.status === 'warning'" class="text-warning fs-5">⚠️</span>
-                                                <span v-else class="text-danger fs-5">❌</span>
-                                            </td>
-                                            <td class="align-middle fw-bold text-nowrap" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;" :title="item.filename">
-                                                {{ item.filename }}
-                                            </td>
-                                            <td class="align-middle text-muted">
-                                                <small>{{ item.message || 'OK' }}</small>
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                        <div class="button-row">
+                            <div class="tabs">
+                                <button
+                                    class="tab"
+                                    :class="{ active: previewRegion === 'schedule' }"
+                                    @click="switchRegion('schedule')"
+                                >Сетка</button>
+                                <button
+                                    class="tab"
+                                    :class="{ active: previewRegion === 'legend' }"
+                                    @click="switchRegion('legend')"
+                                >Дисциплины и преподаватели</button>
                             </div>
-                        </div>
-
-                        <!-- Conflict Warnings -->
-                        <div v-if="uploadWarnings && uploadWarnings.length > 0" class="mb-4">
-                            <div class="d-flex align-items-center mb-2">
-                                <span class="fs-5 me-2">⚠️</span>
-                                <h5 class="fw-bold m-0 text-white">Обнаруженные накладки ({{ uploadWarnings.length }})</h5>
-                            </div>
-                            <div class="bg-white rounded-3 overflow-hidden text-dark shadow-sm">
-                                <div class="p-0" style="max-height: 250px; overflow-y: auto;">
-                                    <ul class="list-group list-group-flush small">
-                                        <li v-for="(warn, wIdx) in uploadWarnings" :key="wIdx" class="list-group-item list-group-item-warning border-0 mb-1 rounded-0">
-                                            {{ warn }}
-                                        </li>
-                                    </ul>
-                                </div>
-                                <div class="bg-light p-2 text-center border-top">
-                                    <small class="text-muted">Эти занятия были автоматически объединены в итоговом файле</small>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Actions -->
-                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-                            <a v-if="downloadLink" :href="downloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>
-                                📊 Общее расписание
-                            </a>
-                            <a v-if="weeklyDownloadLink" :href="weeklyDownloadLink" class="btn btn-light fw-bold px-4 shadow-sm" download>
-                                📅 По неделям
-                            </a>
-                            <button @click="resetUpload" class="btn btn-outline-light px-4">
-                                Загрузить новые
+                            <button class="btn btn-secondary btn-small" @click="loadPreview" :disabled="previewBusy">
+                                Обновить
                             </button>
                         </div>
                     </div>
-                </div>
 
-                <!-- Settings Area -->
-                <div class="col-lg-10">
-                    <div class="accordion">
-                        <div class="accordion-item">
-                            <h2 class="accordion-header">
-                                <button class="accordion-button" :class="{ collapsed: !showSettings }" type="button" @click="showSettings = !showSettings">
-                                    <span>⚙️ Управление данными кафедры</span>
-                                </button>
-                            </h2>
-                            <div class="accordion-collapse" v-show="showSettings">
-                                <div class="accordion-body">
-                                    <div class="row g-4">
-                                        <!-- Teacher List -->
-                                        <div class="col-md-7">
-                                            <div class="d-flex justify-content-between align-items-center mb-4">
-                                                <h5 class="fw-bold mb-0">Преподаватели</h5>
-                                                <span class="badge badge-soft-primary px-3 py-2 rounded-pill">
-                                                    {{ teachers.length }} сотрудников
-                                                </span>
-                                            </div>
-                                            <div class="table-responsive" style="max-height: 450px;">
-                                                <table class="table table-custom">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Сотрудник</th>
-                                                            <th>Должность</th>
-                                                            <th class="text-end">Действия</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        <tr v-for="teacher in teachers" :key="teacher.id">
-                                                            <td>
-                                                                <div class="fw-bold">{{ teacher.short_name }}</div>
-                                                                <div class="small text-muted">{{ teacher.full_name }}</div>
-                                                            </td>
-                                                            <td><small class="text-muted">{{ teacher.position || '—' }}</small></td>
-                                                            <td class="text-end">
-                                                                <button @click="editTeacher(teacher)" class="btn btn-sm btn-light border me-1" title="Редактировать">✏️</button>
-                                                                <button @click="deleteTeacher(teacher.id)" class="btn btn-sm btn-light border text-danger" title="Удалить">🗑️</button>
-                                                            </td>
-                                                        </tr>
-                                                        <tr v-if="teachers.length === 0">
-                                                            <td colspan="3" class="text-center py-5 text-muted">
-                                                                <div class="mb-2 fs-2">📭</div>
-                                                                Список преподавателей пуст
-                                                            </td>
-                                                        </tr>
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                        <!-- Add/Edit Form -->
-                                        <div class="col-md-5">
-                                            <div class="card border-0 bg-light p-3">
-                                                <h6 class="fw-bold mb-3">{{ isEditing ? '✏️ Редактирование' : '➕ Новый преподаватель' }}</h6>
-                                                <form @submit.prevent="saveTeacher">
-                                                    <div class="mb-3">
-                                                        <label class="form-label small fw-bold text-muted">ФИО (кратко)</label>
-                                                        <input v-model="form.short_name" type="text" class="form-control" placeholder="Иванов И.И." required>
-                                                    </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label small fw-bold text-muted">ФИО (полностью)</label>
-                                                        <input v-model="form.full_name" type="text" class="form-control" placeholder="Иванов Иван Иванович" required>
-                                                    </div>
-                                                    <div class="mb-3">
-                                                        <label class="form-label small fw-bold text-muted">Должность</label>
-                                                        <input v-model="form.position" type="text" class="form-control" placeholder="Доцент">
-                                                    </div>
-                                                    <div class="row g-2 mb-4">
-                                                        <div class="col-6">
-                                                            <label class="form-label small fw-bold text-muted">Звание</label>
-                                                            <input v-model="form.rank" type="text" class="form-control">
-                                                        </div>
-                                                        <div class="col-6">
-                                                            <label class="form-label small fw-bold text-muted">Степень</label>
-                                                            <input v-model="form.academic_degree" type="text" class="form-control">
-                                                        </div>
-                                                    </div>
-                                                    <div class="d-grid gap-2">
-                                                        <button type="submit" class="btn btn-primary" :disabled="isSaving">
-                                                            <span v-if="isSaving" class="spinner-border spinner-border-sm me-2"></span>
-                                                            {{ isEditing ? 'Сохранить изменения' : 'Добавить в базу' }}
-                                                        </button>
-                                                        <button v-if="isEditing" @click="resetForm" type="button" class="btn btn-light">
-                                                            Отмена
-                                                        </button>
-                                                    </div>
-                                                </form>
-                                            </div>
-                                        </div>
+                    <div class="preview-wrap">
+                        <div v-if="previewBusy" class="loading-box">
+                            <div>
+                                <div class="spinner" style="margin:0 auto 10px;"></div>
+                                Загружаем область листа
+                            </div>
+                        </div>
+                        <table v-else-if="preview" class="preview-table">
+                            <thead>
+                            <tr>
+                                <th class="row-number">№</th>
+                                <th v-for="column in preview.columns" :key="column.index">
+                                    {{ column.label }}
+                                </th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr v-for="row in preview.rows" :key="row.index">
+                                <th class="row-number">{{ row.index }}</th>
+                                <td
+                                    v-for="cell in row.cells"
+                                    :key="cell.column"
+                                    :class="cellClass(row, cell)"
+                                    :title="`${colLetter(cell.column)}${row.index}${cell.merged ? ' · объединено' : ''}`"
+                                >{{ cell.value }}</td>
+                            </tr>
+                            </tbody>
+                        </table>
+                        <div v-else class="empty-preview">Область листа не загружена.</div>
+                    </div>
+                </section>
+
+                <aside class="card panel settings-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2 class="panel-title">Разметка</h2>
+                            <div class="panel-subtitle">Координаты совпадают с номерами строк Excel</div>
+                        </div>
+                        <button class="btn btn-secondary btn-small" @click="applySuggestion">
+                            Автовариант
+                        </button>
+                    </div>
+
+                    <div v-if="currentLayout" class="panel-body settings-scroll">
+                        <section class="settings-section">
+                            <h3>Шаблоны разметки</h3>
+                            <p class="section-note">Сохраните координаты для повторяющихся форматов. Шаблоны хранятся локально в браузере.</p>
+                            <div class="field-grid">
+                                <div class="field full">
+                                    <label>Название нового шаблона</label>
+                                    <input class="control" v-model.trim="profileName" placeholder="Например: факультет, форма 2026">
+                                </div>
+                                <div class="field full">
+                                    <button class="btn btn-secondary" type="button" @click="saveCurrentProfile">Сохранить текущую разметку</button>
+                                </div>
+                                <div class="field full">
+                                    <label>Сохранённый шаблон</label>
+                                    <select class="control" v-model="selectedProfile">
+                                        <option value="">Не выбран</option>
+                                        <option v-for="profile in layoutProfiles" :key="profile.name" :value="profile.name">{{ profile.name }}</option>
+                                    </select>
+                                </div>
+                                <div class="field full">
+                                    <div class="button-row">
+                                        <button class="btn btn-secondary btn-small" type="button" @click="applySelectedProfile" :disabled="!selectedProfile">Применить</button>
+                                        <button class="btn btn-danger btn-small" type="button" @click="deleteSelectedProfile" :disabled="!selectedProfile">Удалить</button>
+                                        <button class="btn btn-secondary btn-small" type="button" @click="copyLayoutToEnabled">Копировать во включённые файлы</button>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
+                        </section>
 
-        <!-- Toast Notifications -->
-        <div class="toast-container position-fixed bottom-0 end-0 p-4">
-            <div v-for="(toast, index) in toasts" :key="index" class="toast show modern-toast mb-3 shadow" role="alert">
-                <div class="d-flex align-items-center p-3">
-                    <div class="me-3">
-                        <span v-if="toast.type === 'error'" class="text-danger fs-4">❌</span>
-                        <span v-else-if="toast.type === 'success'" class="text-success fs-4">✅</span>
-                        <span v-else-if="toast.type === 'warning'" class="text-warning fs-4">⚠️</span>
-                        <span v-else class="text-primary fs-4">ℹ️</span>
+                        <section class="settings-section">
+                            <h3>Лист и недельная шкала</h3>
+                            <div class="field-grid">
+                                <div class="field full">
+                                    <label>Лист книги</label>
+                                    <select class="control" v-model="currentLayout.sheet_name" @change="markDirty">
+                                        <option v-for="name in currentFile.analysis.sheet_names" :key="name" :value="name">
+                                            {{ name }}
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label>Строка недель</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.weeks_row" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Строка месяцев</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.months_row" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Первый столбец недель</label>
+                                    <div class="control-with-hint">
+                                        <input class="control" type="number" v-model.number="currentLayout.first_week_col" @change="markDirty">
+                                        <span class="col-hint">{{ colLetter(currentLayout.first_week_col) }}</span>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label>Последний столбец недель</label>
+                                    <div class="control-with-hint">
+                                        <input class="control" type="number" v-model.number="currentLayout.last_week_col" @change="markDirty">
+                                        <span class="col-hint">{{ colLetter(currentLayout.last_week_col) }}</span>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label>Шаг между неделями</label>
+                                    <input class="control" type="number" min="1" v-model.number="currentLayout.week_col_step" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Смещение данных от номера недели</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.week_data_col_offset" @change="markDirty">
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-section">
+                            <h3>Сетка занятий</h3>
+                            <div class="field-grid">
+                                <div class="field">
+                                    <label>Первая строка первого дня</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.grid_start_row" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Последняя строка сетки</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.grid_end_row" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Строк в одном дне</label>
+                                    <input class="control" type="number" min="1" v-model.number="currentLayout.day_block_rows" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Пар в день</label>
+                                    <input class="control" type="number" min="1" v-model.number="currentLayout.pairs_per_day" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Шаг строк между парами</label>
+                                    <input class="control" type="number" min="1" v-model.number="currentLayout.pair_row_stride" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Строка даты относительно дня</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.date_row_offset" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Смещение строки кода</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.code_row_offset" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Смещение строки дисциплины</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.subject_row_offset" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Смещение строки аудитории</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.room_row_offset" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Смещение строки преподавателя</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.teacher_row_offset" @change="markDirty">
+                                </div>
+                                <div class="field full">
+                                    <label>Дни по порядку, через запятую</label>
+                                    <input
+                                        class="control"
+                                        :value="currentLayout.day_names.join(', ')"
+                                        @input="changeDayNames"
+                                    >
+                                </div>
+                                <div class="field">
+                                    <label>Расположение занятия</label>
+                                    <select class="control" v-model="currentLayout.cell_mode" @change="markDirty">
+                                        <option value="row_layers">Код, дисциплина и аудитория по строкам</option>
+                                        <option value="combined_cell">Всё занятие в одной многострочной ячейке</option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label>Источник преподавателя</label>
+                                    <select class="control" v-model="currentLayout.teacher_source" @change="markDirty">
+                                        <option value="legend">Только нижний блок</option>
+                                        <option value="schedule">Только сетка</option>
+                                        <option value="both">Сетка и нижний блок</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-section">
+                            <h3>Блок дисциплин и преподавателей</h3>
+                            <div class="field-grid">
+                                <div class="field">
+                                    <label>Строка заголовка блока</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.legend_start_row" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Последняя строка блока</label>
+                                    <input class="control" type="number" v-model.number="currentLayout.legend_end_row" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Строк до первой записи</label>
+                                    <input class="control" type="number" min="1" v-model.number="currentLayout.legend_data_start_offset" @change="markDirty">
+                                </div>
+                                <div class="field">
+                                    <label>Столбец обозначения</label>
+                                    <div class="control-with-hint">
+                                        <input class="control" type="number" v-model.number="currentLayout.legend_code_col" @change="markDirty">
+                                        <span class="col-hint">{{ colLetter(currentLayout.legend_code_col) }}</span>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label>Столбец дисциплины</label>
+                                    <div class="control-with-hint">
+                                        <input class="control" type="number" v-model.number="currentLayout.legend_subject_col" @change="markDirty">
+                                        <span class="col-hint">{{ colLetter(currentLayout.legend_subject_col) }}</span>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label>Столбец лектора</label>
+                                    <div class="control-with-hint">
+                                        <input class="control" type="number" v-model.number="currentLayout.legend_lecturer_col" @change="markDirty">
+                                        <span class="col-hint">{{ colLetter(currentLayout.legend_lecturer_col) }}</span>
+                                    </div>
+                                </div>
+                                <div class="field full">
+                                    <label>Столбец остальных преподавателей</label>
+                                    <div class="control-with-hint">
+                                        <input class="control" type="number" v-model.number="currentLayout.legend_other_col" @change="markDirty">
+                                        <span class="col-hint">{{ colLetter(currentLayout.legend_other_col) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-section">
+                            <h3>Автоматические замечания</h3>
+                            <div class="diagnostic-list">
+                                <div
+                                    v-for="(item, index) in currentFile.analysis.diagnostics"
+                                    :key="index"
+                                    class="diagnostic"
+                                    :class="item.severity"
+                                >{{ item.message }}</div>
+                                <div v-if="!currentFile.analysis.diagnostics.length" class="diagnostic info">
+                                    Существенных замечаний при анализе не найдено.
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-section">
+                            <div class="button-stack">
+                                <button class="btn btn-primary" @click="validateCurrent" :disabled="validateBusy">
+                                    Проверить разметку файла
+                                </button>
+                                <button class="btn btn-secondary" @click="loadPreview" :disabled="previewBusy">
+                                    Обновить область предпросмотра
+                                </button>
+                            </div>
+
+                            <div
+                                v-if="currentValidation"
+                                class="validation-summary"
+                                :class="currentValidation.status"
+                            >
+                                <strong>
+                                    {{ currentValidation.status === 'success' ? 'Разметка пригодна' :
+                                       currentValidation.status === 'warning' ? 'Есть замечания' : 'Разметка ошибочна' }}
+                                </strong>
+                                <div class="metric-row">
+                                    <div class="metric">
+                                        <strong>{{ currentValidation.report.lesson_count }}</strong>
+                                        <span>занятий</span>
+                                    </div>
+                                    <div class="metric">
+                                        <strong>{{ currentValidation.report.mapped_lessons }}</strong>
+                                        <span>с преподавателем</span>
+                                    </div>
+                                    <div class="metric">
+                                        <strong>{{ currentValidation.report.unknown_teacher_lessons }}</strong>
+                                        <span>не назначено</span>
+                                    </div>
+                                </div>
+                                <div class="diagnostic-list">
+                                    <div
+                                        v-for="(message, index) in currentValidation.report.errors"
+                                        :key="'e' + index"
+                                        class="diagnostic error"
+                                    >{{ message }}</div>
+                                    <div
+                                        v-for="(message, index) in currentValidation.report.warnings"
+                                        :key="'w' + index"
+                                        class="diagnostic warning"
+                                    >{{ message }}</div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
-                    <div class="flex-grow-1">
-                        <h6 class="mb-0 fw-bold">{{ toast.title }}</h6>
-                        <small class="text-muted">{{ toast.message }}</small>
-                    </div>
-                    <button @click="removeToast(index)" type="button" class="btn-close ms-2"></button>
+                </aside>
+            </div>
+
+            <div class="bottom-actions">
+                <div class="bottom-note">
+                    Выбрано файлов: {{ enabledFiles.length }}. Результат формируется только из файлов без критических ошибок.
+                </div>
+                <div class="button-row">
+                    <button class="btn btn-secondary" @click="resetWorkflow">Начать заново</button>
+                    <button class="btn btn-secondary" @click="validateAll" :disabled="validateBusy">
+                        Проверить все
+                    </button>
+                    <button class="btn btn-primary" @click="generate" :disabled="generateBusy || !enabledFiles.length">
+                        {{ generateBusy ? 'Формирование…' : 'Сформировать расписание' }}
+                    </button>
                 </div>
             </div>
+        </section>
+
+        <section v-else-if="step === 3">
+            <div class="card result-card">
+                <div class="result-hero">
+                    <div class="result-icon">✓</div>
+                    <div>
+                        <h1 class="page-title" style="font-size:32px;">Расписание сформировано</h1>
+                        <p class="page-lead">{{ result.message }}</p>
+                    </div>
+                </div>
+
+                <div class="result-files">
+                    <div v-for="detail in result.details" :key="detail.file_id || detail.filename" class="result-file">
+                        <span class="status-dot" :class="detail.status"></span>
+                        <div>
+                            <strong>{{ detail.filename }}</strong>
+                            <div class="panel-subtitle">{{ detail.message }}</div>
+                        </div>
+                        <span>{{ detail.lesson_count ?? 0 }} занятий</span>
+                    </div>
+                </div>
+
+                <div class="button-row">
+                    <a
+                        v-if="result.filename"
+                        class="btn btn-primary"
+                        :href="`/api/download/${result.filename}`"
+                        download
+                    >Скачать общее расписание</a>
+                    <a
+                        v-if="result.weekly_filename"
+                        class="btn btn-secondary"
+                        :href="`/api/download/${result.weekly_filename}`"
+                        download
+                    >Скачать недельное расписание</a>
+                    <button class="btn btn-secondary" @click="resetWorkflow">Обработать новые файлы</button>
+                </div>
+
+                <div v-if="result.warnings?.length" class="warning-box">
+                    <strong>Предупреждения</strong>
+                    <ul>
+                        <li v-for="(warning, index) in result.warnings" :key="index">{{ warning }}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast-stack">
+        <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type">
+            <div class="toast-head">
+                <span>{{ toast.title }}</span>
+                <button class="toast-close" @click="removeToast(toast.id)">×</button>
+            </div>
+            <p>{{ toast.message }}</p>
         </div>
     </div>
+</div>
 
-    <script src="assets/vue.global.prod.js"></script>
-    <script src="assets/axios.min.js"></script>
-    <script src="assets/app.js"></script>
+<script src="assets/vue.global.prod.js"></script>
+<script src="assets/axios.min.js"></script>
+<script src="assets/app.js"></script>
 </body>
 </html>
