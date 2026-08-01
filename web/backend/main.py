@@ -1,11 +1,43 @@
 """Application entrypoint with workspace extensions over the stable schedule core."""
+import json
 from pathlib import Path
 import sys
 
 from fastapi import HTTPException
 
-from src.data_migrations import CURRENT_SCHEMA_VERSION
-from src.workspace_store import WorkspaceStore
+from src.data_migrations import (
+    CURRENT_SCHEMA_VERSION,
+    MigrationError,
+    detect_schema_version,
+)
+from src.workspace_store import WorkspaceError, WorkspaceStore
+
+
+def _install_workspace_schema_guard() -> None:
+    """Prevent direct Uvicorn startup from rewriting data created by a newer app."""
+    original_load = WorkspaceStore.load
+    if getattr(original_load, "_planner_schema_guard", False):
+        return
+
+    def guarded_load(store: WorkspaceStore):
+        if store.path.exists():
+            try:
+                payload = json.loads(store.path.read_text(encoding="utf-8"))
+                version = detect_schema_version(payload)
+            except (OSError, json.JSONDecodeError, MigrationError) as exc:
+                raise WorkspaceError(f"Не удалось проверить версию данных: {exc}") from exc
+            if version > CURRENT_SCHEMA_VERSION:
+                raise WorkspaceError(
+                    f"Данные имеют версию {version}, а приложение поддерживает только "
+                    f"версию {CURRENT_SCHEMA_VERSION}. Установите более новую версию приложения."
+                )
+        return original_load(store)
+
+    guarded_load._planner_schema_guard = True  # type: ignore[attr-defined]
+    WorkspaceStore.load = guarded_load  # type: ignore[method-assign]
+
+
+_install_workspace_schema_guard()
 
 # Execute the proven schedule core in this module so existing deployments and
 # tests can still override BASE_DIR, INPUT_DIR and related settings.
