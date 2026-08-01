@@ -36,6 +36,10 @@ output/*
 input/analysis_sessions/
 data/workspaces.json
 data/workspaces.json.tmp
+data/backups/
+backups/
+dist/
+.offline-cache/
 *.log
 config.local.json
 

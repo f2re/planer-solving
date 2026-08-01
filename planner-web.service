@@ -1,18 +1,23 @@
 [Unit]
-Description=Educational Schedule Planner Web Service
+Description=Planner Solving Web Service
 After=network.target
 
 [Service]
-User=user
-Group=user
-WorkingDirectory=/home/user/planner-solving
-Environment="PATH=/home/user/.pyenv/shims:/home/user/.pyenv/bin:$PATH"
-Environment="PATH=/home/user/.pyenv/shims:/home/user/.pyenv/bin:$PATH"
-Environment="PYENV_ROOT=/home/user/.pyenv"
-Environment="PYTHONPATH=/home/user/planner-solving"
-ExecStart=/home/user/.pyenv/shims/python -m uvicorn web.backend.main:app --host 0.0.0.0 --port 8000 --workers 1
-Restart=always
+Type=simple
+User=planner
+Group=planner
+WorkingDirectory=/opt/planner-solving/current
+Environment=PYTHONPATH=/opt/planner-solving/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/planner-solving/current/.venv/bin/python -m tools.migrate --data-dir /opt/planner-solving/shared/data --legacy-teachers /opt/planner-solving/shared/teachers.json --backup-dir /opt/planner-solving/shared/backups/migrations
+ExecStart=/opt/planner-solving/current/.venv/bin/python -m uvicorn web.backend.main:app --host 0.0.0.0 --port 8001 --workers 1
+Restart=on-failure
 RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/planner-solving/shared
 
 [Install]
 WantedBy=multi-user.target

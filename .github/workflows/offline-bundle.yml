@@ -1,0 +1,40 @@
+name: Offline bundle
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-x86_64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Build offline bundle
+        run: bash offline/build_offline_bundle.sh --output dist
+
+      - name: Verify archive checksum
+        run: cd dist && sha256sum -c *.tar.gz.sha256
+
+      - name: Upload offline bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-solving-offline-linux-x86_64-py311
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
