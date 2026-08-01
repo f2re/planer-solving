@@ -69,7 +69,10 @@ atomic_link "$PREVIOUS" "$INSTALL_ROOT/current"
 )
 if [[ $NO_SYSTEMD -eq 0 ]]; then
     service_start
-    wait_for_health "$PYTHON_BIN" "$PORT" 45 || die "После отката служба не прошла проверку."
+    if ! wait_for_health "$PYTHON_BIN" "$PORT" 45; then
+        warn "После отката служба не прошла проверку."
+        false
+    fi
 fi
 trap - ERR
 log "Откат завершён. Текущий выпуск: $PREVIOUS"
