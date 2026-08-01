@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import platform
 import shutil
 import subprocess
 import sys
@@ -70,6 +69,23 @@ def run(command: list[str], cwd: Path | None = None) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def target_python_info(executable: str) -> dict[str, Any]:
+    code = (
+        "import json,platform,sys;"
+        "print(json.dumps({'major':sys.version_info.major,'minor':sys.version_info.minor,"
+        "'implementation':platform.python_implementation(),'architecture':platform.machine().lower(),"
+        "'platform':platform.system().lower()}))"
+    )
+    try:
+        payload = subprocess.check_output([executable, "-c", code], text=True)
+        info = json.loads(payload)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Не удалось проверить целевой Python {executable}: {exc}") from exc
+    if (info["major"], info["minor"]) < (3, 11):
+        raise RuntimeError("Целевой Python должен быть версии 3.11 или новее.")
+    return info
+
+
 def source_commit(root: Path) -> str:
     try:
         return subprocess.check_output(
@@ -95,14 +111,13 @@ def build(args: argparse.Namespace) -> Path:
     version = (root / "VERSION").read_text(encoding="utf-8").strip()
     if not version:
         raise RuntimeError("Файл VERSION пуст.")
-    if sys.version_info < (3, 11):
-        raise RuntimeError("Для сборки требуется Python 3.11 или новее.")
+    python_info = target_python_info(args.python)
 
     output_dir = args.output.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    architecture = platform.machine().lower() or "unknown"
-    system = platform.system().lower() or "unknown"
-    python_tag = f"py{sys.version_info.major}{sys.version_info.minor}"
+    architecture = python_info["architecture"] or "unknown"
+    system = python_info["platform"] or "unknown"
+    python_tag = f"py{python_info['major']}{python_info['minor']}"
     bundle_name = f"planner-solving-offline-{version}-{system}-{architecture}-{python_tag}"
 
     with tempfile.TemporaryDirectory(prefix="planner-bundle-") as temporary:
@@ -118,12 +133,11 @@ def build(args: argparse.Namespace) -> Path:
             raise RuntimeError("Отсутствует requirements-runtime.txt.")
         if args.use_wheelhouse:
             cached = args.use_wheelhouse.resolve()
-            wheels = list(cached.glob("*"))
+            wheels = list(cached.glob("*.whl"))
             if not wheels:
-                raise RuntimeError(f"В каталоге {cached} нет пакетов.")
+                raise RuntimeError(f"В каталоге {cached} нет Python-колёс .whl.")
             for path in wheels:
-                if path.is_file():
-                    shutil.copy2(path, wheelhouse / path.name)
+                shutil.copy2(path, wheelhouse / path.name)
         else:
             run([
                 args.python, "-m", "pip", "download", "--dest", str(wheelhouse),
@@ -146,9 +160,9 @@ def build(args: argparse.Namespace) -> Path:
             "platform": system,
             "architecture": architecture,
             "python": {
-                "major": sys.version_info.major,
-                "minor": sys.version_info.minor,
-                "implementation": platform.python_implementation(),
+                "major": python_info["major"],
+                "minor": python_info["minor"],
+                "implementation": python_info["implementation"],
             },
             "requirements_sha256": sha256(requirements),
             "files": {},
@@ -182,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Сборка офлайн-пакета Planner Solving")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output", type=Path, default=Path("dist"))
-    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--python", default=sys.executable, help="Python, для которого скачиваются колёса")
     parser.add_argument("--use-wheelhouse", type=Path, help="Не скачивать пакеты, использовать готовый wheelhouse")
     args = parser.parse_args(argv)
     try:
