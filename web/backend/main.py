@@ -14,7 +14,7 @@ from src.workspace_store import WorkspaceError, WorkspaceStore
 
 
 def _install_workspace_schema_guard() -> None:
-    """Prevent direct Uvicorn startup from rewriting data created by a newer app."""
+    """Prevent direct Uvicorn startup from rewriting unprepared data."""
     original_load = WorkspaceStore.load
     if getattr(original_load, "_planner_schema_guard", False):
         return
@@ -30,6 +30,11 @@ def _install_workspace_schema_guard() -> None:
                 raise WorkspaceError(
                     f"Данные имеют версию {version}, а приложение поддерживает только "
                     f"версию {CURRENT_SCHEMA_VERSION}. Установите более новую версию приложения."
+                )
+            if version < CURRENT_SCHEMA_VERSION:
+                raise WorkspaceError(
+                    f"Данные имеют версию {version} и требуют миграции до версии "
+                    f"{CURRENT_SCHEMA_VERSION}. Запустите tools.migrate или штатный start_web.sh."
                 )
         return original_load(store)
 
