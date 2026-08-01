@@ -6,7 +6,7 @@ from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 
 from src.data_loader import DataLoader
 from src.schedule_analyzer import ScheduleLayout
@@ -137,7 +137,7 @@ def build_schedule_router(context: Any, workspace_getter: Any, default_workspace
         return generate_from_session(session_id, request)
 
     @router.post("/api/upload", response_model=ScheduleUploadResponse)
-    async def upload_compatibility(files: List[Any] = context.File(...)) -> ScheduleUploadResponse:
+    async def upload_compatibility(files: List[UploadFile] = File(...)) -> ScheduleUploadResponse:
         analysis = await context.analyze_schedules(files)
         specs = [{
             "file_id": item.file_id, "group_name": item.group_name,
