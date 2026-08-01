@@ -34,6 +34,8 @@ ENV/
 output/*
 !output/.gitkeep
 input/analysis_sessions/
+data/workspaces.json
+data/workspaces.json.tmp
 *.log
 config.local.json
 
