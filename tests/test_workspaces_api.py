@@ -3,15 +3,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from web.backend import main as backend
+from web.backend.app_factory import create_app
 
 
-def configure_storage(tmp_path: Path, monkeypatch) -> TestClient:
-    input_dir = tmp_path / "input"
-    output_dir = tmp_path / "output"
-    session_root = input_dir / "analysis_sessions"
-    for directory in (input_dir, output_dir, session_root):
-        directory.mkdir(parents=True, exist_ok=True)
+def configure_storage(tmp_path: Path) -> TestClient:
     teachers = tmp_path / "teachers.json"
     teachers.write_text(json.dumps([{
         "id": 1,
@@ -21,16 +16,11 @@ def configure_storage(tmp_path: Path, monkeypatch) -> TestClient:
         "rank": "",
         "academic_degree": "к.т.н.",
     }], ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(backend, "BASE_DIR", tmp_path)
-    monkeypatch.setattr(backend, "TEACHERS_JSON", teachers)
-    monkeypatch.setattr(backend, "INPUT_DIR", input_dir)
-    monkeypatch.setattr(backend, "OUTPUT_DIR", output_dir)
-    monkeypatch.setattr(backend, "SESSION_ROOT", session_root)
-    return TestClient(backend.app)
+    return TestClient(create_app(tmp_path))
 
 
-def test_workspace_teacher_and_template_api(tmp_path: Path, monkeypatch) -> None:
-    client = configure_storage(tmp_path, monkeypatch)
+def test_workspace_teacher_and_template_api(tmp_path: Path) -> None:
+    client = configure_storage(tmp_path)
     spaces = client.get("/api/workspaces")
     assert spaces.status_code == 200
     default_space = spaces.json()[0]
@@ -75,8 +65,8 @@ def test_workspace_teacher_and_template_api(tmp_path: Path, monkeypatch) -> None
     assert exported.json()["workspace"]["name"] == "Метеорология"
 
 
-def test_teacher_csv_import(tmp_path: Path, monkeypatch) -> None:
-    client = configure_storage(tmp_path, monkeypatch)
+def test_teacher_csv_import(tmp_path: Path) -> None:
+    client = configure_storage(tmp_path)
     workspace_id = client.get("/api/workspaces").json()[0]["id"]
     csv_payload = (
         "Краткое имя;Полное ФИО;Должность;Звание;Степень\n"

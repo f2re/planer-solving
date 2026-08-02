@@ -10,12 +10,10 @@ import shutil
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import uuid
 
+from .workspace_domain import DEFAULT_COLOR, default_semester_settings
+
 CURRENT_SCHEMA_VERSION = 1
-DEFAULT_COLOR = "#315EFB"
-DEFAULT_SETTINGS = {
-    "schedule_start_date": "2026-02-10",
-    "schedule_end_date": "2026-06-30",
-}
+DEFAULT_SETTINGS = default_semester_settings()
 
 
 class MigrationError(RuntimeError):
@@ -83,7 +81,7 @@ def _workspace_from_teachers(teachers: List[Dict[str, Any]]) -> Dict[str, Any]:
         "updated_at": stamp,
         "teachers": normalized,
         "templates": [],
-        "settings": deepcopy(DEFAULT_SETTINGS),
+        "settings": default_semester_settings(),
     }
 
 
@@ -99,7 +97,10 @@ def detect_schema_version(payload: Any) -> int:
     return raw_version
 
 
-def migrate_0_to_1(payload: Any, legacy_teachers: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def migrate_0_to_1(
+    payload: Any,
+    legacy_teachers: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """Convert legacy teachers or unversioned workspace documents to schema v1."""
     if isinstance(payload, list):
         workspace = _workspace_from_teachers(payload)
@@ -126,7 +127,10 @@ def migrate_0_to_1(payload: Any, legacy_teachers: Optional[List[Dict[str, Any]]]
     }
 
 
-MIGRATIONS: Dict[int, Callable[[Any, Optional[List[Dict[str, Any]]]], Dict[str, Any]]] = {
+MIGRATIONS: Dict[
+    int,
+    Callable[[Any, Optional[List[Dict[str, Any]]]], Dict[str, Any]],
+] = {
     0: migrate_0_to_1,
 }
 
@@ -181,7 +185,11 @@ def migrate_document(
     return result, applied
 
 
-def create_backup(source: Path, backup_dir: Path, label: str = "before-migration") -> Optional[Path]:
+def create_backup(
+    source: Path,
+    backup_dir: Path,
+    label: str = "before-migration",
+) -> Optional[Path]:
     if not source.exists():
         return None
     backup_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,17 @@
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from src.workspace_domain import default_semester_settings
+
+
+def _default_start_date() -> date:
+    return date.fromisoformat(default_semester_settings()["schedule_start_date"])
+
+
+def _default_end_date() -> date:
+    return date.fromisoformat(default_semester_settings()["schedule_end_date"])
 
 
 class Teacher(BaseModel):
@@ -29,8 +40,8 @@ class TeacherUpdate(BaseModel):
 
 
 class WorkspaceSettings(BaseModel):
-    schedule_start_date: str = "2026-02-10"
-    schedule_end_date: str = "2026-06-30"
+    schedule_start_date: date = Field(default_factory=_default_start_date)
+    schedule_end_date: date = Field(default_factory=_default_end_date)
 
 
 class WorkspaceSummary(BaseModel):
