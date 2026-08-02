@@ -6,12 +6,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import time
 from typing import Any, Dict, Optional, Protocol
 import uuid
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION, MigrationError, detect_schema_version
-from src.sqlite_workspace_store import SQLiteWorkspaceStore
+from src.sqlite_workspace_store import SQLITE_SCHEMA_VERSION, SQLiteWorkspaceStore
 from src.workspace_store import WorkspaceError
 from web.backend.errors import SessionCorrupted, SessionNotFound, UploadedFileNotFound
 
@@ -168,6 +169,7 @@ class ApplicationContext:
             directory.mkdir(parents=True, exist_ok=True)
         self.sessions = AnalysisSessionStore(self.paths.session_root)
         if workspace_repository is None:
+            self._validate_storage_schema()
             self._validate_legacy_schema_before_import()
             workspace_repository = SQLiteWorkspaceStore(
                 self.paths.workspace_database,
@@ -175,6 +177,32 @@ class ApplicationContext:
                 self.paths.teachers_json,
             )
         self.workspace_repository = workspace_repository
+
+    def _validate_storage_schema(self) -> None:
+        database = self.paths.workspace_database
+        if not database.exists() or database.stat().st_size == 0:
+            return
+        try:
+            connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+            try:
+                version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error) as exc:
+            raise WorkspaceError(f"Не удалось проверить базу SQLite: {exc}") from exc
+        if quick_check != "ok":
+            raise WorkspaceError(f"База SQLite повреждена: {quick_check}")
+        if version > SQLITE_SCHEMA_VERSION:
+            raise WorkspaceError(
+                f"База SQLite имеет версию {version}, а приложение поддерживает только "
+                f"версию {SQLITE_SCHEMA_VERSION}. Установите более новую версию приложения."
+            )
+        if 0 < version < SQLITE_SCHEMA_VERSION:
+            raise WorkspaceError(
+                f"База SQLite имеет версию {version} и требует миграции до версии "
+                f"{SQLITE_SCHEMA_VERSION}. Запустите штатное обновление приложения."
+            )
 
     def _validate_legacy_schema_before_import(self) -> None:
         if self.paths.workspace_database.exists() or not self.paths.workspaces_json.exists():
