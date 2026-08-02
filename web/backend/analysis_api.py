@@ -97,7 +97,7 @@ async def analyze_files(context: Any, files: List[UploadFile]) -> AnalyzeRespons
         item["stored_name"] = stored_name
         try:
             item["bytes_written"] = await stream_upload(upload, stored_path)
-        except OSError:
+        except Exception:
             logger.exception("Cannot store uploaded workbook %s", original_name)
             stored_path.unlink(missing_ok=True)
             item["message"] = "Не удалось сохранить файл на сервере. Проверьте свободное место и права каталога."
