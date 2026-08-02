@@ -13,6 +13,7 @@ from src.exporter import export_to_excel
 from src.schedule_analyzer import ScheduleLayout
 from src.transformer import transform_to_teacher_grid
 from src.weekly_exporter import generate_weekly_semester_schedule
+from src.workspace_domain import default_semester_settings
 from web.backend.analysis_api import analyze_files, request_uploads
 from web.backend.app_context import ApplicationContext
 from web.backend.schemas import (
@@ -144,9 +145,10 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                 warnings=list(loader.warnings),
             )
 
-        settings = selected_workspace.get("settings", {})
-        start_date = settings.get("schedule_start_date", "2026-02-10")
-        end_date = settings.get("schedule_end_date", "2026-06-30")
+        settings = selected_workspace.get("settings") or {}
+        defaults = default_semester_settings()
+        start_date = str(settings.get("schedule_start_date") or defaults["schedule_start_date"])
+        end_date = str(settings.get("schedule_end_date") or defaults["schedule_end_date"])
         transformed = transform_to_teacher_grid(
             filtered,
             teachers,
