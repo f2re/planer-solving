@@ -54,13 +54,13 @@ export function installInteractionMarkup() {
     const previewCell = document.querySelector('.preview-table tbody td');
     if (previewCell && !previewCell.hasAttribute('data-parser-cell')) {
         previewCell.setAttribute('data-parser-cell', 'true');
-        previewCell.setAttribute(':data-row', 'row.index');
-        previewCell.setAttribute(':data-col', 'cell.column');
-        previewCell.setAttribute(':class', '[cellClass(row, cell), interactiveCellClass(row, cell)]');
-        previewCell.setAttribute('@pointerdown', 'beginRangeSelection(row.index, cell.column, $event)');
-        previewCell.setAttribute('@keydown.enter.prevent', 'selectSingleCell(row.index, cell.column)');
-        previewCell.setAttribute('@keydown.space.prevent', 'selectSingleCell(row.index, cell.column)');
-        previewCell.setAttribute(':aria-selected', 'isCellSelected(row.index, cell.column)');
+        previewCell.setAttribute('v-bind:data-row', 'row.index');
+        previewCell.setAttribute('v-bind:data-col', 'cell.column');
+        previewCell.setAttribute('v-bind:class', '[cellClass(row, cell), interactiveCellClass(row, cell)]');
+        previewCell.setAttribute('v-on:pointerdown', 'beginRangeSelection(row.index, cell.column, $event)');
+        previewCell.setAttribute('v-on:keydown.enter.prevent', 'selectSingleCell(row.index, cell.column)');
+        previewCell.setAttribute('v-on:keydown.space.prevent', 'selectSingleCell(row.index, cell.column)');
+        previewCell.setAttribute('v-bind:aria-selected', 'isCellSelected(row.index, cell.column)');
         previewCell.setAttribute('tabindex', '0');
         previewCell.setAttribute('role', 'gridcell');
     }
