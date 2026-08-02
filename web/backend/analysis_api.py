@@ -4,15 +4,16 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import time
-import uuid
 from typing import Any, Dict, List
+import uuid
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, Request, UploadFile
 from pydantic import BaseModel
 
 from src.schedule_analyzer import ScheduleAnalyzer
 from src.template_matcher import evaluate_layout, rank_candidates
-from src.workspace_store import WorkspaceError, WorkspaceNotFound, WorkspaceStore
+from web.backend.app_context import ApplicationContext
+from web.backend.errors import ApplicationError
 from web.backend.schemas import AnalysisFile, AnalyzeResponse
 
 logger = logging.getLogger(__name__)
@@ -24,13 +25,15 @@ class TemplateMatchRequest(BaseModel):
 
 
 async def request_uploads(request: Request, field_name: str = "files") -> List[UploadFile]:
-    """Parse multipart data without Starlette's default file-count ceiling."""
+    """Parse multipart data without an application file-count ceiling."""
 
-    unlimited = float("inf")
-    form = await request.form(max_files=unlimited, max_fields=unlimited)
-    files = [item for item in form.getlist(field_name) if hasattr(item, "read") and hasattr(item, "filename")]
+    form = await request.form(max_files=float("inf"), max_fields=float("inf"))
+    files = [
+        item for item in form.getlist(field_name)
+        if hasattr(item, "read") and hasattr(item, "filename")
+    ]
     if not files:
-        raise HTTPException(status_code=400, detail="Не выбраны файлы расписаний.")
+        raise ApplicationError("Не выбраны файлы расписаний.")
     return files
 
 
@@ -56,13 +59,10 @@ def _response_file(item: Dict[str, Any]) -> AnalysisFile:
     return AnalysisFile(**{key: item[key] for key in keys})
 
 
-async def analyze_files(context: Any, files: List[UploadFile]) -> AnalyzeResponse:
+async def analyze_files(context: ApplicationContext, files: List[UploadFile]) -> AnalyzeResponse:
     """Analyze any number of workbooks while keeping their payloads off RAM."""
 
-    context._cleanup_old_sessions()
-    session_id = str(uuid.uuid4())
-    session_dir = context.SESSION_ROOT / session_id
-    session_dir.mkdir(parents=True, exist_ok=False)
+    session_id, session_dir = context.sessions.create()
     analyzer = ScheduleAnalyzer()
     response_files: List[AnalysisFile] = []
     manifest_files: List[Dict[str, Any]] = []
@@ -100,7 +100,10 @@ async def analyze_files(context: Any, files: List[UploadFile]) -> AnalyzeRespons
         except Exception:
             logger.exception("Cannot store uploaded workbook %s", original_name)
             stored_path.unlink(missing_ok=True)
-            item["message"] = "Не удалось сохранить файл на сервере. Проверьте свободное место и права каталога."
+            item["message"] = (
+                "Не удалось сохранить файл на сервере. "
+                "Проверьте свободное место и права каталога."
+            )
             manifest_files.append(item)
             response_files.append(_response_file(item))
             continue
@@ -124,7 +127,10 @@ async def analyze_files(context: Any, files: List[UploadFile]) -> AnalyzeRespons
         except Exception:
             logger.exception("Cannot analyze workbook %s", original_name)
             item["status"] = "error"
-            item["message"] = "Книгу не удалось разобрать. Проверьте, что файл не повреждён и содержит таблицу Excel."
+            item["message"] = (
+                "Книгу не удалось разобрать. Проверьте, что файл не повреждён "
+                "и содержит таблицу Excel."
+            )
 
         manifest_files.append(item)
         response_files.append(_response_file(item))
@@ -134,29 +140,12 @@ async def analyze_files(context: Any, files: List[UploadFile]) -> AnalyzeRespons
         "created_at": time.time(),
         "files": manifest_files,
     }
-    context._atomic_json_write(session_dir / "manifest.json", manifest)
+    context.sessions.save_manifest(session_id, manifest)
     return AnalyzeResponse(session_id=session_id, files=response_files)
 
 
-def _install_router_before_static(app: Any, router: APIRouter) -> None:
-    static_routes, kept = [], []
-    for route in app.router.routes:
-        if route.__class__.__name__ == "Mount":
-            static_routes.append(route)
-            continue
-        methods = getattr(route, "methods", set())
-        if getattr(route, "path", None) == "/api/analyze" and "POST" in methods:
-            continue
-        kept.append(route)
-    app.router.routes[:] = kept
-    app.include_router(router)
-    app.router.routes.extend(static_routes)
-
-
-def install_analysis_api(app: Any, context: Any) -> Any:
-    """Replace the legacy buffered upload route and add template matching."""
-
-    router = APIRouter()
+def build_analysis_router(context: ApplicationContext) -> APIRouter:
+    router = APIRouter(tags=["analysis"])
 
     @router.post("/api/analyze", response_model=AnalyzeResponse)
     async def analyze_schedules(request: Request) -> AnalyzeResponse:
@@ -168,27 +157,19 @@ def install_analysis_api(app: Any, context: Any) -> Any:
         file_id: str,
         request: TemplateMatchRequest,
     ) -> Dict[str, Any]:
-        manifest = context._load_manifest(session_id)
-        item = context._manifest_file(manifest, file_id)
+        manifest = context.sessions.load_manifest(session_id)
+        item = context.sessions.manifest_file(manifest, file_id)
         analysis = item.get("analysis")
-        if not analysis:
-            raise HTTPException(status_code=400, detail="Для файла нет результатов автоматического анализа.")
+        if not isinstance(analysis, dict):
+            raise ApplicationError("Для файла нет результатов автоматического анализа.")
 
-        store = WorkspaceStore(
-            context.BASE_DIR / "data" / "workspaces.json",
-            context.TEACHERS_JSON,
+        workspace = context.workspace_repository.get_workspace(request.workspace_id)
+        teachers_path = context.sessions.write_snapshot(
+            session_id,
+            f"teachers-match-{workspace['id']}.json",
+            workspace.get("teachers", []),
         )
-        try:
-            workspace = store.get_workspace(request.workspace_id)
-        except WorkspaceNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except WorkspaceError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        session_dir = context._safe_session_dir(session_id)
-        teachers_path = session_dir / f"teachers-match-{workspace['id']}.json"
-        context._atomic_json_write(teachers_path, workspace.get("teachers", []))
-        workbook_path = context._stored_path(session_id, item)
+        workbook_path = context.sessions.stored_path(session_id, item)
         common = {
             "file_path": workbook_path,
             "teachers_path": teachers_path,
@@ -234,7 +215,7 @@ def install_analysis_api(app: Any, context: Any) -> Any:
                 )
             },
         }
-        context._atomic_json_write(session_dir / "manifest.json", manifest)
+        context.sessions.save_manifest(session_id, manifest)
         return {
             "file_id": file_id,
             "workspace_id": workspace["id"],
@@ -244,5 +225,11 @@ def install_analysis_api(app: Any, context: Any) -> Any:
             "evaluated_count": len(ranked),
         }
 
-    _install_router_before_static(app, router)
+    return router
+
+
+def install_analysis_api(app: FastAPI, context: ApplicationContext) -> FastAPI:
+    """Compatibility wrapper for extensions written before the app factory."""
+
+    app.include_router(build_analysis_router(context))
     return app
