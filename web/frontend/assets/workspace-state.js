@@ -1,5 +1,36 @@
 const { ref, reactive, computed } = Vue;
 
+function formatIsoDate(year, month, day) {
+    return [year, month, day]
+        .map((value, index) => index === 0 ? String(value) : String(value).padStart(2, '0'))
+        .join('-');
+}
+
+function defaultSemesterDates(reference = new Date()) {
+    const year = reference.getFullYear();
+    if (reference.getMonth() <= 5) {
+        return {
+            schedule_start_date: formatIsoDate(year, 2, 1),
+            schedule_end_date: formatIsoDate(year, 6, 30)
+        };
+    }
+    return {
+        schedule_start_date: formatIsoDate(year, 9, 1),
+        schedule_end_date: formatIsoDate(year + 1, 1, 31)
+    };
+}
+
+function emptyWorkspaceForm() {
+    return {
+        id: null,
+        name: '',
+        color: '#315EFB',
+        description: '',
+        ...defaultSemesterDates(),
+        is_default: false
+    };
+}
+
 export function installWorkspaceMarkup() {
     const topbar = document.querySelector('.topbar');
     if (topbar && !document.querySelector('.workspace-switcher')) {
@@ -12,6 +43,7 @@ export function installWorkspaceMarkup() {
                 <button class="btn btn-secondary btn-small" type="button" @click="openManager('teachers')">Управление</button>
             </div>`);
     }
+
     const app = document.querySelector('#app');
     if (app && !document.querySelector('.workspace-modal')) {
         app.insertAdjacentHTML('beforeend', `
@@ -59,7 +91,7 @@ export function installWorkspaceMarkup() {
               <div v-else-if="managerTab==='templates'" class="manager-grid">
                 <section>
                   <div class="manager-toolbar">
-                    <p class="manager-hint">Шаблоны хранятся на сервере и доступны с любого рабочего места.</p>
+                    <p class="manager-hint">Шаблоны хранятся в SQLite на сервере и доступны с любого рабочего места.</p>
                     <div class="button-row"><a class="btn btn-secondary btn-small" :href="templateExportUrl" download>Экспорт JSON</a><label class="btn btn-secondary btn-small">Импорт JSON<input hidden type="file" accept=".json" @change="importTemplates"></label></div>
                   </div>
                   <div class="manager-list">
@@ -106,61 +138,408 @@ export function installWorkspaceMarkup() {
 }
 
 export function createWorkspaceState(addToast, onWorkspaceChanged) {
-    const workspaces = ref([]), activeWorkspaceId = ref(localStorage.getItem('planner-workspace-id') || '');
-    const teachers = ref([]), layoutProfiles = ref([]), selectedProfile = ref(''), profileName = ref('');
-    const showTeachers = ref(false), managerOpen = ref(false), managerTab = ref('teachers');
-    const teacherBusy = ref(false), editingTeacher = ref(false), teacherSearch = ref('');
-    const teacherForm = reactive({id:null,short_name:'',full_name:'',position:'',rank:'',academic_degree:''});
-    const templateForm = reactive({id:null,name:'',description:''});
-    const workspaceForm = reactive({id:null,name:'',color:'#315EFB',description:'',schedule_start_date:'2026-02-10',schedule_end_date:'2026-06-30',is_default:false});
-    const activeWorkspace = computed(() => workspaces.value.find(x => x.id === activeWorkspaceId.value) || null);
-    const filteredTeachers = computed(() => {
-        const q = teacherSearch.value.toLocaleLowerCase('ru');
-        return q ? teachers.value.filter(t => `${t.short_name} ${t.full_name} ${t.position}`.toLocaleLowerCase('ru').includes(q)) : teachers.value;
+    const workspaces = ref([]);
+    const activeWorkspaceId = ref(localStorage.getItem('planner-workspace-id') || '');
+    const teachers = ref([]);
+    const layoutProfiles = ref([]);
+    const selectedProfile = ref('');
+    const profileName = ref('');
+    const showTeachers = ref(false);
+    const managerOpen = ref(false);
+    const managerTab = ref('teachers');
+    const teacherBusy = ref(false);
+    const editingTeacher = ref(false);
+    const teacherSearch = ref('');
+
+    const teacherForm = reactive({
+        id: null,
+        short_name: '',
+        full_name: '',
+        position: '',
+        rank: '',
+        academic_degree: ''
     });
+    const templateForm = reactive({ id: null, name: '', description: '' });
+    const workspaceForm = reactive(emptyWorkspaceForm());
+
+    const activeWorkspace = computed(
+        () => workspaces.value.find(item => item.id === activeWorkspaceId.value) || null
+    );
+    const filteredTeachers = computed(() => {
+        const query = teacherSearch.value.toLocaleLowerCase('ru');
+        if (!query) return teachers.value;
+        return teachers.value.filter(teacher =>
+            `${teacher.short_name} ${teacher.full_name} ${teacher.position}`
+                .toLocaleLowerCase('ru')
+                .includes(query)
+        );
+    });
+    const selectedTemplate = computed(() =>
+        layoutProfiles.value.find(item =>
+            item.id === selectedProfile.value || item.name === selectedProfile.value
+        ) || null
+    );
+    const templateExportUrl = computed(() => api('/templates/export'));
+    const workspaceExportUrl = computed(
+        () => activeWorkspaceId.value ? api('/export') : '#'
+    );
+
     const api = path => `/api/workspaces/${activeWorkspaceId.value}${path}`;
-    const setTheme = () => document.documentElement.style.setProperty('--primary', activeWorkspace.value?.color || '#315EFB');
+    const errorMessage = (error, fallback) => error.response?.data?.detail || fallback;
+    const setTheme = () => document.documentElement.style.setProperty(
+        '--primary',
+        activeWorkspace.value?.color || '#315EFB'
+    );
+
     const loadSpaces = async preferred => {
-        const {data} = await axios.get('/api/workspaces'); workspaces.value = data;
-        const exists = data.some(x => x.id === (preferred || activeWorkspaceId.value));
-        activeWorkspaceId.value = exists ? (preferred || activeWorkspaceId.value) : (data.find(x => x.is_default)?.id || data[0]?.id || '');
-        localStorage.setItem('planner-workspace-id', activeWorkspaceId.value); setTheme();
+        const { data } = await axios.get('/api/workspaces');
+        workspaces.value = data;
+        const target = preferred || activeWorkspaceId.value;
+        const exists = data.some(item => item.id === target);
+        activeWorkspaceId.value = exists
+            ? target
+            : (data.find(item => item.is_default)?.id || data[0]?.id || '');
+        localStorage.setItem('planner-workspace-id', activeWorkspaceId.value);
+        setTheme();
     };
+
+    const clearTemplateForm = () => Object.assign(templateForm, {
+        id: null,
+        name: '',
+        description: ''
+    });
+
     const loadData = async () => {
         if (!activeWorkspaceId.value) return;
-        const [t,p] = await Promise.all([axios.get(api('/teachers')), axios.get(api('/templates'))]);
-        teachers.value=t.data; layoutProfiles.value=p.data; selectedProfile.value=''; clearTemplateForm();
+        const [teacherResponse, templateResponse] = await Promise.all([
+            axios.get(api('/teachers')),
+            axios.get(api('/templates'))
+        ]);
+        teachers.value = teacherResponse.data;
+        layoutProfiles.value = templateResponse.data;
+        selectedProfile.value = '';
+        clearTemplateForm();
     };
+
+    const resetTeacherForm = () => {
+        Object.assign(teacherForm, {
+            id: null,
+            short_name: '',
+            full_name: '',
+            position: '',
+            rank: '',
+            academic_degree: ''
+        });
+        editingTeacher.value = false;
+    };
+
     const switchWorkspace = async id => {
-        if (!id) return; activeWorkspaceId.value=id; localStorage.setItem('planner-workspace-id',id); setTheme();
-        resetTeacherForm(); await loadData(); if (onWorkspaceChanged) onWorkspaceChanged();
-        addToast('Пространство выбрано', `Активно: ${activeWorkspace.value?.name || ''}`, 'success');
+        if (!id) return;
+        try {
+            activeWorkspaceId.value = id;
+            localStorage.setItem('planner-workspace-id', id);
+            setTheme();
+            resetTeacherForm();
+            await loadData();
+            if (onWorkspaceChanged) onWorkspaceChanged();
+            addToast(
+                'Пространство выбрано',
+                `Активно: ${activeWorkspace.value?.name || ''}`,
+                'success'
+            );
+        } catch (error) {
+            addToast('Ошибка', errorMessage(error, 'Не удалось переключить пространство.'), 'error');
+        }
     };
-    const init = async () => { try { await loadSpaces(); await loadData(); } catch(e) { addToast('Ошибка','Не удалось загрузить пространства.','error'); } };
-    const openManager = tab => { managerTab.value=tab; managerOpen.value=true; if(tab==='spaces') editWorkspace(activeWorkspace.value); };
-    const resetTeacherForm = () => { Object.assign(teacherForm,{id:null,short_name:'',full_name:'',position:'',rank:'',academic_degree:''}); editingTeacher.value=false; };
-    const editTeacher = t => { Object.assign(teacherForm,t); editingTeacher.value=true; showTeachers.value=true; };
-    const saveTeacher = async () => { teacherBusy.value=true; try { const url=teacherForm.id?api(`/teachers/${teacherForm.id}`):api('/teachers'); await axios[teacherForm.id?'put':'post'](url,teacherForm); resetTeacherForm(); await loadData(); await loadSpaces(activeWorkspaceId.value); addToast('Сохранено','Список преподавателей обновлён.','success'); } catch(e){ addToast('Ошибка',e.response?.data?.detail||'Не удалось сохранить запись.','error'); } finally { teacherBusy.value=false; } };
-    const deleteTeacher = async t => { if(!confirm(`Удалить ${t.short_name}?`))return; await axios.delete(api(`/teachers/${t.id}`)); await loadData(); await loadSpaces(activeWorkspaceId.value); };
+
+    const init = async () => {
+        try {
+            await loadSpaces();
+            await loadData();
+        } catch (error) {
+            addToast('Ошибка', errorMessage(error, 'Не удалось загрузить пространства.'), 'error');
+        }
+    };
+
+    const openManager = tab => {
+        managerTab.value = tab;
+        managerOpen.value = true;
+        if (tab === 'spaces') editWorkspace(activeWorkspace.value);
+    };
+
+    const editTeacher = teacher => {
+        Object.assign(teacherForm, teacher);
+        editingTeacher.value = true;
+        showTeachers.value = true;
+    };
+
+    const saveTeacher = async () => {
+        teacherBusy.value = true;
+        try {
+            const url = teacherForm.id
+                ? api(`/teachers/${teacherForm.id}`)
+                : api('/teachers');
+            await axios[teacherForm.id ? 'put' : 'post'](url, teacherForm);
+            resetTeacherForm();
+            await loadData();
+            await loadSpaces(activeWorkspaceId.value);
+            addToast('Сохранено', 'Список преподавателей обновлён.', 'success');
+        } catch (error) {
+            addToast('Ошибка', errorMessage(error, 'Не удалось сохранить запись.'), 'error');
+        } finally {
+            teacherBusy.value = false;
+        }
+    };
+
+    const deleteTeacher = async teacher => {
+        if (!confirm(`Удалить ${teacher.short_name}?`)) return;
+        try {
+            await axios.delete(api(`/teachers/${teacher.id}`));
+            await loadData();
+            await loadSpaces(activeWorkspaceId.value);
+            addToast('Удалено', 'Преподаватель удалён из пространства.', 'success');
+        } catch (error) {
+            addToast('Удаление', errorMessage(error, 'Не удалось удалить преподавателя.'), 'error');
+        }
+    };
+
     const teacherExportUrl = format => api(`/teachers/export?format=${format}`);
-    const templateExportUrl = computed(() => api('/templates/export'));
-    const workspaceExportUrl = computed(() => activeWorkspaceId.value ? api('/export') : '#');
-    const importFile = async (event,url,label) => { const file=event.target.files?.[0]; if(!file)return; const form=new FormData(); form.append('file',file); try { const {data}=await axios.post(url,form,{headers:{'Content-Type':'multipart/form-data'}}); await loadData(); await loadSpaces(activeWorkspaceId.value); addToast(label,`Добавлено: ${data.added ?? 1}, пропущено: ${data.skipped ?? 0}.`,'success'); } catch(e){ addToast('Ошибка импорта',e.response?.data?.detail||'Файл не импортирован.','error'); } finally { event.target.value=''; } };
-    const importTeachers = e => importFile(e,api('/teachers/import?mode=append'),'Преподаватели импортированы');
-    const importTemplates = e => importFile(e,api('/templates/import?mode=append'),'Шаблоны импортированы');
-    const clearTemplateForm = () => Object.assign(templateForm,{id:null,name:'',description:''});
-    const selectTemplateForEdit = p => { selectedProfile.value=p.name; Object.assign(templateForm,{id:p.id,name:p.name,description:p.description||''}); };
-    const saveTemplateMetadata = async () => { if(!templateForm.id)return; await axios.put(api(`/templates/${templateForm.id}`),{name:templateForm.name,description:templateForm.description}); await loadData(); addToast('Шаблон сохранён','Название и описание обновлены.','success'); };
-    const deleteTemplate = async p => { if(!confirm(`Удалить шаблон «${p.name}»?`))return; await axios.delete(api(`/templates/${p.id}`)); selectedProfile.value=''; clearTemplateForm(); await loadData(); };
-    const createTemplate = async (name,description,layout) => { const {data}=await axios.post(api('/templates'),{name,description,layout}); await loadData(); selectedProfile.value=data.name; return data; };
-    const updateTemplateLayout = async (id,layout,name,description) => { const {data}=await axios.put(api(`/templates/${id}`),{layout,name,description}); await loadData(); selectedProfile.value=data.name; return data; };
-    const selectedTemplate = computed(() => layoutProfiles.value.find(x => x.id === selectedProfile.value || x.name === selectedProfile.value) || null);
-    const newWorkspace = () => Object.assign(workspaceForm,{id:null,name:'',color:'#315EFB',description:'',schedule_start_date:'2026-02-10',schedule_end_date:'2026-06-30',is_default:false});
-    const editWorkspace = s => { if(!s)return newWorkspace(); Object.assign(workspaceForm,{id:s.id,name:s.name,color:s.color,description:s.description||'',schedule_start_date:s.settings?.schedule_start_date||'2026-02-10',schedule_end_date:s.settings?.schedule_end_date||'2026-06-30',is_default:!!s.is_default}); };
-    const saveWorkspace = async () => { const payload={name:workspaceForm.name,color:workspaceForm.color,description:workspaceForm.description,is_default:workspaceForm.is_default,settings:{schedule_start_date:workspaceForm.schedule_start_date,schedule_end_date:workspaceForm.schedule_end_date}}; try { const {data}=workspaceForm.id?await axios.put(`/api/workspaces/${workspaceForm.id}`,payload):await axios.post('/api/workspaces',payload); await loadSpaces(data.id); await loadData(); editWorkspace(activeWorkspace.value); addToast('Пространство сохранено','Настройки применены.','success'); } catch(e){ addToast('Ошибка',e.response?.data?.detail||'Не удалось сохранить пространство.','error'); } };
-    const duplicateWorkspace = async () => { const {data}=await axios.post(api('/duplicate'),{}); await loadSpaces(data.id); await loadData(); editWorkspace(activeWorkspace.value); };
-    const deleteWorkspace = async () => { if(!confirm(`Удалить пространство «${activeWorkspace.value?.name}» со всеми данными?`))return; try { await axios.delete(`/api/workspaces/${activeWorkspaceId.value}`); await loadSpaces(); await loadData(); editWorkspace(activeWorkspace.value); } catch(e){ addToast('Удаление',e.response?.data?.detail||'Не удалось удалить пространство.','error'); } };
-    const importWorkspace = async e => { const file=e.target.files?.[0]; if(!file)return; const form=new FormData(); form.append('file',file); try { const {data}=await axios.post('/api/workspaces/import',form,{headers:{'Content-Type':'multipart/form-data'}}); await loadSpaces(data.id); await loadData(); editWorkspace(activeWorkspace.value); addToast('Пространство импортировано',data.name,'success'); } catch(err){ addToast('Ошибка импорта',err.response?.data?.detail||'Файл не импортирован.','error'); } finally { e.target.value=''; } };
-    const formatDate = value => value ? new Date(value).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}) : '—';
-    return {workspaces,activeWorkspaceId,activeWorkspace,teachers,layoutProfiles,selectedProfile,selectedTemplate,profileName,showTeachers,managerOpen,managerTab,teacherBusy,editingTeacher,teacherSearch,filteredTeachers,teacherForm,templateForm,workspaceForm,init,switchWorkspace,openManager,resetTeacherForm,editTeacher,saveTeacher,deleteTeacher,teacherExportUrl,templateExportUrl,workspaceExportUrl,importTeachers,importTemplates,selectTemplateForEdit,saveTemplateMetadata,clearTemplateForm,deleteTemplate,createTemplate,updateTemplateLayout,newWorkspace,editWorkspace,saveWorkspace,duplicateWorkspace,deleteWorkspace,importWorkspace,formatDate};
+
+    const importFile = async (event, url, label) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const { data } = await axios.post(url, form, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            await loadData();
+            await loadSpaces(activeWorkspaceId.value);
+            addToast(
+                label,
+                `Добавлено: ${data.added ?? 1}, пропущено: ${data.skipped ?? 0}.`,
+                'success'
+            );
+        } catch (error) {
+            addToast('Ошибка импорта', errorMessage(error, 'Файл не импортирован.'), 'error');
+        } finally {
+            event.target.value = '';
+        }
+    };
+
+    const importTeachers = event => importFile(
+        event,
+        api('/teachers/import?mode=append'),
+        'Преподаватели импортированы'
+    );
+    const importTemplates = event => importFile(
+        event,
+        api('/templates/import?mode=append'),
+        'Шаблоны импортированы'
+    );
+
+    const selectTemplateForEdit = profile => {
+        selectedProfile.value = profile.name;
+        Object.assign(templateForm, {
+            id: profile.id,
+            name: profile.name,
+            description: profile.description || ''
+        });
+    };
+
+    const saveTemplateMetadata = async () => {
+        if (!templateForm.id) return;
+        try {
+            await axios.put(api(`/templates/${templateForm.id}`), {
+                name: templateForm.name,
+                description: templateForm.description
+            });
+            await loadData();
+            addToast('Шаблон сохранён', 'Название и описание обновлены.', 'success');
+        } catch (error) {
+            addToast('Ошибка шаблона', errorMessage(error, 'Не удалось сохранить шаблон.'), 'error');
+        }
+    };
+
+    const deleteTemplate = async profile => {
+        if (!confirm(`Удалить шаблон «${profile.name}»?`)) return;
+        try {
+            await axios.delete(api(`/templates/${profile.id}`));
+            selectedProfile.value = '';
+            clearTemplateForm();
+            await loadData();
+            addToast('Шаблон удалён', profile.name, 'success');
+        } catch (error) {
+            addToast('Удаление', errorMessage(error, 'Не удалось удалить шаблон.'), 'error');
+        }
+    };
+
+    const createTemplate = async (name, description, layout) => {
+        const { data } = await axios.post(api('/templates'), { name, description, layout });
+        await loadData();
+        selectedProfile.value = data.name;
+        return data;
+    };
+
+    const updateTemplateLayout = async (id, layout, name, description) => {
+        const { data } = await axios.put(api(`/templates/${id}`), {
+            layout,
+            name,
+            description
+        });
+        await loadData();
+        selectedProfile.value = data.name;
+        return data;
+    };
+
+    const newWorkspace = () => Object.assign(workspaceForm, emptyWorkspaceForm());
+
+    const editWorkspace = workspace => {
+        if (!workspace) {
+            newWorkspace();
+            return;
+        }
+        const defaults = defaultSemesterDates();
+        Object.assign(workspaceForm, {
+            id: workspace.id,
+            name: workspace.name,
+            color: workspace.color,
+            description: workspace.description || '',
+            schedule_start_date:
+                workspace.settings?.schedule_start_date || defaults.schedule_start_date,
+            schedule_end_date:
+                workspace.settings?.schedule_end_date || defaults.schedule_end_date,
+            is_default: Boolean(workspace.is_default)
+        });
+    };
+
+    const saveWorkspace = async () => {
+        if (workspaceForm.schedule_start_date > workspaceForm.schedule_end_date) {
+            addToast(
+                'Проверьте даты',
+                'Дата начала семестра не может быть позже даты окончания.',
+                'warning'
+            );
+            return;
+        }
+        const payload = {
+            name: workspaceForm.name,
+            color: workspaceForm.color,
+            description: workspaceForm.description,
+            is_default: workspaceForm.is_default,
+            settings: {
+                schedule_start_date: workspaceForm.schedule_start_date,
+                schedule_end_date: workspaceForm.schedule_end_date
+            }
+        };
+        try {
+            const { data } = workspaceForm.id
+                ? await axios.put(`/api/workspaces/${workspaceForm.id}`, payload)
+                : await axios.post('/api/workspaces', payload);
+            await loadSpaces(data.id);
+            await loadData();
+            editWorkspace(activeWorkspace.value);
+            addToast('Пространство сохранено', 'Настройки применены.', 'success');
+        } catch (error) {
+            addToast('Ошибка', errorMessage(error, 'Не удалось сохранить пространство.'), 'error');
+        }
+    };
+
+    const duplicateWorkspace = async () => {
+        try {
+            const { data } = await axios.post(api('/duplicate'), {});
+            await loadSpaces(data.id);
+            await loadData();
+            editWorkspace(activeWorkspace.value);
+            addToast('Пространство скопировано', data.name, 'success');
+        } catch (error) {
+            addToast('Копирование', errorMessage(error, 'Не удалось создать копию.'), 'error');
+        }
+    };
+
+    const deleteWorkspace = async () => {
+        if (!confirm(`Удалить пространство «${activeWorkspace.value?.name}» со всеми данными?`)) {
+            return;
+        }
+        try {
+            await axios.delete(`/api/workspaces/${activeWorkspaceId.value}`);
+            await loadSpaces();
+            await loadData();
+            editWorkspace(activeWorkspace.value);
+            addToast('Пространство удалено', 'Активировано основное пространство.', 'success');
+        } catch (error) {
+            addToast('Удаление', errorMessage(error, 'Не удалось удалить пространство.'), 'error');
+        }
+    };
+
+    const importWorkspace = async event => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const { data } = await axios.post('/api/workspaces/import', form, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            await loadSpaces(data.id);
+            await loadData();
+            editWorkspace(activeWorkspace.value);
+            addToast('Пространство импортировано', data.name, 'success');
+        } catch (error) {
+            addToast('Ошибка импорта', errorMessage(error, 'Файл не импортирован.'), 'error');
+        } finally {
+            event.target.value = '';
+        }
+    };
+
+    const formatDate = value => value
+        ? new Date(value).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
+        : '—';
+
+    return {
+        workspaces,
+        activeWorkspaceId,
+        activeWorkspace,
+        teachers,
+        layoutProfiles,
+        selectedProfile,
+        selectedTemplate,
+        profileName,
+        showTeachers,
+        managerOpen,
+        managerTab,
+        teacherBusy,
+        editingTeacher,
+        teacherSearch,
+        filteredTeachers,
+        teacherForm,
+        templateForm,
+        workspaceForm,
+        init,
+        switchWorkspace,
+        openManager,
+        resetTeacherForm,
+        editTeacher,
+        saveTeacher,
+        deleteTeacher,
+        teacherExportUrl,
+        templateExportUrl,
+        workspaceExportUrl,
+        importTeachers,
+        importTemplates,
+        selectTemplateForEdit,
+        saveTemplateMetadata,
+        clearTemplateForm,
+        deleteTemplate,
+        createTemplate,
+        updateTemplateLayout,
+        newWorkspace,
+        editWorkspace,
+        saveWorkspace,
+        duplicateWorkspace,
+        deleteWorkspace,
+        importWorkspace,
+        formatDate
+    };
 }
