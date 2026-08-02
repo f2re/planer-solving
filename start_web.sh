@@ -22,5 +22,11 @@ HOST="${PLANNER_HOST:-0.0.0.0}"
     --legacy-teachers "$ROOT/teachers.json" \
     --backup-dir "$BACKUP_DIR"
 
+# Импорт приложения создаёт/обновляет SQLite из проверенного JSON-зеркала.
+# Запуск сервера запрещается, если база повреждена или имеет неподдерживаемую версию.
+"$PYTHON_BIN" -m tools.healthcheck \
+    --app-root "$ROOT" \
+    --data-dir "$DATA_DIR"
+
 echo "Запуск веб-интерфейса на http://$HOST:$PORT"
 exec "$PYTHON_BIN" -m uvicorn web.backend.main:app --host "$HOST" --port "$PORT" --workers 1
