@@ -36,6 +36,9 @@ output/*
 input/analysis_sessions/
 data/workspaces.json
 data/workspaces.json.tmp
+data/planner-solving.sqlite3
+data/planner-solving.sqlite3-wal
+data/planner-solving.sqlite3-shm
 data/backups/
 backups/
 dist/
