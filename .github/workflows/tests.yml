@@ -32,8 +32,8 @@ jobs:
         run: |
           python -m py_compile \
             src/schedule_analyzer.py src/data_loader.py src/template_matcher.py \
-            src/workspace_store.py src/sqlite_workspace_store.py src/data_migrations.py \
-            tools/migrate.py tools/healthcheck.py \
+            src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \
+            src/data_migrations.py tools/migrate.py tools/healthcheck.py \
             offline/build_bundle.py offline/verify_bundle.py \
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
             web/backend/errors.py web/backend/analysis_api.py \
@@ -46,6 +46,7 @@ jobs:
           ! grep -R "exec(compile" -n web/backend
           ! grep -R "app.router.routes\[:\]" -n web/backend
           ! grep -R "WorkspaceStore.load =" -n web/backend
+          ! grep -R "class WorkspaceStore" -n src
 
       - name: Check shell scripts
         run: |
