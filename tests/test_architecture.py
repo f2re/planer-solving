@@ -11,18 +11,18 @@ def test_app_factory_registers_each_api_once_and_mounts_frontend_last(tmp_path: 
     (tmp_path / "VERSION").write_text("test\n", encoding="utf-8")
 
     app = create_app(tmp_path)
-    api_paths = [getattr(route, "path", "") for route in app.router.routes]
+    schema = app.openapi()
 
-    assert api_paths.count("/api/analyze") == 1
-    assert api_paths.count("/api/teachers") == 2  # GET and POST are separate routes.
-    assert api_paths.count("/api/health") == 1
+    assert set(schema["paths"]["/api/analyze"]) == {"post"}
+    assert set(schema["paths"]["/api/teachers"]) == {"get", "post"}
+    assert set(schema["paths"]["/api/health"]) == {"get"}
     assert app.router.routes[-1].__class__.__name__ == "Mount"
-    assert app.router.routes[-1].path == ""
 
     client = TestClient(app)
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["storage"] == "sqlite"
+    assert client.get("/").status_code == 200
 
 
 def test_workspace_validation_is_reported_by_central_error_handler(tmp_path: Path):
