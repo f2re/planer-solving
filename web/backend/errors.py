@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from src.workspace_store import WorkspaceError, WorkspaceNotFound
+from src.workspace_domain import WorkspaceError, WorkspaceNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,12 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled error for %s %s", request.method, request.url.path, exc_info=exc)
+        logger.error(
+            "Unhandled error for %s %s",
+            request.method,
+            request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         return JSONResponse(
             status_code=500,
             content=_payload(
