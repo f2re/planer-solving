@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from .data_loader import DataLoader
 from .schedule_analyzer import ScheduleLayout
+
+logger = logging.getLogger(__name__)
 
 
 def _value(item: Any, name: str, default: Any = "") -> Any:
@@ -41,7 +44,10 @@ def score_candidate(report: Mapping[str, Any], lessons: Sequence[Any]) -> Dict[s
     unique_lessons = len(signatures)
     duplicate_lessons = max(0, lesson_count - unique_lessons)
     mapped_lessons = sum(
-        1 for item in lessons if str(_value(item, "teacher", "Unknown")).strip() not in {"", "Unknown"}
+        1
+        for item in lessons
+        if str(_value(item, "teacher", "Unknown")).strip().casefold()
+        not in {"", "unknown", "none"}
     )
     unknown_teachers = max(0, lesson_count - mapped_lessons)
     subjects = {
@@ -154,10 +160,11 @@ def evaluate_layout(
             layout=normalized,
         )
         report = dict(loader.last_report)
-    except Exception as exc:  # The matcher must isolate a broken template.
+    except Exception:  # The matcher must isolate a broken template.
+        logger.exception("Cannot evaluate layout %s for %s", name, file_path)
         lessons = []
         report = {
-            "errors": [f"Шаблон не удалось проверить: {exc}"],
+            "errors": ["Шаблон не удалось проверить."],
             "warnings": [],
             "legend_entries": 0,
             "empty_week_columns": [],
