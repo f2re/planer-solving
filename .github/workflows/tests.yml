@@ -31,11 +31,12 @@ jobs:
       - name: Compile Python modules
         run: |
           python -m py_compile \
-            src/schedule_analyzer.py src/data_loader.py src/workspace_store.py src/data_migrations.py \
+            src/schedule_analyzer.py src/data_loader.py src/template_matcher.py \
+            src/workspace_store.py src/data_migrations.py \
             tools/migrate.py tools/healthcheck.py \
             offline/build_bundle.py offline/verify_bundle.py \
-            web/backend/main.py web/backend/legacy_main.py web/backend/workspace_api.py \
-            web/backend/workspace_schedule.py web/backend/schemas.py
+            web/backend/main.py web/backend/legacy_main.py web/backend/analysis_api.py \
+            web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
 
       - name: Check shell scripts
         run: |
@@ -51,6 +52,9 @@ jobs:
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/schedule-state.js
+          node --check web/frontend/assets/interaction-ui.js
+          node --check web/frontend/assets/interaction-markup.js
+          node --check web/frontend/assets/interaction-state.js
 
       - name: Build real offline bundle
         run: bash offline/build_offline_bundle.sh --output dist

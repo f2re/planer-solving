@@ -1,15 +1,15 @@
 """Workspace-aware validation and schedule generation routes."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Request
 
 from src.data_loader import DataLoader
 from src.schedule_analyzer import ScheduleLayout
+from web.backend.analysis_api import analyze_files, request_uploads
 from web.backend.schemas import (
     FileUploadDetail,
     GenerateScheduleRequest,
@@ -68,38 +68,54 @@ def build_schedule_router(context: Any, workspace_getter: Any, default_workspace
                 if report.get("errors"):
                     status, message = "error", "; ".join(report["errors"])
                 elif report.get("warnings"):
-                    status, message = "warning", f"Найдено занятий: {len(lessons)}. Требуется проверить предупреждения."
+                    status = "warning"
+                    message = f"Найдено занятий: {len(lessons)}. Требуется проверить предупреждения."
+                    lessons_all.extend(lessons)
                 else:
                     status, message = "success", f"Найдено занятий: {len(lessons)}."
-                lessons_all.extend(lessons)
+                    lessons_all.extend(lessons)
                 details.append(FileUploadDetail(
-                    file_id=spec.file_id, filename=item["filename"], status=status,
-                    message=message, lesson_count=len(lessons),
+                    file_id=spec.file_id,
+                    filename=item["filename"],
+                    status=status,
+                    message=message,
+                    lesson_count=len(lessons),
                 ))
             except Exception as exc:
                 details.append(FileUploadDetail(
-                    file_id=spec.file_id, filename=item["filename"], status="error",
-                    message=str(exc), lesson_count=0,
+                    file_id=spec.file_id,
+                    filename=item["filename"],
+                    status="error",
+                    message=str(exc),
+                    lesson_count=0,
                 ))
 
         if not lessons_all:
             return ScheduleUploadResponse(
-                status="error", message="После проверки разметки не найдено ни одного занятия.",
-                details=details, reports=reports, warnings=list(loader.warnings),
+                status="error",
+                message="После проверки разметки не найдено ни одного занятия без критических ошибок.",
+                details=details,
+                reports=reports,
+                warnings=list(loader.warnings),
             )
         filtered = [lesson for lesson in lessons_all if lesson.teacher != "Unknown"]
         if not filtered:
             return ScheduleUploadResponse(
                 status="error",
                 message="Занятия найдены, но преподаватели не определены. Проверьте активное пространство, блок дисциплин и список сотрудников.",
-                details=details, reports=reports, warnings=list(loader.warnings),
+                details=details,
+                reports=reports,
+                warnings=list(loader.warnings),
             )
 
         settings = workspace.get("settings", {})
         start_date = settings.get("schedule_start_date", "2026-02-10")
         end_date = settings.get("schedule_end_date", "2026-06-30")
         transformed = context.transform_to_teacher_grid(
-            filtered, teachers, start_date_str=start_date, end_date_str=end_date,
+            filtered,
+            teachers,
+            start_date_str=start_date,
+            end_date_str=end_date,
         )
         output_id = str(uuid.uuid4())
         filename = f"schedule_{output_id}.xlsx"
@@ -112,10 +128,12 @@ def build_schedule_router(context: Any, workspace_getter: Any, default_workspace
             weekly_filename = f"weekly_schedule_{output_id}.xlsx"
             try:
                 context.generate_weekly_semester_schedule(
-                    teachers_config=teachers, lessons=lessons_all,
+                    teachers_config=teachers,
+                    lessons=lessons_all,
                     template_path=str(weekly_template),
                     output_path=str(context.OUTPUT_DIR / weekly_filename),
-                    start_date_str=start_date, end_date_str=end_date,
+                    start_date_str=start_date,
+                    end_date_str=end_date,
                 )
             except Exception as exc:
                 weekly_filename = None
@@ -125,11 +143,17 @@ def build_schedule_router(context: Any, workspace_getter: Any, default_workspace
 
         has_attention = any(item.status != "success" for item in details) or bool(warnings)
         return ScheduleUploadResponse(
-            filename=filename, weekly_filename=weekly_filename,
+            filename=filename,
+            weekly_filename=weekly_filename,
             status="warning" if has_attention else "success",
-            message=(f"Расписание пространства «{workspace['name']}» сформировано, но часть данных требует внимания."
-                     if has_attention else f"Расписание пространства «{workspace['name']}» сформировано."),
-            details=details, warnings=warnings, reports=reports,
+            message=(
+                f"Расписание пространства «{workspace['name']}» сформировано, но часть данных требует внимания."
+                if has_attention
+                else f"Расписание пространства «{workspace['name']}» сформировано."
+            ),
+            details=details,
+            warnings=warnings,
+            reports=reports,
         )
 
     @router.post("/api/analysis/{session_id}/generate", response_model=ScheduleUploadResponse)
@@ -137,11 +161,13 @@ def build_schedule_router(context: Any, workspace_getter: Any, default_workspace
         return generate_from_session(session_id, request)
 
     @router.post("/api/upload", response_model=ScheduleUploadResponse)
-    async def upload_compatibility(files: List[UploadFile] = File(...)) -> ScheduleUploadResponse:
-        analysis = await context.analyze_schedules(files)
+    async def upload_compatibility(request: Request) -> ScheduleUploadResponse:
+        analysis = await analyze_files(context, await request_uploads(request))
         specs = [{
-            "file_id": item.file_id, "group_name": item.group_name,
-            "layout": item.analysis["layout"], "enabled": True,
+            "file_id": item.file_id,
+            "group_name": item.group_name,
+            "layout": item.analysis["layout"],
+            "enabled": True,
         } for item in analysis.files if item.analysis and item.status != "error"]
         request = GenerateScheduleRequest(files=specs, workspace_id=default_workspace_id())
         return generate_from_session(analysis.session_id, request)

@@ -49,8 +49,10 @@ _install_workspace_schema_guard()
 _core = Path(__file__).with_name("legacy_main.py")
 exec(compile(_core.read_text(encoding="utf-8"), str(_core), "exec"), globals())
 
+from web.backend.analysis_api import install_analysis_api  # noqa: E402
 from web.backend.workspace_api import install_workspace_api  # noqa: E402
 
+app = install_analysis_api(app, sys.modules[__name__])
 app = install_workspace_api(app, sys.modules[__name__])
 
 

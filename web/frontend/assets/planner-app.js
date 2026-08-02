@@ -1,10 +1,12 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
+import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 
 const { createApp, ref, onMounted } = Vue;
 
 export function mount() {
     installWorkspaceMarkup();
+    installInteractionMarkup();
     createApp({
         setup() {
             const toasts = ref([]);
@@ -22,10 +24,16 @@ export function mount() {
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
+            const interaction = createInteractionState(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId
+            );
 
-            const invalidateAfter = handler => async (...args) => {
+            const rematchAfter = handler => async (...args) => {
                 const result = await handler(...args);
                 schedule.invalidateAll();
+                await interaction.rematchTemplates({ quiet: true });
                 return result;
             };
 
@@ -34,6 +42,7 @@ export function mount() {
                 if (workspace.managerTab.value === 'spaces') {
                     workspace.editWorkspace(workspace.activeWorkspace.value);
                 }
+                await interaction.rematchTemplates({ quiet: true });
             };
 
             const deleteTeacher = async value => {
@@ -46,14 +55,16 @@ export function mount() {
                 }
                 await workspace.deleteTeacher(teacher);
                 schedule.invalidateAll();
+                await interaction.rematchTemplates({ quiet: true });
             };
 
-            const saveTeacher = invalidateAfter(workspace.saveTeacher);
-            const importTeachers = invalidateAfter(workspace.importTeachers);
-            const saveWorkspace = invalidateAfter(workspace.saveWorkspace);
-            const duplicateWorkspace = invalidateAfter(workspace.duplicateWorkspace);
-            const deleteWorkspace = invalidateAfter(workspace.deleteWorkspace);
-            const importWorkspace = invalidateAfter(workspace.importWorkspace);
+            const saveTeacher = rematchAfter(workspace.saveTeacher);
+            const importTeachers = rematchAfter(workspace.importTeachers);
+            const importTemplates = rematchAfter(workspace.importTemplates);
+            const saveWorkspace = rematchAfter(workspace.saveWorkspace);
+            const duplicateWorkspace = rematchAfter(workspace.duplicateWorkspace);
+            const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
+            const importWorkspace = rematchAfter(workspace.importWorkspace);
 
             const saveCurrentProfile = async () => {
                 const name = workspace.profileName.value.trim();
@@ -100,6 +111,7 @@ export function mount() {
             const deleteSelectedProfile = async () => {
                 if (workspace.selectedTemplate.value) {
                     await workspace.deleteTemplate(workspace.selectedTemplate.value);
+                    await interaction.rematchTemplates({ quiet: true });
                 }
             };
 
@@ -143,6 +155,7 @@ export function mount() {
             return {
                 ...workspace,
                 ...schedule,
+                ...interaction,
                 toasts,
                 addToast,
                 removeToast,
@@ -150,6 +163,7 @@ export function mount() {
                 saveTeacher,
                 deleteTeacher,
                 importTeachers,
+                importTemplates,
                 saveWorkspace,
                 duplicateWorkspace,
                 deleteWorkspace,
