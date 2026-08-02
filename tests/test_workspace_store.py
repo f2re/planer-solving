@@ -3,10 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from src.workspace_store import WorkspaceError, WorkspaceStore
+from src.sqlite_workspace_store import SQLiteWorkspaceStore
+from src.workspace_domain import WorkspaceError
 
 
-def store(tmp_path: Path) -> WorkspaceStore:
+def store(tmp_path: Path) -> SQLiteWorkspaceStore:
     legacy = tmp_path / "teachers.json"
     legacy.write_text(json.dumps([{
         "id": 1,
@@ -16,7 +17,11 @@ def store(tmp_path: Path) -> WorkspaceStore:
         "rank": "",
         "academic_degree": "к.т.н.",
     }], ensure_ascii=False), encoding="utf-8")
-    return WorkspaceStore(tmp_path / "data" / "workspaces.json", legacy)
+    return SQLiteWorkspaceStore(
+        tmp_path / "data" / "planner-solving.sqlite3",
+        tmp_path / "data" / "workspaces.json",
+        legacy,
+    )
 
 
 def test_migrates_legacy_teachers_and_scopes_data(tmp_path: Path) -> None:
