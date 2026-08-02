@@ -2,31 +2,33 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION
-from web.backend import main as backend
+from src.workspace_store import WorkspaceError
+from web.backend.app_factory import create_app
 
 
-def test_health_reports_application_and_schema_versions(tmp_path: Path, monkeypatch) -> None:
+def test_health_reports_application_and_schema_versions(tmp_path: Path) -> None:
     teachers = tmp_path / "teachers.json"
     teachers.write_text(json.dumps([
         {"id": 1, "short_name": "Иванов", "full_name": "Иванов Иван Иванович"}
     ], ensure_ascii=False), encoding="utf-8")
     (tmp_path / "VERSION").write_text("test-version\n", encoding="utf-8")
-    monkeypatch.setattr(backend, "BASE_DIR", tmp_path)
-    monkeypatch.setattr(backend, "TEACHERS_JSON", teachers)
 
-    response = TestClient(backend.app).get("/api/health")
+    response = TestClient(create_app(tmp_path)).get("/api/health")
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["app_version"] == "test-version"
     assert payload["data_schema_version"] == CURRENT_SCHEMA_VERSION
     assert payload["supported_data_schema_version"] == CURRENT_SCHEMA_VERSION
+    assert payload["storage"] == "sqlite"
     assert (tmp_path / "data" / "workspaces.json").exists()
+    assert (tmp_path / "data" / "planner-solving.sqlite3").exists()
 
 
-def test_future_schema_is_blocked_without_rewriting(tmp_path: Path, monkeypatch) -> None:
+def test_future_schema_is_blocked_without_rewriting(tmp_path: Path) -> None:
     teachers = tmp_path / "teachers.json"
     teachers.write_text("[]\n", encoding="utf-8")
     data_dir = tmp_path / "data"
@@ -40,10 +42,9 @@ def test_future_schema_is_blocked_without_rewriting(tmp_path: Path, monkeypatch)
     original = json.dumps(future, ensure_ascii=False, indent=2)
     workspace_path.write_text(original, encoding="utf-8")
     (tmp_path / "VERSION").write_text("old-app\n", encoding="utf-8")
-    monkeypatch.setattr(backend, "BASE_DIR", tmp_path)
-    monkeypatch.setattr(backend, "TEACHERS_JSON", teachers)
 
-    response = TestClient(backend.app).get("/api/health")
-    assert response.status_code == 503
-    assert "более новую версию" in response.json()["detail"]
+    with pytest.raises(WorkspaceError, match="более новую версию"):
+        create_app(tmp_path)
+
     assert workspace_path.read_text(encoding="utf-8") == original
+    assert not (data_dir / "planner-solving.sqlite3").exists()
