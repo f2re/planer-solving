@@ -54,6 +54,7 @@ export function installInteractionMarkup() {
     const previewCell = document.querySelector('.preview-table tbody td');
     if (previewCell && !previewCell.hasAttribute('data-parser-cell')) {
         previewCell.setAttribute('data-parser-cell', 'true');
+        previewCell.removeAttribute(':class');
         previewCell.setAttribute('v-bind:data-row', 'row.index');
         previewCell.setAttribute('v-bind:data-col', 'cell.column');
         previewCell.setAttribute('v-bind:class', '[cellClass(row, cell), interactiveCellClass(row, cell)]');
