@@ -12,30 +12,73 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 def _normalized_words(values: Iterable[Any]) -> List[str]:
     words: set[str] = set()
     for value in values:
-        for token in re.findall(r"[0-9a-zа-я]+", str(value or "").casefold().replace("ё", "е")):
+        for token in re.findall(
+            r"[0-9a-zа-я]+",
+            str(value or "").casefold().replace("ё", "е"),
+        ):
             if len(token) >= 2:
                 words.add(token)
     return sorted(words)
+
+
+def _integer_list(value: Any) -> List[int]:
+    result: List[int] = []
+    for item in value or []:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number not in result:
+            result.append(number)
+    return result
 
 
 def fingerprint_from_analysis(analysis: Mapping[str, Any]) -> Dict[str, Any]:
     layout = dict(analysis.get("layout") or {})
     diagnostics = analysis.get("diagnostics") or []
     sheet_names = [str(item) for item in analysis.get("sheet_names") or []]
+    week_columns = _integer_list(layout.get("week_columns"))
+    week_data_columns = _integer_list(layout.get("week_data_columns"))
+    week_numbers = _integer_list(layout.get("week_numbers"))
+    day_rows = _integer_list(layout.get("day_start_rows"))
+    pair_offsets = _integer_list(layout.get("pair_row_offsets"))
+    first_week_col = int(layout.get("first_week_col") or 0)
+    last_week_col = int(layout.get("last_week_col") or 0)
     features = {
         "sheet_count": len(sheet_names),
         "sheet_words": _normalized_words(sheet_names),
         "max_row_bucket": int(math.ceil(int(analysis.get("max_row") or 0) / 25)),
         "max_column_bucket": int(math.ceil(int(analysis.get("max_column") or 0) / 5)),
-        "week_span": max(
-            0,
-            int(layout.get("last_week_col") or 0) - int(layout.get("first_week_col") or 0),
-        ),
+        "week_span": max(0, last_week_col - first_week_col),
         "week_step": int(layout.get("week_col_step") or 0),
+        "week_column_count": len(week_columns) or (
+            max(0, (last_week_col - first_week_col) // max(1, int(layout.get("week_col_step") or 1)) + 1)
+            if first_week_col and last_week_col else 0
+        ),
+        "week_data_offset_pattern": [
+            data_col - header_col
+            for header_col, data_col in zip(week_columns, week_data_columns)
+        ],
+        "week_number_start": week_numbers[0] if week_numbers else None,
+        "week_number_end": week_numbers[-1] if week_numbers else None,
+        "allow_week_zero": bool(layout.get("allow_week_zero")),
         "day_block_rows": int(layout.get("day_block_rows") or 0),
+        "day_row_count": len(day_rows),
+        "day_gap_pattern": [right - left for left, right in zip(day_rows, day_rows[1:])],
         "pairs_per_day": int(layout.get("pairs_per_day") or 0),
+        "pair_offset_pattern": pair_offsets,
+        "code_row_offset": int(layout.get("code_row_offset") or 0),
+        "subject_row_offset": int(layout.get("subject_row_offset") or 0),
+        "room_row_offset": int(layout.get("room_row_offset") or 0),
+        "legend_data_offset": (
+            int(layout.get("legend_data_start_row") or 0)
+            - int(layout.get("legend_start_row") or 0)
+            if layout.get("legend_data_start_row") and layout.get("legend_start_row")
+            else int(layout.get("legend_data_start_offset") or 0)
+        ),
         "cell_mode": str(layout.get("cell_mode") or ""),
         "teacher_source": str(layout.get("teacher_source") or ""),
+        "teacher_role_fallback": str(layout.get("teacher_role_fallback") or "strict"),
         "has_legend": bool(layout.get("legend_start_row")),
         "diagnostic_codes": sorted({
             str(item.get("code"))
@@ -43,14 +86,22 @@ def fingerprint_from_analysis(analysis: Mapping[str, Any]) -> Dict[str, Any]:
             if isinstance(item, Mapping) and item.get("code")
         }),
     }
-    canonical = json.dumps(features, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        features,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return {
         "hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         "features": features,
     }
 
 
-def fingerprint_similarity(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> float:
+def fingerprint_similarity(
+    left: Mapping[str, Any] | None,
+    right: Mapping[str, Any] | None,
+) -> float:
     if not left or not right:
         return 0.0
     a = dict(left.get("features") or left)
@@ -61,10 +112,16 @@ def fingerprint_similarity(left: Mapping[str, Any] | None, right: Mapping[str, A
     for field, field_weight in (
         ("cell_mode", 1.5),
         ("teacher_source", 1.0),
+        ("teacher_role_fallback", 0.5),
         ("has_legend", 1.0),
-        ("week_step", 1.0),
+        ("allow_week_zero", 0.8),
+        ("week_step", 0.8),
         ("day_block_rows", 1.0),
         ("pairs_per_day", 1.0),
+        ("code_row_offset", 0.6),
+        ("subject_row_offset", 0.6),
+        ("room_row_offset", 0.6),
+        ("legend_data_offset", 0.8),
     ):
         weight += field_weight
         if a.get(field) == b.get(field):
@@ -75,14 +132,29 @@ def fingerprint_similarity(left: Mapping[str, Any] | None, right: Mapping[str, A
         ("max_row_bucket", 6, 1.0),
         ("max_column_bucket", 4, 1.0),
         ("week_span", 12, 1.0),
+        ("week_column_count", 8, 1.2),
+        ("day_row_count", 2, 1.0),
+        ("week_number_start", 2, 0.8),
+        ("week_number_end", 8, 0.8),
     ):
         weight += field_weight
-        av, bv = float(a.get(field) or 0), float(b.get(field) or 0)
-        score += field_weight * max(0.0, 1.0 - abs(av - bv) / max(1.0, tolerance))
+        av = float(a.get(field) or 0)
+        bv = float(b.get(field) or 0)
+        score += field_weight * max(
+            0.0,
+            1.0 - abs(av - bv) / max(1.0, tolerance),
+        )
 
-    for field, field_weight in (("sheet_words", 1.0), ("diagnostic_codes", 0.5)):
+    for field, field_weight in (
+        ("sheet_words", 1.0),
+        ("diagnostic_codes", 0.5),
+        ("week_data_offset_pattern", 0.8),
+        ("day_gap_pattern", 0.8),
+        ("pair_offset_pattern", 1.0),
+    ):
         weight += field_weight
-        aset, bset = set(a.get(field) or []), set(b.get(field) or [])
+        aset = set(a.get(field) or [])
+        bset = set(b.get(field) or [])
         if not aset and not bset:
             score += field_weight
         elif aset or bset:
@@ -91,7 +163,10 @@ def fingerprint_similarity(left: Mapping[str, Any] | None, right: Mapping[str, A
     return round(score / max(weight, 1.0), 4)
 
 
-def layout_candidates(template: Mapping[str, Any], sheet_names: Sequence[str]) -> List[Dict[str, Any]]:
+def layout_candidates(
+    template: Mapping[str, Any],
+    sheet_names: Sequence[str],
+) -> List[Dict[str, Any]]:
     """Return primary and matching composite sheet layouts for one template."""
 
     candidates: List[Dict[str, Any]] = []
@@ -112,7 +187,10 @@ def layout_candidates(template: Mapping[str, Any], sheet_names: Sequence[str]) -
         else:
             try:
                 expression = re.compile(pattern, re.I)
-                matched_sheet = next((name for name in sheet_names if expression.search(name)), None)
+                matched_sheet = next(
+                    (name for name in sheet_names if expression.search(name)),
+                    None,
+                )
             except re.error:
                 matched_sheet = next(
                     (name for name in sheet_names if pattern.casefold() in name.casefold()),
@@ -146,16 +224,23 @@ def best_template_layout(
     )
     selected = ranked[0]
     selected["fingerprint_similarity"] = template_similarity
-    selected["score"] = round(float(selected.get("score", 0)) + template_similarity * 25.0, 3)
+    selected["score"] = round(
+        float(selected.get("score", 0)) + template_similarity * 25.0,
+        3,
+    )
     selected["evaluated_rules"] = len(ranked)
     return selected
 
 
-def layout_diff(before: Mapping[str, Any], after: Mapping[str, Any]) -> List[Dict[str, Any]]:
+def layout_diff(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+) -> List[Dict[str, Any]]:
     keys = sorted(set(before) | set(after))
     changes = []
     for key in keys:
-        old, new = before.get(key), after.get(key)
+        old = before.get(key)
+        new = after.get(key)
         if old != new:
             changes.append({"field": key, "before": old, "after": new})
     return changes
