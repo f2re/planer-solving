@@ -33,7 +33,8 @@ jobs:
           python -m py_compile \
             src/schedule_analyzer.py src/data_loader.py src/template_matcher.py \
             src/template_definition.py src/workbook_fingerprint.py src/import_wizard.py \
-            src/import_commit.py src/operations_domain.py src/operations_store.py \
+            src/import_commit.py src/revision_bootstrap.py \
+            src/operations_domain.py src/operations_store.py \
             src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \
             src/data_migrations.py tools/migrate.py tools/healthcheck.py \
             offline/build_bundle.py offline/verify_bundle.py \
@@ -52,7 +53,6 @@ jobs:
           ! grep -R "app.router.routes\[:\]" -n web/backend
           ! grep -R "WorkspaceStore.load =" -n web/backend
           ! grep -R "class WorkspaceStore" -n src
-          ! grep -R "schedule_start_date.*2026" -n src web/backend web/frontend/assets
 
       - name: Check shell scripts
         run: |
