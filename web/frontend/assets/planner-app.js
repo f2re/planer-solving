@@ -1,6 +1,7 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
 import { createScheduleDraftState } from './schedule-draft.js';
+import { createScheduleResultCoverageState } from './schedule-result-coverage.js';
 import { installSessionDraftMarkup } from './session-draft-markup.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
@@ -51,6 +52,7 @@ export function mount() {
                 workspace.activeWorkspaceId,
                 interaction
             );
+            const scheduleResultCoverage = createScheduleResultCoverageState(schedule);
             const reactiveWorkspace = createReactiveWorkspaceState(addToast, workspace, schedule);
             workspace.loadData = reactiveWorkspace.refreshData;
             workspace.loadSpaces = reactiveWorkspace.refreshSpaces;
@@ -286,6 +288,7 @@ export function mount() {
                 // interaction functions and add persistence without disabling
                 // upload progress, template matching or range cleanup.
                 ...scheduleDraft,
+                ...scheduleResultCoverage,
                 ...sampleLayout,
                 ...platform,
                 ...reactiveWorkspace,
