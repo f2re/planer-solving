@@ -77,14 +77,17 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
     }
 
     function draftPayload() {
-        const knownIds = new Set(
+        const sessionIds = new Set(
+            schedule.analyzedFiles.value.map(item => String(item.file_id))
+        );
+        const analysableIds = new Set(
             schedule.analyzedFiles.value
                 .filter(item => item.analysis)
                 .map(item => String(item.file_id))
         );
         const layouts = {};
         const periodOverrides = {};
-        for (const fileId of knownIds) {
+        for (const fileId of analysableIds) {
             if (schedule.layouts[fileId]) layouts[fileId] = clone(schedule.layouts[fileId]);
             if (schedule.periodOverrides[fileId]) {
                 periodOverrides[fileId] = clone(schedule.periodOverrides[fileId]);
@@ -93,7 +96,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         return {
             version: DRAFT_VERSION,
             workspace_id: activeWorkspaceId.value || null,
-            selected_file_id: knownIds.has(String(schedule.selectedFileId.value || ''))
+            selected_file_id: sessionIds.has(String(schedule.selectedFileId.value || ''))
                 ? schedule.selectedFileId.value
                 : null,
             step: schedule.step.value,
@@ -157,6 +160,25 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         return saveChain;
     }
 
+    function exposeUnparsedSession({ notify = true } = {}) {
+        if (!schedule.sessionId.value || !schedule.analyzedFiles.value.length) return false;
+        if (schedule.step.value === 1) schedule.step.value = 2;
+        if (!schedule.selectedFileId.value) {
+            const preferred = schedule.analyzedFiles.value.find(item => item.analysis)
+                || schedule.analyzedFiles.value[0];
+            schedule.selectedFileId.value = preferred?.file_id || null;
+        }
+        rememberSession(schedule.sessionId.value, activeWorkspaceId.value);
+        if (notify && !schedule.analyzedFiles.value.some(item => item.analysis)) {
+            addToast(
+                'Файлы сохранены в сеансе',
+                'Автоанализ не нашёл пригодную книгу. Замените нужный файл кнопкой «Выбрать другой» — остальные данные не потеряются.',
+                'warning'
+            );
+        }
+        return true;
+    }
+
     async function restoreDraft() {
         const stored = storedSession();
         if (!stored?.session_id || schedule.sessionId.value) return { restored: false };
@@ -175,7 +197,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
                     enabled: saved ? Boolean(saved.enabled && item.analysis) : Boolean(item.analysis)
                 };
             });
-            if (!files.some(item => item.analysis)) {
+            if (!files.length) {
                 rememberSession(null);
                 draftState.value = 'idle';
                 return { restored: false };
@@ -207,8 +229,9 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
             schedule.calendarOverrides.week_day_dates ||= {};
             schedule.calendarOverrides.week_months ||= {};
 
-            const selected = files.find(item => item.file_id === draft.selected_file_id && item.analysis)
-                || files.find(item => item.analysis);
+            const selected = files.find(item => item.file_id === draft.selected_file_id)
+                || files.find(item => item.analysis)
+                || files[0];
             schedule.selectedFileId.value = selected?.file_id || null;
             schedule.result.value = draft.result || null;
             schedule.step.value = Number(draft.step) === 3 && draft.result?.filename ? 3 : 2;
@@ -228,14 +251,16 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
             draftState.value = 'saved';
             draftRestored.value = true;
             await nextTick();
-            if (schedule.step.value === 2 && schedule.selectedFileId.value) {
+            if (schedule.step.value === 2 && selected?.analysis) {
                 await schedule.loadPreview();
             }
             addToast(
                 'Работа восстановлена',
                 schedule.step.value === 3
                     ? 'Восстановлен готовый результат и исходная сессия правок.'
-                    : 'Файлы, разметка, даты и положение рабочего этапа восстановлены.',
+                    : files.some(item => item.analysis)
+                        ? 'Файлы, разметка, даты и положение рабочего этапа восстановлены.'
+                        : 'Восстановлен сеанс с неразобранными файлами. Их можно заменить по одному.',
                 'success'
             );
             return {
@@ -258,16 +283,16 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
 
     async function returnToCorrections(fileId = null) {
         schedule.step.value = 2;
-        const requested = schedule.analyzedFiles.value.find(item => item.file_id === fileId && item.analysis);
+        const requested = schedule.analyzedFiles.value.find(item => item.file_id === fileId);
         const problematic = resultProblemFiles.value
-            .map(detail => schedule.analyzedFiles.value.find(item => item.file_id === detail.file_id && item.analysis))
+            .map(detail => schedule.analyzedFiles.value.find(item => item.file_id === detail.file_id))
             .find(Boolean);
-        const target = requested || problematic || schedule.analyzedFiles.value.find(item => item.analysis);
+        const target = requested || problematic || schedule.analyzedFiles.value.find(item => item.analysis) || schedule.analyzedFiles.value[0];
         if (target) {
             schedule.selectedFileId.value = target.file_id;
             schedule.previewRegion.value = 'schedule';
             await nextTick();
-            await schedule.loadPreview();
+            if (target.analysis) await schedule.loadPreview();
         }
         await flushDraft();
     }
@@ -277,7 +302,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
     }
 
     function startFileReplacement(fileId = null) {
-        const target = fileId || schedule.currentFile.value?.file_id;
+        const target = fileId || schedule.currentFile.value?.file_id || schedule.selectedFileId.value;
         if (!target || replacementBusy.value) return;
         replacementFileId.value = target;
         nextTick(() => document.getElementById('analysis-file-replacement')?.click());
@@ -340,7 +365,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
     const originalApplyParserAction = schedule.applyParserAction;
     async function applyParserAction(action) {
         if (action?.type === 'replace_file') {
-            startFileReplacement(action.file_id || schedule.currentFile.value?.file_id);
+            startFileReplacement(action.file_id || schedule.currentFile.value?.file_id || schedule.selectedFileId.value);
             return;
         }
         if (action?.type === 'open_teacher_mapping') {
@@ -364,6 +389,20 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
     async function generate() {
         await originalGenerate();
         if (schedule.result.value?.filename) await flushDraft({ quiet: false });
+    }
+
+    const originalHandleFileInput = schedule.handleFileInput;
+    async function handleFileInput(event) {
+        await originalHandleFileInput(event);
+        exposeUnparsedSession();
+        await flushDraft();
+    }
+
+    const originalHandleDrop = schedule.handleDrop;
+    async function handleDrop(event) {
+        await originalHandleDrop(event);
+        exposeUnparsedSession();
+        await flushDraft();
     }
 
     const originalResetWorkflow = schedule.resetWorkflow;
@@ -445,6 +484,8 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         replaceAnalysisFile,
         applyParserAction,
         generate,
+        handleFileInput,
+        handleDrop,
         resetWorkflow
     };
 }
