@@ -1,6 +1,11 @@
 const { computed } = Vue;
 
-export function createScheduleDiagnosticGenerationState(addToast, schedule, scheduleDraft) {
+export function createScheduleDiagnosticGenerationState(
+    addToast,
+    schedule,
+    scheduleDraft,
+    activeWorkspaceId
+) {
     const recoverableFiles = computed(() =>
         schedule.analyzedFiles.value.filter(file => !file.analysis || file.enabled)
     );
@@ -20,7 +25,7 @@ export function createScheduleDiagnosticGenerationState(addToast, schedule, sche
         try {
             await schedule.validateAll();
             const payload = {
-                workspace_id: schedule.activeWorkspaceId?.value,
+                workspace_id: activeWorkspaceId.value,
                 allow_partial: true,
                 calendar_overrides: {
                     policy: schedule.calendarOverrides.policy,
