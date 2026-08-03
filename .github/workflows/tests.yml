@@ -78,6 +78,7 @@ jobs:
           node --check web/frontend/assets/editor-history-state.js
           node --check web/frontend/assets/history-ux.js
           node --check web/frontend/assets/history-ux-state.js
+          node --check web/frontend/assets/unified-operations.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/reactive-workspace.js
           node --check web/frontend/assets/schedule-layout-utils.js
