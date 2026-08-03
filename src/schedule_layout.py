@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 import math
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -170,6 +170,126 @@ class ScheduleLayout:
             return list(self.pair_row_offsets)
         return [index * self.pair_row_stride for index in range(self.pairs_per_day)]
 
+    def repaired(self, worksheet: Worksheet) -> Tuple["ScheduleLayout", List[Dict[str, Any]]]:
+        """Return a safe layout and a transparent list of automatic corrections.
+
+        Operator coordinates are treated as hints. Obvious inversions, invalid
+        values and out-of-sheet coordinates are repaired instead of rejecting the
+        file. Every change is returned to the UI and can still be edited in place.
+        """
+
+        fixed = ScheduleLayout.from_dict(self.to_dict())
+        repairs: List[Dict[str, Any]] = []
+        max_row = max(1, int(worksheet.max_row or 1))
+        max_col = max(1, int(worksheet.max_column or 1))
+
+        def change(field_name: str, value: Any, reason: str) -> None:
+            before = getattr(fixed, field_name)
+            if before == value:
+                return
+            setattr(fixed, field_name, value)
+            repairs.append({
+                "type": "layout_patch",
+                "field": field_name,
+                "before": before,
+                "after": value,
+                "reason": reason,
+                "blocking": False,
+            })
+
+        defaults = {
+            "weeks_row": 1,
+            "first_week_col": 1,
+            "last_week_col": max_col,
+            "week_col_step": 1,
+            "grid_start_row": 1,
+            "day_block_rows": 13,
+            "pairs_per_day": 4,
+            "pair_row_stride": 3,
+        }
+        for field_name, default in defaults.items():
+            value = value_as_int(getattr(fixed, field_name))
+            if value is None or value < 1:
+                change(field_name, default, "Недопустимое значение заменено безопасным.")
+
+        change("weeks_row", min(max(1, fixed.weeks_row), max_row), "Строка недель приведена к границам листа.")
+        change("grid_start_row", min(max(1, fixed.grid_start_row), max_row), "Начало сетки приведено к границам листа.")
+        change("first_week_col", min(max(1, fixed.first_week_col), max_col), "Первый столбец приведён к границам листа.")
+        change("last_week_col", min(max(1, fixed.last_week_col), max_col), "Последний столбец приведён к границам листа.")
+        if fixed.first_week_col > fixed.last_week_col:
+            left, right = fixed.last_week_col, fixed.first_week_col
+            change("first_week_col", left, "Перепутанные границы недель переставлены местами.")
+            change("last_week_col", right, "Перепутанные границы недель переставлены местами.")
+
+        for field_name in ("months_row", "grid_end_row", "legend_start_row", "legend_end_row", "legend_data_start_row"):
+            value = getattr(fixed, field_name)
+            if value is not None:
+                parsed = value_as_int(value)
+                change(field_name, min(max(1, parsed or 1), max_row), "Строка приведена к границам листа.")
+        for field_name in ("legend_code_col", "legend_subject_col", "legend_lecturer_col", "legend_other_col"):
+            value = getattr(fixed, field_name)
+            if value is not None:
+                parsed = value_as_int(value)
+                change(field_name, min(max(1, parsed or 1), max_col), "Столбец приведён к границам листа.")
+
+        if fixed.grid_end_row is not None and fixed.grid_end_row < fixed.grid_start_row:
+            change("grid_end_row", max_row, "Конец сетки автоматически перенесён ниже её начала.")
+        if fixed.legend_start_row and fixed.legend_end_row and fixed.legend_end_row < fixed.legend_start_row:
+            change("legend_end_row", max(fixed.legend_start_row, fixed.legend_end_row), "Границы блока дисциплин упорядочены.")
+        if fixed.legend_start_row and fixed.legend_data_start_row and fixed.legend_data_start_row <= fixed.legend_start_row:
+            change(
+                "legend_data_start_row",
+                min(max_row, fixed.legend_start_row + max(1, fixed.legend_data_start_offset)),
+                "Начало данных блока перенесено ниже заголовка.",
+            )
+
+        columns = sorted({value for value in fixed.resolved_week_columns() if 1 <= value <= max_col})
+        if not columns:
+            columns = list(range(fixed.first_week_col, fixed.last_week_col + 1, max(1, fixed.week_col_step)))
+        if not columns:
+            columns = [fixed.first_week_col]
+        change("week_columns", columns, "Точные столбцы недель восстановлены по границам листа.")
+        change("first_week_col", columns[0], "Граница синхронизирована с точными столбцами недель.")
+        change("last_week_col", columns[-1], "Граница синхронизирована с точными столбцами недель.")
+
+        data_columns = [value for value in fixed.week_data_columns if 1 <= value <= max_col]
+        if len(data_columns) != len(columns):
+            data_columns = [
+                min(max_col, max(1, column + int(fixed.week_data_col_offset or 0)))
+                for column in columns
+            ]
+        change("week_data_columns", data_columns, "Столбцы данных выровнены со столбцами учебных недель.")
+
+        minimum_week = 0 if fixed.allow_week_zero else 1
+        week_numbers = [value for value in fixed.week_numbers if minimum_week <= value <= 60]
+        if len(week_numbers) != len(columns):
+            first = week_numbers[0] if week_numbers else minimum_week
+            week_numbers = [first + index for index in range(len(columns))]
+        change("week_numbers", week_numbers, "Номера недель выровнены с числом столбцов.")
+
+        if not fixed.day_names:
+            change("day_names", list(DAY_NAMES), "Восстановлен стандартный список дней недели.")
+        day_rows = [value for value in fixed.day_start_rows if 1 <= value <= max_row]
+        if len(day_rows) != len(fixed.day_names):
+            day_rows = [
+                min(max_row, fixed.grid_start_row + index * max(1, fixed.day_block_rows))
+                for index in range(len(fixed.day_names))
+            ]
+        change("day_start_rows", day_rows, "Строки дней восстановлены по началу и высоте блока дня.")
+
+        pair_offsets = [value for value in fixed.pair_row_offsets if isinstance(value, int) and value >= 0]
+        if len(pair_offsets) != max(1, fixed.pairs_per_day):
+            pair_offsets = [index * max(1, fixed.pair_row_stride) for index in range(max(1, fixed.pairs_per_day))]
+        change("pair_row_offsets", pair_offsets, "Смещения пар восстановлены по шагу строк.")
+
+        if fixed.cell_mode not in {"row_layers", "combined_cell"}:
+            change("cell_mode", "row_layers", "Неизвестный режим заменён послойным чтением.")
+        if fixed.teacher_source not in {"legend", "schedule", "both"}:
+            change("teacher_source", "both", "Преподаватель будет искаться и в сетке, и в блоке дисциплин.")
+        if fixed.teacher_role_fallback not in {"strict", "any"}:
+            change("teacher_role_fallback", "any", "Разрешена безопасная подстановка роли преподавателя.")
+        return fixed, repairs
+
     def validate(self, worksheet: Optional[Worksheet] = None) -> List[Diagnostic]:
         result: List[Diagnostic] = []
         required = {
@@ -195,50 +315,50 @@ class ScheduleLayout:
         }
         for label, value in required.items():
             if not isinstance(value, int) or value < 1:
-                result.append(Diagnostic("error", "invalid_coordinate", f"Поле «{label}» должно быть положительным целым числом."))
+                result.append(Diagnostic("warning", "invalid_coordinate", f"Поле «{label}» будет исправлено автоматически."))
         for label, value in optional.items():
             if value is not None and (not isinstance(value, int) or value < 1):
-                result.append(Diagnostic("error", "invalid_coordinate", f"Поле «{label}» должно быть положительным целым числом."))
+                result.append(Diagnostic("warning", "invalid_coordinate", f"Поле «{label}» будет исправлено автоматически."))
         if self.first_week_col > self.last_week_col:
-            result.append(Diagnostic("error", "invalid_week_range", "Первый столбец недель расположен правее последнего."))
+            result.append(Diagnostic("warning", "invalid_week_range", "Границы недель будут переставлены местами."))
         if self.grid_end_row and self.grid_start_row > self.grid_end_row:
-            result.append(Diagnostic("error", "invalid_grid_range", "Начало сетки расположено ниже её конца."))
+            result.append(Diagnostic("warning", "invalid_grid_range", "Границы сетки будут упорядочены автоматически."))
         if self.legend_start_row and self.legend_end_row and self.legend_start_row > self.legend_end_row:
-            result.append(Diagnostic("error", "invalid_legend_range", "Начало блока дисциплин расположено ниже его конца."))
+            result.append(Diagnostic("warning", "invalid_legend_range", "Границы блока дисциплин будут упорядочены автоматически."))
         if self.legend_data_start_row and self.legend_start_row and self.legend_data_start_row <= self.legend_start_row:
-            result.append(Diagnostic("error", "invalid_legend_data", "Строка данных легенды должна располагаться ниже заголовка."))
+            result.append(Diagnostic("warning", "invalid_legend_data", "Начало данных будет перенесено ниже заголовка."))
         if self.cell_mode not in {"row_layers", "combined_cell"}:
-            result.append(Diagnostic("error", "invalid_cell_mode", "Неизвестный режим расположения занятия в ячейках."))
+            result.append(Diagnostic("warning", "invalid_cell_mode", "Режим ячеек будет заменён безопасным вариантом."))
         if self.teacher_source not in {"legend", "schedule", "both"}:
-            result.append(Diagnostic("error", "invalid_teacher_source", "Неизвестный источник преподавателя."))
+            result.append(Diagnostic("warning", "invalid_teacher_source", "Источник преподавателя будет определён автоматически."))
         if self.teacher_role_fallback not in {"strict", "any"}:
-            result.append(Diagnostic("error", "invalid_teacher_fallback", "Неизвестный режим подстановки преподавателя."))
+            result.append(Diagnostic("warning", "invalid_teacher_fallback", "Режим подстановки будет исправлен автоматически."))
         if not self.day_names:
-            result.append(Diagnostic("error", "missing_days", "Не задан список дней недели."))
+            result.append(Diagnostic("warning", "missing_days", "Будет использован стандартный список дней недели."))
         for name, values in (
             ("точные столбцы недель", self.week_columns),
             ("столбцы данных недель", self.week_data_columns),
             ("строки дней", self.day_start_rows),
         ):
             if any(not isinstance(value, int) or value < 1 for value in values):
-                result.append(Diagnostic("error", "invalid_coordinate_list", f"Поле «{name}» содержит недопустимую координату."))
+                result.append(Diagnostic("warning", "invalid_coordinate_list", f"Поле «{name}» будет очищено и восстановлено."))
         if any(not isinstance(value, int) or value < 0 for value in self.pair_row_offsets):
-            result.append(Diagnostic("error", "invalid_pair_offsets", "Смещения строк пар должны быть целыми неотрицательными числами."))
+            result.append(Diagnostic("warning", "invalid_pair_offsets", "Смещения пар будут восстановлены по шагу строк."))
         minimum_week = 0 if self.allow_week_zero else 1
         if any(not isinstance(value, int) or not minimum_week <= value <= 60 for value in self.week_numbers):
-            result.append(Diagnostic("error", "invalid_week_numbers", "Список номеров недель содержит недопустимое значение."))
+            result.append(Diagnostic("warning", "invalid_week_numbers", "Номера недель будут восстановлены последовательно."))
         if self.week_data_columns and len(self.week_data_columns) != len(self.resolved_week_columns()):
-            result.append(Diagnostic("error", "week_column_count_mismatch", "Число столбцов данных недель не совпадает с числом заголовков."))
+            result.append(Diagnostic("warning", "week_column_count_mismatch", "Столбцы данных будут выровнены со столбцами недель."))
         if self.week_numbers and len(self.week_numbers) != len(self.resolved_week_columns()):
-            result.append(Diagnostic("error", "week_number_count_mismatch", "Число номеров недель не совпадает с числом столбцов."))
+            result.append(Diagnostic("warning", "week_number_count_mismatch", "Номера недель будут выровнены со столбцами."))
         if self.day_start_rows and len(self.day_start_rows) != len(self.day_names):
-            result.append(Diagnostic("warning", "day_row_count_mismatch", "Число точных строк дней не совпадает со списком дней."))
+            result.append(Diagnostic("warning", "day_row_count_mismatch", "Строки дней будут восстановлены по высоте блока."))
         if worksheet:
             if self.weeks_row > worksheet.max_row or self.grid_start_row > worksheet.max_row:
-                result.append(Diagnostic("error", "row_out_of_range", "Координаты расписания выходят за пределы листа."))
+                result.append(Diagnostic("warning", "row_out_of_range", "Координаты будут приведены к границам листа."))
             for col in self.resolved_week_columns():
                 if col > worksheet.max_column:
-                    result.append(Diagnostic("warning", "column_out_of_range", f"Столбец недели {col} правее фактической области листа."))
+                    result.append(Diagnostic("warning", "column_out_of_range", f"Столбец {col} будет исключён из разметки."))
         return result
 
 
