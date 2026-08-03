@@ -43,7 +43,10 @@ export function installEditorWorkspaceMarkup() {
           <span class="sheet-toolbar-separator"></span>
           <button type="button" class="sheet-tool" :class="{active:liveRecalc}" @click="liveRecalc=!liveRecalc" title="Автоматический пересчёт">↻ <span>Авто</span></button>
           <button type="button" class="sheet-tool" @click="recalculateNow" :disabled="recalcState==='working'">✓ <span>Пересчитать</span></button>
-          <button type="button" class="sheet-tool save" :class="{dirty:layoutDirty}" @click="requestTemplateSave">◆ <span>{{ layoutDirty ? 'Сохранить изменения' : 'Шаблон сохранён' }}</span></button>
+          <span class="sheet-file-save-state" :class="{dirty:layoutDirty}">
+            {{ layoutDirty ? 'Изменения файла — в черновике' : 'Разметка файла сохранена' }}
+          </span>
+          <button type="button" class="sheet-tool save" @click="requestTemplateSave" title="Сохранить текущую разметку как глобальный шаблон для будущих файлов">◆ <span>Сохранить как шаблон</span></button>
           <span class="sheet-recalc-status" :class="recalcState">{{ recalcLabel }}</span>
           <button type="button" class="sheet-tool exit" @click="leaveSheetWorkspace">× <span>Выйти</span></button>
         </template>
@@ -86,18 +89,17 @@ export function installEditorWorkspaceMarkup() {
     const app = document.querySelector('#app');
     app?.insertAdjacentHTML('beforeend', `
       <div v-if="templateSaveOpen" class="template-save-backdrop" @click.self="cancelTemplateSave">
-        <section class="template-save-dialog card" role="dialog" aria-modal="true" aria-label="Сохранение разметки">
+        <section class="template-save-dialog card" role="dialog" aria-modal="true" aria-label="Сохранение шаблона">
           <div class="template-save-icon">◆</div>
           <div>
-            <h3>Сохранить рабочую разметку?</h3>
-            <p>Проверенная структура будет автоматически предложена для следующих похожих файлов.</p>
+            <h3>Сохранить глобальный шаблон?</h3>
+            <p>Текущая разметка файла уже сохранена в серверном черновике. Шаблон нужен только для автоматического применения к будущим похожим книгам.</p>
           </div>
           <label>Название шаблона<input class="control" v-model.trim="smartTemplateName" @keydown.enter.prevent="saveEditorTemplate"></label>
           <label v-if="selectedEditorTemplate">Действие<select class="control" v-model="templateSaveMode"><option value="update">Обновить «{{ selectedEditorTemplate.name }}»</option><option value="new">Сохранить новым шаблоном</option></select></label>
           <div class="template-save-actions">
-            <button type="button" class="btn btn-primary" @click="saveEditorTemplate" :disabled="templateSaving || !smartTemplateName">{{ templateSaving ? 'Сохраняем…' : 'Сохранить' }}</button>
-            <button type="button" class="btn btn-secondary" @click="cancelTemplateSave">Продолжить работу</button>
-            <button v-if="pendingEditorExit" type="button" class="btn btn-secondary" @click="leaveWithoutTemplateSave">Выйти без сохранения</button>
+            <button type="button" class="btn btn-primary" @click="saveEditorTemplate" :disabled="templateSaving || !smartTemplateName">{{ templateSaving ? 'Сохраняем…' : 'Сохранить шаблон' }}</button>
+            <button type="button" class="btn btn-secondary" @click="cancelTemplateSave">Отмена</button>
           </div>
         </section>
       </div>`);
