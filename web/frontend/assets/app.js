@@ -82,6 +82,7 @@
             boot.mounted = true;
             boot.mountedAt = Date.now();
             window.clearTimeout(watchdog);
+            document.getElementById('planner-startup-error')?.remove();
 
             // Политика пустых паролей не должна задерживать основной интерфейс.
             // Даже если вспомогательный модуль повреждён, Vue уже смонтирован.
