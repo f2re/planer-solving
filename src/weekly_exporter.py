@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from copy import copy
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import openpyxl
 from openpyxl.styles import Alignment, Font
 
 from src.data_loader import Lesson
+from src.schedule_period import (
+    DAY_NAMES,
+    MONTH_GENITIVE,
+    ResolvedScheduleCalendar,
+    resolve_schedule_calendar,
+)
 
 
 def get_week_dates(start_date: datetime, week_num: int) -> List[datetime]:
@@ -47,19 +53,23 @@ def generate_weekly_semester_schedule(
     output_path: str,
     start_date_str: str,
     end_date_str: str,
+    *,
+    period_reports: Optional[Sequence[Mapping[str, Any]]] = None,
+    resolved_calendar: Optional[ResolvedScheduleCalendar] = None,
 ) -> None:
-    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+    calendar = resolved_calendar or resolve_schedule_calendar(
+        lessons,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
+        period_reports=period_reports,
+    )
 
     template_wb = openpyxl.load_workbook(template_path)
     template_ws = template_wb.active
     output_wb = openpyxl.Workbook()
     output_wb.remove(output_wb.active)
 
-    weeks = _configured_weeks(start_date, end_date)
-    if any(getattr(item, "week", None) == 0 for item in lessons):
-        weeks.insert(0, 0)
-
+    weeks = list(calendar.weeks)
     day_map = {"Пн": 0, "Вт": 1, "Ср": 2, "Чт": 3, "Пт": 4, "Сб": 5}
     schedule_grid: Dict[tuple[int, str, int, int], List[Lesson]] = {}
     for lesson in lessons:
@@ -94,10 +104,14 @@ def generate_weekly_semester_schedule(
             if row in template_ws.row_dimensions:
                 worksheet.row_dimensions[row].height = template_ws.row_dimensions[row].height
 
-        for day_index, day in enumerate(get_week_dates(start_date, week_num)):
+        for day_index, day_name in enumerate(DAY_NAMES):
+            day = calendar.date_for(week_num, day_name)
+            if day is None:
+                continue
             column = 5 + day_index
             worksheet.cell(row=11, column=column).value = (
-                f"{day_names_full[day_index]}\n({day.strftime('%d.%m')})"
+                f"{day_names_full[day_index]}\n"
+                f"({day.strftime('%d.%m')} · {MONTH_GENITIVE[day.month]})"
             )
             worksheet.cell(row=11, column=column).alignment = Alignment(
                 wrapText=True,
