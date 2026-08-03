@@ -1,3 +1,5 @@
+import { installUnifiedOperationsMarkup } from './unified-operations.js';
+
 export function installEditorWorkspaceMarkup() {
     const grid = document.querySelector('.workflow-grid');
     if (!grid || document.querySelector('.sheet-command-bar')) return;
@@ -135,4 +137,6 @@ export function installEditorWorkspaceMarkup() {
         'beforeend',
         '<button v-if="userForm.id" type="button" class="btn btn-secondary" @click="clearUserPassword">Сбросить пароль</button>'
     );
+
+    installUnifiedOperationsMarkup();
 }
