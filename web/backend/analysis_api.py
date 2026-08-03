@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+import shutil
 import time
 from typing import Any, Dict, List
 import uuid
@@ -175,9 +176,10 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         """Replace one workbook as a file+manifest transaction.
 
         The new payload is parsed before touching the active file. The previous
-        file is moved to a private backup, the manifest is committed atomically,
-        and a failure before that commit restores the previous bytes. Cleanup
-        after a successful commit is deliberately non-fatal.
+        bytes are snapshotted while the active path remains present, the new
+        workbook is installed with one atomic replace, and a failure before the
+        manifest commit restores the previous bytes. Cleanup after a successful
+        commit is deliberately non-fatal.
         """
 
         uploads = await request_uploads(request)
@@ -214,9 +216,6 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                 status_code=409,
                 code="replacement_source_path",
             )
-        # Keep the existing internal name when possible. This leaves the
-        # manifest path valid even during a process interruption between the
-        # file swap and the atomic JSON commit.
         final_name = old_name or f"{file_id}{extension}"
         final_path = (session_dir / final_name).resolve()
         if final_path.parent != session_dir:
@@ -249,7 +248,10 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                 ) from exc
 
             if old_path and old_path.is_file():
-                os.replace(old_path, backup)
+                try:
+                    os.link(old_path, backup)
+                except OSError:
+                    shutil.copy2(old_path, backup)
                 backup_created = True
             os.replace(temporary, final_path)
             replacement_installed = True
@@ -285,8 +287,6 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                 draft["saved_at"] = time.time()
             manifest["updated_at"] = time.time()
 
-            # Validate the response before committing metadata. A pydantic
-            # failure here is still safely rollbackable.
             response = _response_file(item)
             context.sessions.save_manifest(session_id, manifest)
             manifest_committed = True
@@ -294,8 +294,6 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         except Exception:
             if not manifest_committed:
                 if backup_created and backup.is_file() and old_path is not None:
-                    # Replacing the destination restores the previous file even
-                    # if the newly installed file cannot be unlinked separately.
                     os.replace(backup, old_path)
                     backup_created = False
                 elif replacement_installed:
@@ -310,10 +308,6 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                 try:
                     backup.unlink(missing_ok=True)
                 except OSError:
-                    # The active file and manifest already agree. A stale
-                    # private backup is harmless and can be removed by session
-                    # cleanup; it must never turn a successful replacement into
-                    # an apparent failure or trigger rollback.
                     logger.warning("Cannot remove committed replacement backup: %s", backup, exc_info=True)
 
     @router.post("/api/analysis/{session_id}/files/{file_id}/match-templates")
