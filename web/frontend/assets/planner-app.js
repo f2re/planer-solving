@@ -7,6 +7,7 @@ import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-lay
 import { createReactiveWorkspaceState } from './reactive-workspace.js';
 import { installEditorWorkspaceMarkup, createEditorWorkspaceState } from './editor-workspace.js';
 import { createSessionFileActions } from './session-file-actions.js';
+import { createTeacherMappingState } from './teacher-mapping-state.js';
 
 const { createApp, ref, onMounted } = Vue;
 
@@ -55,6 +56,11 @@ export function mount() {
                 platform
             );
             const sessionFiles = createSessionFileActions(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId
+            );
+            const teacherMapping = createTeacherMappingState(
                 addToast,
                 schedule,
                 workspace.activeWorkspaceId
@@ -227,6 +233,7 @@ export function mount() {
             const logout = async () => {
                 reactiveWorkspace.stopReactiveSync();
                 sessionFiles.clearRemovedFileUndo();
+                teacherMapping.clearTeacherMappingState();
                 if (schedule.sessionId.value) await schedule.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
@@ -274,6 +281,7 @@ export function mount() {
                 ...reactiveWorkspace,
                 ...editor,
                 ...sessionFiles,
+                ...teacherMapping,
                 toasts,
                 addToast,
                 removeToast,
