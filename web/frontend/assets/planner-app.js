@@ -3,6 +3,8 @@ import { createScheduleState } from './schedule-state.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 import { installPlatformEnhancements } from './platform-enhancements.js';
+import { installHistoryUxMarkup } from './history-ux.js';
+import { createHistoryUxState } from './history-ux-state.js';
 import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-layout-editor.js';
 import { createReactiveWorkspaceState } from './reactive-workspace.js';
 import { installEditorWorkspaceMarkup, createEditorWorkspaceState } from './editor-workspace.js';
@@ -16,6 +18,7 @@ export function mount() {
     installWorkspaceMarkup();
     installInteractionMarkup();
     installPlatformMarkup();
+    installHistoryUxMarkup();
     installPlatformEnhancements();
     installSampleLayoutMarkup();
     installEditorWorkspaceMarkup();
@@ -50,6 +53,7 @@ export function mount() {
             );
             const sampleLayout = createSampleLayoutState(addToast, schedule);
             const platform = createPlatformState(addToast, workspace, schedule);
+            const historyUx = createHistoryUxState();
             const editor = createEditorWorkspaceState(
                 addToast,
                 schedule,
@@ -303,6 +307,7 @@ export function mount() {
                 sessionFiles.clearRemovedFileUndo();
                 teacherMapping.clearTeacherMappingState();
                 editorHistory.resetEditorHistory();
+                historyUx.closeHistoryFileDecisions();
                 if (schedule.sessionId.value) await schedule.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
@@ -322,6 +327,7 @@ export function mount() {
                         data.message,
                         data.status === 'success' ? 'success' : 'warning'
                     );
+                    historyUx.closeHistoryFileDecisions();
                     await platform.selectOperationsTab('history');
                 } catch (error) {
                     addToast(
@@ -347,6 +353,7 @@ export function mount() {
                 ...interaction,
                 ...sampleLayout,
                 ...platform,
+                ...historyUx,
                 ...reactiveWorkspace,
                 ...editor,
                 ...editorHistory,
