@@ -34,3 +34,20 @@ def test_parser_documentation_promises_recovery_and_in_place_corrections():
     assert "Сбросить вид" in guide
     assert "диагностический Excel" in recovery
     assert "недел" in audit.lower()
+
+
+def test_session_draft_documentation_covers_refresh_result_return_and_replacement():
+    root = Path(__file__).parents[1]
+    guide = (root / "docs" / "OPERATOR_GUIDE.md").read_text(encoding="utf-8")
+    draft = (root / "docs" / "SESSION_DRAFT_RECOVERY.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    for source in (guide, draft, readme):
+        assert "24 час" in source
+        assert "Замен" in source or "замен" in source
+        assert "чернов" in source.lower()
+    assert "F5" in guide
+    assert "Вернуться к файлам и правкам" in guide
+    assert "GET  /api/analysis/{session_id}" in draft
+    assert "POST /api/analysis/{session_id}/files/{file_id}/replace" in draft
+    assert "блокировка формирования при критических ошибках" not in readme
+    assert "SESSION_DRAFT_RECOVERY.md" in readme
