@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import time
 from typing import Any, Dict, List
@@ -24,6 +25,7 @@ from web.backend.schemas import AnalysisFile, AnalyzeResponse
 
 logger = logging.getLogger(__name__)
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+SUPPORTED_EXTENSIONS = {".xlsx", ".xlsm"}
 
 
 class TemplateMatchRequest(BaseModel):
@@ -65,6 +67,16 @@ def _response_file(item: Dict[str, Any]) -> AnalysisFile:
     return AnalysisFile(**{key: item[key] for key in keys})
 
 
+def _analysis_status(analysis: Dict[str, Any]) -> tuple[str, str]:
+    status = "success" if float(analysis.get("confidence") or 0) >= 0.55 else "warning"
+    message = (
+        "Структура определена автоматически."
+        if status == "success"
+        else "Структура определена с низкой уверенностью; её можно исправить на текущем экране."
+    )
+    return status, message
+
+
 async def analyze_files(context: ApplicationContext, files: List[UploadFile]) -> AnalyzeResponse:
     """Analyze any number of workbooks while keeping their payloads off RAM."""
 
@@ -88,7 +100,7 @@ async def analyze_files(context: ApplicationContext, files: List[UploadFile]) ->
             "bytes_written": 0,
         }
 
-        if extension not in {".xlsx", ".xlsm"}:
+        if extension not in SUPPORTED_EXTENSIONS:
             await upload.close()
             item["message"] = (
                 "Поддерживаются .xlsx и .xlsm. Старый формат .xls необходимо "
@@ -125,18 +137,13 @@ async def analyze_files(context: ApplicationContext, files: List[UploadFile]) ->
             analysis = analyzer.analyze(str(stored_path)).to_dict()
             analysis["fingerprint"] = fingerprint_from_analysis(analysis)
             item["analysis"] = analysis
-            item["status"] = "success" if analysis["confidence"] >= 0.55 else "warning"
-            item["message"] = (
-                "Структура определена автоматически."
-                if item["status"] == "success"
-                else "Структура определена с низкой уверенностью; требуется ручная проверка."
-            )
+            item["status"], item["message"] = _analysis_status(analysis)
         except Exception:
             logger.exception("Cannot analyze workbook %s", original_name)
             item["status"] = "error"
             item["message"] = (
-                "Книгу не удалось разобрать. Проверьте, что файл не повреждён "
-                "и содержит таблицу Excel."
+                "Книгу не удалось разобрать. Её можно заменить отдельно, "
+                "не удаляя остальные файлы текущего сеанса."
             )
 
         manifest_files.append(item)
@@ -158,6 +165,100 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
     @router.post("/api/analyze", response_model=AnalyzeResponse)
     async def analyze_schedules(request: Request) -> AnalyzeResponse:
         return await analyze_files(context, await request_uploads(request))
+
+    @router.post("/api/analysis/{session_id}/files/{file_id}/replace", response_model=AnalysisFile)
+    async def replace_analysis_file(
+        session_id: str,
+        file_id: str,
+        request: Request,
+    ) -> AnalysisFile:
+        """Atomically replace one workbook while preserving every other draft item."""
+
+        uploads = await request_uploads(request)
+        if len(uploads) != 1:
+            for upload in uploads:
+                await upload.close()
+            raise ApplicationError(
+                "Для замены выберите ровно один Excel-файл.",
+                status_code=400,
+                code="replacement_file_count",
+            )
+        upload = uploads[0]
+        original_name = Path(upload.filename or "schedule.xlsx").name
+        extension = Path(original_name).suffix.lower()
+        if extension not in SUPPORTED_EXTENSIONS:
+            await upload.close()
+            raise ApplicationError(
+                "Для замены поддерживаются только .xlsx и .xlsm.",
+                status_code=415,
+                code="replacement_file_type",
+            )
+
+        manifest = context.sessions.load_manifest(session_id)
+        item = context.sessions.manifest_file(manifest, file_id)
+        session_dir = context.sessions.path(session_id)
+        temporary = session_dir / f".replacement-{file_id}-{uuid.uuid4().hex}{extension}"
+        try:
+            written = await stream_upload(upload, temporary)
+            if not written:
+                raise ApplicationError(
+                    "Выбранный файл пуст. Прежний файл сохранён.",
+                    status_code=422,
+                    code="replacement_empty",
+                )
+            try:
+                analysis = ScheduleAnalyzer().analyze(str(temporary)).to_dict()
+                analysis["fingerprint"] = fingerprint_from_analysis(analysis)
+            except Exception as exc:
+                logger.info("Replacement workbook is not readable: %s", original_name, exc_info=True)
+                raise ApplicationError(
+                    "Новый файл не удалось разобрать. Прежний файл и все правки сохранены.",
+                    status_code=422,
+                    code="replacement_unreadable",
+                ) from exc
+
+            final_name = f"{file_id}{extension}"
+            final_path = session_dir / final_name
+            old_name = str(item.get("stored_name") or "")
+            old_path = (session_dir / old_name).resolve() if old_name else None
+            os.replace(temporary, final_path)
+            if old_path and old_path != final_path.resolve() and old_path.parent == session_dir:
+                old_path.unlink(missing_ok=True)
+
+            item.update({
+                "filename": original_name,
+                "group_name": item.get("group_name") or Path(original_name).stem,
+                "stored_name": final_name,
+                "status": _analysis_status(analysis)[0],
+                "message": "Файл заменён без потери остальных данных сеанса.",
+                "analysis": analysis,
+                "bytes_written": written,
+                "replaced_at": time.time(),
+            })
+            item.pop("template_match", None)
+
+            draft = manifest.get("draft")
+            if isinstance(draft, dict):
+                (draft.get("layouts") or {}).pop(file_id, None)
+                (draft.get("period_overrides") or {}).pop(file_id, None)
+                states = draft.setdefault("files", [])
+                state = next((value for value in states if value.get("file_id") == file_id), None)
+                if state is None:
+                    state = {"file_id": file_id}
+                    states.append(state)
+                state.update({
+                    "enabled": True,
+                    "group_name": str(item.get("group_name") or Path(original_name).stem),
+                })
+                draft["selected_file_id"] = file_id
+                draft["step"] = 2
+                draft["result"] = None
+                draft["saved_at"] = time.time()
+            manifest["updated_at"] = time.time()
+            context.sessions.save_manifest(session_id, manifest)
+            return _response_file(item)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @router.post("/api/analysis/{session_id}/files/{file_id}/match-templates")
     def match_templates(
