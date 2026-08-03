@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Проверка окружения службы Planner Solving")
     parser.add_argument("--app-root", type=Path, default=Path.cwd())
     parser.add_argument("--shared-dir", type=Path)
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="дополнительно создать FastAPI-приложение; применять после миграции данных",
+    )
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
@@ -49,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         "python_version": ".".join(map(str, sys.version_info[:3])),
         "prefix": sys.prefix,
         "base_prefix": sys.base_prefix,
+        "full": bool(args.full),
         "modules": {},
     }
 
@@ -89,20 +95,21 @@ def main(argv: list[str] | None = None) -> int:
             expected = app_root / name
         _writable_directory(expected, errors)
 
-    previous_base = os.environ.get("PLANNER_BASE_DIR")
-    os.environ["PLANNER_BASE_DIR"] = str(app_root)
-    try:
-        from web.backend.app_factory import create_app
+    if args.full:
+        previous_base = os.environ.get("PLANNER_BASE_DIR")
+        os.environ["PLANNER_BASE_DIR"] = str(app_root)
+        try:
+            from web.backend.app_factory import create_app
 
-        app = create_app(app_root)
-        details["routes"] = len(app.routes)
-    except Exception as exc:  # pragma: no cover - exercised by broken installations
-        errors.append(f"Приложение не создаётся: {exc}")
-    finally:
-        if previous_base is None:
-            os.environ.pop("PLANNER_BASE_DIR", None)
-        else:
-            os.environ["PLANNER_BASE_DIR"] = previous_base
+            app = create_app(app_root)
+            details["routes"] = len(app.routes)
+        except Exception as exc:  # pragma: no cover - exercised by broken installations
+            errors.append(f"Приложение не создаётся: {exc}")
+        finally:
+            if previous_base is None:
+                os.environ.pop("PLANNER_BASE_DIR", None)
+            else:
+                os.environ["PLANNER_BASE_DIR"] = previous_base
 
     details["ok"] = not errors
     details["errors"] = errors
@@ -115,10 +122,14 @@ def main(argv: list[str] | None = None) -> int:
             for error in errors:
                 print(f"- {error}", file=sys.stderr)
         else:
+            suffix = (
+                f", маршрутов {details.get('routes', 0)}"
+                if args.full
+                else ", без открытия базы"
+            )
             print(
                 "Окружение службы исправно: "
-                f"Python {details['python_version']}, модулей {len(REQUIRED_MODULES)}, "
-                f"маршрутов {details.get('routes', 0)}."
+                f"Python {details['python_version']}, модулей {len(REQUIRED_MODULES)}{suffix}."
             )
         for warning in warnings:
             print(f"Предупреждение: {warning}", file=sys.stderr)
