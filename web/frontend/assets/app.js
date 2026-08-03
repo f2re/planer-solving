@@ -20,7 +20,8 @@
         '/assets/operator-flow.css',
         '/assets/session-file-actions.css',
         '/assets/session-draft.css',
-        '/assets/history-ux.css'
+        '/assets/history-ux.css',
+        '/assets/unified-operations.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
@@ -81,12 +82,14 @@
     Promise.allSettled([
         import('/assets/operator-flow.js'),
         import('/assets/planner-app.js'),
-        import('/assets/session-draft-runtime.js')
+        import('/assets/session-draft-runtime.js'),
+        import('/assets/unified-operations.js')
     ])
         .then(results => {
             const operatorFlowResult = results[0];
             const applicationResult = results[1];
             const draftRuntimeResult = results[2];
+            const unifiedOperationsResult = results[3];
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
 
             const operatorFlow = operatorFlowResult.status === 'fulfilled'
@@ -103,6 +106,13 @@
                 console.warn('[planner] server draft runtime was not loaded', draftRuntimeResult.reason);
             }
 
+            const unifiedOperations = unifiedOperationsResult.status === 'fulfilled'
+                ? unifiedOperationsResult.value
+                : {};
+            if (unifiedOperationsResult.status !== 'fulfilled') {
+                console.warn('[planner] unified operations center was not loaded', unifiedOperationsResult.reason);
+            }
+
             operatorFlow.installOperatorFlowMarkup?.();
             const application = applicationResult.value;
             if (typeof application.mount !== 'function') {
@@ -111,6 +121,7 @@
             application.mount();
             operatorFlow.installOperatorFlowRuntime?.();
             draftRuntime.installSessionDraftRuntime?.();
+            unifiedOperations.installUnifiedOperationsRuntime?.();
 
             boot.mounted = true;
             boot.mountedAt = Date.now();
