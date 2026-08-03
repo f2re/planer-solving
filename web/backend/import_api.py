@@ -21,6 +21,7 @@ from src.import_wizard import (
     parse_workspace_source,
 )
 from src.operations_domain import AuthenticatedUser, PermissionDenied
+from src.revision_bootstrap import ensure_template_revisions
 from web.backend.analysis_api import stream_upload
 from web.backend.app_context import ApplicationContext
 from web.backend.auth import operator_dependency
@@ -73,12 +74,7 @@ def _public_job(job: Dict[str, Any], row_limit: int = 200) -> Dict[str, Any]:
 
 
 def _review_evaluation(context: ApplicationContext, job: Dict[str, Any]) -> Dict[str, Any]:
-    """Return detailed reviewed rows even after commit replaced evaluation statistics.
-
-    A committed import stores its authoritative commit result in ``evaluation_json``.
-    The immutable source rows and mapping remain available, so the human-readable
-    report can always be regenerated without touching persistent workspace data.
-    """
+    """Return detailed reviewed rows even after commit stored final statistics."""
 
     evaluation = dict(job.get("evaluation") or {})
     rows = list(evaluation.get("rows") or [])
@@ -252,7 +248,7 @@ def build_import_router(context: ApplicationContext) -> APIRouter:
         else:
             source_rows = (job.get("source") or {}).get("rows") or []
             created = context.workspace_repository.import_workspace(source_rows[0])
-            context.operations.ensure_template_revisions(created["id"])
+            ensure_template_revisions(context.operations)
             result = {
                 "added": 1,
                 "updated": 0,
