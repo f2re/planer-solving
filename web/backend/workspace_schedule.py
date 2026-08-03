@@ -14,6 +14,7 @@ from openpyxl.styles import Alignment, Font
 
 from src.data_loader import DataLoader
 from src.exporter import export_to_excel
+from src.operator_issues import attach_operator_issues
 from src.schedule_analyzer import ScheduleLayout
 from src.schedule_period import resolve_schedule_calendar
 from src.transformer import transform_to_teacher_grid
@@ -98,6 +99,38 @@ def _collect_corrections(reports: List[Dict[str, Any]], calendar_report: Mapping
     return result
 
 
+def _teacher_overrides(values: Mapping[str, Any] | None) -> Dict[str, str]:
+    raw = dict(values or {}).get("teacher_overrides") or {}
+    if not isinstance(raw, Mapping):
+        return {}
+    return {
+        str(subject).strip(): str(teacher).strip()
+        for subject, teacher in raw.items()
+        if str(subject).strip() and str(teacher).strip()
+    }
+
+
+def _record_teacher_overrides(
+    loader: DataLoader,
+    report: Dict[str, Any],
+    requested: Mapping[str, str],
+    applied: Mapping[str, str],
+) -> None:
+    report["teacher_overrides"] = dict(requested)
+    for subject, requested_teacher in requested.items():
+        resolved_teacher = applied.get(loader._subject_key(subject))
+        if not resolved_teacher:
+            continue
+        report.setdefault("auto_repairs", []).append({
+            "type": "teacher_override",
+            "subject": subject,
+            "before": "Не назначен",
+            "after": resolved_teacher,
+            "reason": f"Оператор назначил преподавателя для дисциплины «{subject}».",
+            "blocking": False,
+        })
+
+
 def _export_recovery_workbook(
     output_path: Path,
     *,
@@ -138,30 +171,37 @@ def _export_recovery_workbook(
         cell.alignment = Alignment(wrap_text=True, vertical="top")
 
     issues = workbook.create_sheet("Замечания и решения")
-    issues.append(["Файл", "Уровень", "Код", "Сообщение", "Решение"])
+    issues.append(["Файл", "Уровень", "Код", "Сообщение", "Решение по умолчанию", "Влияние", "Действие оператора"])
     for report in reports:
+        structured = report.get("issues") or []
+        if structured:
+            for item in structured:
+                issues.append([
+                    report.get("file"),
+                    item.get("severity", "attention"),
+                    item.get("code", "parser"),
+                    item.get("message", ""),
+                    item.get("default_decision", "Принято автоматически"),
+                    item.get("impact", "Формирование не блокируется"),
+                    (item.get("action") or {}).get("label") or "Необязательно",
+                ])
+            continue
         for message in report.get("errors") or []:
-            issues.append([report.get("file"), "пропущено", "technical", message, "Открыть или заменить только этот файл"])
+            issues.append([report.get("file"), "technical", "technical", message, "Пропустить только этот файл", "Остальные файлы обрабатываются", "Заменить файл"])
         for message in report.get("warnings") or []:
-            issues.append([report.get("file"), "предупреждение", "parser", message, "Исправить на экране разметки или оставить автоисправление"])
-        for item in (report.get("period") or {}).get("issues") or []:
-            issues.append([
-                report.get("file"),
-                item.get("severity", "предупреждение"),
-                item.get("code", "period"),
-                item.get("message", ""),
-                (item.get("action") or {}).get("label") or "Принято автоматически",
-            ])
+            issues.append([report.get("file"), "attention", "parser", message, "Оставить безопасный вариант", "Формирование не блокируется", "Уточнить в редакторе"])
     for item in (calendar_report or {}).get("issues") or []:
         issues.append([
             "Все файлы",
-            item.get("severity", "предупреждение"),
+            item.get("severity", "attention"),
             item.get("code", "calendar"),
             item.get("message", ""),
-            (item.get("action") or {}).get("label") or "Принято автоматически",
+            "Использовать фактическую последовательность дат",
+            "Календарь записывается в отчёт без блокировки",
+            (item.get("action") or {}).get("label") or "Необязательно",
         ])
     issues.freeze_panes = "A2"
-    for column, width in zip("ABCDE", (28, 18, 30, 90, 55)):
+    for column, width in zip("ABCDEFG", (28, 18, 30, 78, 58, 58, 42)):
         issues.column_dimensions[column].width = width
     for cell in issues[1]:
         cell.font = Font(bold=True)
@@ -194,15 +234,21 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
         item = context.sessions.manifest_file(manifest, payload.file_id)
         selected_workspace = workspace(payload.workspace_id)
         loader = DataLoader(str(teacher_file(session_id, selected_workspace)))
+        requested_overrides = _teacher_overrides(payload.period_overrides)
+        applied_overrides = loader.set_teacher_overrides(requested_overrides)
         lessons = loader.load_group_schedule(
             str(context.sessions.stored_path(session_id, item)),
             group_name=payload.group_name,
             layout=ScheduleLayout.from_dict(payload.layout),
             period_overrides=payload.period_overrides,
         )
-        report = loader.last_report
-        report["generation_allowed"] = True
+        report = dict(loader.last_report)
+        for warning in loader.warnings:
+            if warning not in report.setdefault("warnings", []):
+                report["warnings"].append(warning)
+        _record_teacher_overrides(loader, report, requested_overrides, applied_overrides)
         report["used_lesson_count"] = len(lessons)
+        attach_operator_issues(report)
         status = "success" if lessons and not report.get("warnings") and not report.get("errors") else "warning"
         return ValidateLayoutResponse(status=status, report=report)
 
@@ -241,6 +287,9 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             if selected_match.get("template_id"):
                 selected_templates.append(selected_match)
             try:
+                requested_overrides = _teacher_overrides(spec.period_overrides)
+                applied_overrides = loader.set_teacher_overrides(requested_overrides)
+                warning_start = len(loader.warnings)
                 lessons = loader.load_group_schedule(
                     str(stored_path),
                     group_name=spec.group_name,
@@ -248,6 +297,10 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     period_overrides=spec.period_overrides,
                 )
                 report = dict(loader.last_report)
+                for warning in loader.warnings[warning_start:]:
+                    if warning not in report.setdefault("warnings", []):
+                        report["warnings"].append(warning)
+                _record_teacher_overrides(loader, report, requested_overrides, applied_overrides)
                 report["period_overrides"] = dict(spec.period_overrides)
                 report["source_archive"] = _archive_source(
                     context,
@@ -255,6 +308,7 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     spec.file_id,
                     stored_path,
                 )
+                attach_operator_issues(report)
                 reports.append(report)
                 lessons_all.extend(lessons)
                 warning_count = len(_all_report_messages(report))
@@ -311,6 +365,7 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     )
                 except OSError:
                     pass
+                attach_operator_issues(error_report)
                 reports.append(error_report)
                 repository.record_processing_file(
                     run_id,
@@ -377,7 +432,6 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     "rank": "—",
                     "academic_degree": "",
                 })
-
             transformed = transform_to_teacher_grid(
                 lessons_all,
                 export_teachers,
