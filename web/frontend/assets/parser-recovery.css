@@ -1,0 +1,148 @@
+.period-recovery-section {
+    display: grid;
+    gap: 12px;
+    border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--line));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--primary) 3%, #fff);
+}
+.recovery-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.recovery-heading h3 { margin-bottom: 3px; }
+.recovery-heading .section-note { margin: 0; }
+.recovery-ready {
+    flex: 0 0 auto;
+    padding: 6px 9px;
+    border: 1px solid color-mix(in srgb, var(--success) 28%, var(--line));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--success) 8%, #fff);
+    color: var(--success);
+    font-size: 10px;
+    font-weight: 850;
+    white-space: nowrap;
+}
+.repair-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--success) 24%, var(--line));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--success) 5%, #fff);
+}
+.repair-card > div { display: grid; gap: 2px; }
+.repair-card b { font-size: 12px; }
+.repair-card small { color: var(--muted); font-size: 10px; }
+.recovery-issue-list { display: grid; gap: 7px; }
+.recovery-issue {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    padding: 9px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+}
+.recovery-issue.info {
+    border-color: color-mix(in srgb, var(--success) 22%, var(--line));
+    background: color-mix(in srgb, var(--success) 3%, #fff);
+}
+.recovery-issue.warning {
+    border-color: color-mix(in srgb, var(--warning) 30%, var(--line));
+    background: color-mix(in srgb, var(--warning) 4%, #fff);
+}
+.recovery-issue-symbol {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--surface-soft);
+    color: var(--primary);
+    font-weight: 900;
+}
+.recovery-issue.warning .recovery-issue-symbol { color: var(--warning); }
+.recovery-issue > div { display: grid; gap: 2px; min-width: 0; }
+.recovery-issue b { font-size: 11px; line-height: 1.4; }
+.recovery-issue small { color: var(--muted); font-size: 9px; }
+.recovery-actions { flex-wrap: wrap; }
+.period-editor-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.period-editor-toggle > span:first-child { display: grid; gap: 2px; }
+.period-editor-toggle b { font-size: 12px; }
+.period-editor-toggle small { color: var(--muted); font-size: 10px; }
+.period-editor-toggle > span:last-child { color: var(--primary); font-size: 10px; font-weight: 800; }
+.period-editor { display: grid; gap: 11px; animation: parser-recovery-in .18s ease-out; }
+.period-policy { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 750; }
+.period-table-wrap {
+    max-height: 280px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+}
+.date-table-wrap { max-height: 360px; }
+.period-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+}
+.period-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 7px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-soft);
+    color: var(--muted);
+    text-align: left;
+    font-weight: 800;
+}
+.period-table td { padding: 6px 7px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.period-table tr:last-child td { border-bottom: 0; }
+.period-table .control { min-height: 36px; padding: 6px 8px; font-size: 10px; }
+.period-empty {
+    padding: 10px;
+    border: 1px dashed var(--line-strong);
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.5;
+}
+.validation-summary.error {
+    border-color: color-mix(in srgb, var(--warning) 34%, var(--line));
+    background: color-mix(in srgb, var(--warning) 5%, #fff);
+}
+@keyframes parser-recovery-in {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 760px) {
+    .recovery-heading,
+    .repair-card { align-items: stretch; flex-direction: column; }
+    .recovery-ready { align-self: flex-start; }
+    .recovery-issue { grid-template-columns: auto minmax(0, 1fr); }
+    .recovery-issue .btn { grid-column: 1 / -1; width: 100%; }
+    .period-table { min-width: 520px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .period-editor { animation: none; }
+}
