@@ -73,9 +73,14 @@ EOF
     exit 0
 fi
 
-"$PYTHON" -m tools.service_preflight \
-    --app-root "$CURRENT" \
-    --shared-dir "$INSTALL_ROOT/shared"
+# Выпуски 2.13+ имеют отдельную быструю проверку зависимостей. При откате
+# на более старый выпуск стабильный запуск остаётся совместимым и использует
+# прежний healthcheck вместо падения на отсутствующем модуле.
+if [[ -f "$CURRENT/tools/service_preflight.py" ]]; then
+    "$PYTHON" -m tools.service_preflight \
+        --app-root "$CURRENT" \
+        --shared-dir "$INSTALL_ROOT/shared"
+fi
 
 if [[ "$MODE" == "check" ]]; then
     "$PYTHON" -m tools.healthcheck \
