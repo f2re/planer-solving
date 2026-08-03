@@ -6,16 +6,54 @@ warn() { printf '[planner] ПРЕДУПРЕЖДЕНИЕ: %s\n' "$*" >&2; }
 die() { printf '[planner] ОШИБКА: %s\n' "$*" >&2; exit 2; }
 
 require_command() {
-    if [[ "$1" == */* ]]; then
-        [[ -x "$1" ]] || die "Не найдена исполняемая команда: $1"
+    local command_name="${1:-}"
+    [[ -n "$command_name" ]] || die "Не задано имя команды."
+    if [[ "$command_name" == */* ]]; then
+        [[ -f "$command_name" && -x "$command_name" ]] || \
+            die "Не найдена исполняемая команда (ожидался файл, а не каталог): $command_name"
     else
-        command -v "$1" >/dev/null 2>&1 || die "Не найдена команда: $1"
+        command -v -- "$command_name" >/dev/null 2>&1 || die "Не найдена команда: $command_name"
     fi
 }
 
+canonical_path() {
+    if command -v readlink >/dev/null 2>&1; then
+        readlink -f -- "$1" 2>/dev/null || printf '%s\n' "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+hash_file() {
+    local path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command -v busybox >/dev/null 2>&1 && busybox sha256sum "$path" >/dev/null 2>&1; then
+        busybox sha256sum "$path" | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$path" | awk '{print $NF}'
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 - "$path" <<'PY'
+import hashlib, sys
+h = hashlib.sha256()
+with open(sys.argv[1], 'rb') as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        h.update(chunk)
+print(h.hexdigest())
+PY
+    else
+        die "Не найдены sha256sum, busybox, openssl или python3 для SHA-256."
+    fi
+}
+
+read_assignment() {
+    local path="$1" key="$2"
+    [[ -f "$path" ]] || return 0
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*$/\1/p" "$path" | tail -n 1
+}
+
 atomic_link() {
-    local target="$1" link="$2"
-    local temporary="${link}.next.$$"
+    local target="$1" link="$2" temporary="${2}.next.$$"
     rm -f "$temporary"
     ln -s "$target" "$temporary"
     mv -Tf "$temporary" "$link" 2>/dev/null || mv -f "$temporary" "$link"
@@ -24,10 +62,11 @@ atomic_link() {
 run_as_user() {
     local user="$1"
     shift
-    if [[ $EUID -ne 0 || -z "$user" || "$user" == "root" || "$user" == "$(id -un)" ]]; then
+    if [[ $EUID -ne 0 || -z "$user" || "$user" == root || "$user" == "$(id -un)" ]]; then
         "$@"
         return
     fi
+    id "$user" >/dev/null 2>&1 || die "Пользователь не существует: $user"
     if command -v runuser >/dev/null 2>&1; then
         runuser -u "$user" -- "$@"
     elif command -v sudo >/dev/null 2>&1; then
@@ -41,95 +80,46 @@ run_as_user() {
     fi
 }
 
-_python_matches() {
-    local candidate="$1" expected_major="${2:-}" expected_minor="${3:-}"
-    [[ -x "$candidate" ]] || return 1
-    if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
-        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (int(sys.argv[1]), int(sys.argv[2])) else 1)' \
-            "$expected_major" "$expected_minor" >/dev/null 2>&1
+INSTALL_LOCK_MODE=""
+INSTALL_LOCK_PATH=""
+acquire_install_lock() {
+    local state_dir="$1"
+    mkdir -p "$state_dir"
+    INSTALL_LOCK_PATH="$state_dir/install.lock"
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>"$INSTALL_LOCK_PATH"
+        flock -n 9 || die "Другая установка или обновление уже выполняется: $INSTALL_LOCK_PATH"
+        INSTALL_LOCK_MODE="flock"
     else
-        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+        INSTALL_LOCK_PATH="$state_dir/install.lock.d"
+        mkdir "$INSTALL_LOCK_PATH" 2>/dev/null || \
+            die "Другая установка или обновление уже выполняется: $INSTALL_LOCK_PATH"
+        INSTALL_LOCK_MODE="mkdir"
     fi
 }
 
-resolve_python_bin() {
-    local user="${1:-}" expected_major="${2:-}" expected_minor="${3:-}" install_root="${4:-/opt/planner-solving}"
-    local candidate="" home="" version_glob=""
-
-    if [[ -n "${PYTHON_BIN:-}" ]]; then
-        candidate="$(command -v "$PYTHON_BIN" 2>/dev/null || true)"
-        [[ -z "$candidate" && -x "$PYTHON_BIN" ]] && candidate="$PYTHON_BIN"
-        _python_matches "$candidate" "$expected_major" "$expected_minor" || \
-            die "Указанный Python не подходит пакету: $PYTHON_BIN"
-        printf '%s\n' "$candidate"
-        return 0
+release_install_lock() {
+    if [[ "$INSTALL_LOCK_MODE" == mkdir && -n "$INSTALL_LOCK_PATH" ]]; then
+        rmdir "$INSTALL_LOCK_PATH" 2>/dev/null || true
     fi
+    INSTALL_LOCK_MODE=""
+}
 
-    if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
-        for candidate in \
-            "$install_root/python/bin/python${expected_major}.${expected_minor}" \
-            "$install_root/python/bin/python3" \
-            "/opt/python${expected_major}.${expected_minor}/bin/python${expected_major}.${expected_minor}" \
-            "/usr/local/bin/python${expected_major}.${expected_minor}" \
-            "/usr/bin/python${expected_major}.${expected_minor}"; do
-            if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
-                printf '%s\n' "$candidate"
-                return 0
-            fi
-        done
-        candidate="$(command -v "python${expected_major}.${expected_minor}" 2>/dev/null || true)"
-        if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    fi
-
-    if [[ -n "$user" ]]; then
-        home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6 || true)"
-    fi
-    if [[ -n "$home" && -d "$home/.pyenv/versions" ]]; then
-        if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
-            version_glob="${expected_major}.${expected_minor}*"
-        else
-            version_glob="*"
-        fi
-        while IFS= read -r candidate; do
-            if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
-                if run_as_user "$user" "$candidate" -c 'import sys; print(sys.executable)' >/dev/null 2>&1; then
-                    printf '%s\n' "$candidate"
-                    return 0
-                fi
-            fi
-        done < <(
-            find "$home/.pyenv/versions" \
-                -path "*/${version_glob}/bin/python3" \
-                \( -type f -o -type l \) 2>/dev/null | sort -Vr
-        )
-    fi
-
-    for candidate in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /usr/local/bin/python3; do
-        if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-
-    if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
-        die "Не найден Python ${expected_major}.${expected_minor}. Установите его в /usr/bin, /usr/local/bin или /opt/python${expected_major}.${expected_minor}, либо укажите --python PATH."
-    fi
-    die "Не найден Python 3.11+. Укажите путь через --python или PYTHON_BIN."
+systemd_available() {
+    command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]
 }
 
 service_stop() {
-    command -v systemctl >/dev/null 2>&1 || return 0
+    systemd_available || return 0
     systemctl stop planner-solving.service >/dev/null 2>&1 || true
     systemctl stop planner-web.service >/dev/null 2>&1 || true
 }
 
 service_start() {
-    command -v systemctl >/dev/null 2>&1 || return 0
+    systemd_available || return 1
     systemctl daemon-reload
-    systemctl enable --now planner-solving.service
+    systemctl enable planner-solving.service >/dev/null
+    systemctl restart planner-solving.service
 }
 
 set_shared_owner() {
@@ -141,9 +131,8 @@ set_shared_owner() {
 }
 
 backup_shared() {
-    local shared="$1" backup_dir="$2" label="$3"
+    local shared="$1" backup_dir="$2" label="$3" stamp archive
     mkdir -p "$backup_dir"
-    local stamp archive
     stamp="$(date +%Y%m%d-%H%M%S)"
     archive="$backup_dir/${label}-${stamp}.tar.gz"
     tar --ignore-failed-read -czf "$archive" -C "$shared" data teachers.json config.json 2>/dev/null || {
@@ -168,20 +157,16 @@ restore_shared() {
 wait_for_health() {
     local python_bin="$1" port="$2" attempts="${3:-30}"
     "$python_bin" - "$port" "$attempts" <<'PY'
-import json
-import sys
-import time
-from urllib.request import urlopen
+import json, sys, time
 from urllib.error import URLError
-
-port = int(sys.argv[1])
-attempts = int(sys.argv[2])
+from urllib.request import urlopen
+port = int(sys.argv[1]); attempts = int(sys.argv[2])
 url = f"http://127.0.0.1:{port}/api/health"
 for _ in range(attempts):
     try:
         with urlopen(url, timeout=2) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        if response.status == 200 and payload.get("status") == "ok":
+            payload = json.loads(response.read().decode('utf-8'))
+        if response.status == 200 and payload.get('status') == 'ok':
             raise SystemExit(0)
     except (OSError, URLError, ValueError, json.JSONDecodeError):
         time.sleep(1)
@@ -189,28 +174,46 @@ raise SystemExit(1)
 PY
 }
 
+port_available() {
+    local python_bin="$1" host="$2" port="$3"
+    "$python_bin" - "$host" "$port" <<'PY'
+import socket, sys
+host = sys.argv[1]
+port = int(sys.argv[2])
+probe_host = '' if host in ('0.0.0.0', '::') else host
+family = socket.AF_INET6 if ':' in probe_host else socket.AF_INET
+sock = socket.socket(family, socket.SOCK_STREAM)
+try:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((probe_host, port))
+except OSError as exc:
+    print(exc, file=sys.stderr)
+    raise SystemExit(1)
+finally:
+    sock.close()
+PY
+}
+
 write_update_state() {
     local state_path="$1" previous="$2" current="$3" backup="$4" version="$5"
-    local writer="${PYTHON_BIN:-python3}"
+    local writer="${6:-${PYTHON_BIN:-python3}}"
     "$writer" - "$state_path" "$previous" "$current" "$backup" "$version" <<'PY'
-import json
+import json, sys
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
-
 path = Path(sys.argv[1])
 payload = {
-    "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-    "previous_release": sys.argv[2] or None,
-    "current_release": sys.argv[3],
-    "backup_archive": sys.argv[4] or None,
-    "version": sys.argv[5],
+    'updated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    'previous_release': sys.argv[2] or None,
+    'current_release': sys.argv[3],
+    'backup_archive': sys.argv[4] or None,
+    'version': sys.argv[5],
 }
 path.parent.mkdir(parents=True, exist_ok=True)
-tmp = path.with_suffix(path.suffix + ".tmp")
-tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+tmp = path.with_suffix(path.suffix + '.tmp')
+tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
 tmp.replace(path)
-with (path.parent / "history.jsonl").open("a", encoding="utf-8") as stream:
-    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+with (path.parent / 'history.jsonl').open('a', encoding='utf-8') as stream:
+    stream.write(json.dumps(payload, ensure_ascii=False) + '\n')
 PY
 }

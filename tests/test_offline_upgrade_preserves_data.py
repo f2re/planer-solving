@@ -31,11 +31,18 @@ def test_backup_and_restore_keep_database_accounts_and_configuration(tmp_path: P
     assert (shared / "config.json").read_text(encoding="utf-8") == '{"port":8001}\n'
 
 
-def test_packaged_installer_is_independent_of_sudo_invoking_user():
+def test_packaged_installer_preserves_invoking_user_python_context_without_using_it_for_service():
     repository = Path(__file__).parents[1]
-    source = (repository / "offline" / "install_from_archive.sh").read_text(encoding="utf-8")
-    assert 'INSTALL_ROOT="/opt/planner-solving"' in source
-    assert 'SERVICE_USER="${SERVICE_USER:-planner-solving}"' in source
-    assert "SUDO_USER" not in source
-    assert "install_or_update.sh" in source
-    assert "planner-solving-admin" in source
+    entrypoint = (repository / "offline" / "install_from_archive.sh").read_text(encoding="utf-8")
+    internal = (repository / "offline" / "install_or_update.sh").read_text(encoding="utf-8")
+    assert 'INSTALL_ROOT="/opt/planner-solving"' in entrypoint
+    assert 'SERVICE_USER="${SERVICE_USER:-planner-solving}"' in entrypoint
+    assert "PLANNER_INVOKING_USER" in entrypoint
+    assert "PLANNER_INVOKING_HOME" in entrypoint
+    assert "PLANNER_INVOKING_VIRTUAL_ENV" in entrypoint
+    assert "PLANNER_INVOKING_PYENV_ROOT" in entrypoint
+    assert "PLANNER_INVOKING_PATH" in entrypoint
+    assert "SUDO_USER" in entrypoint
+    assert "install_or_update.sh" in entrypoint
+    assert "planner-solving-admin" in internal
+    assert "planner-solving-python" in internal
