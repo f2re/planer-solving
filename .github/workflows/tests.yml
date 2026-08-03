@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m py_compile \
             src/schedule_layout.py src/worksheet_matrix.py src/schedule_detection.py \
-            src/schedule_analyzer.py src/teacher_resolver.py src/schedule_parser_geometry.py \
+            src/schedule_analyzer.py src/teacher_resolver.py src/operator_issues.py src/schedule_parser_geometry.py \
             src/schedule_period_values.py src/schedule_period_validation.py src/schedule_calendar.py src/schedule_period.py src/data_loader.py \
             src/transformer.py src/weekly_exporter.py src/template_matcher.py \
             src/template_learning.py src/import_wizard.py src/security.py \
@@ -73,6 +73,7 @@ jobs:
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/operator-flow.js
           node --check web/frontend/assets/session-file-actions.js
+          node --check web/frontend/assets/teacher-mapping-state.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/reactive-workspace.js
           node --check web/frontend/assets/schedule-layout-utils.js
