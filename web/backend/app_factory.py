@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from web.backend.analysis_api import build_analysis_router
+from web.backend.analysis_selection_api import build_analysis_selection_router
 from web.backend.app_context import ApplicationContext, WorkspaceRepository
 from web.backend.audit_api import build_audit_router
 from web.backend.auth_api import build_auth_router
@@ -39,6 +40,7 @@ def create_app(
 
     app.include_router(build_auth_router(context))
     app.include_router(build_analysis_router(context))
+    app.include_router(build_analysis_selection_router(context))
     app.include_router(build_session_router(context))
     app.include_router(build_workspace_router(context))
     app.include_router(build_template_revision_router(context))
