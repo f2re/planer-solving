@@ -98,8 +98,12 @@ export function installOperatorFlowMarkup() {
               <p><b>По умолчанию:</b> {{ issue.default_decision }}</p>
               <small>{{ issue.impact }}</small>
             </div>
-            <button type="button" class="btn btn-secondary btn-small" @click="openAttentionIssue(issue)">
-              {{ issue.action?.label || 'Показать файл' }}
+            <button
+              type="button"
+              class="btn btn-secondary btn-small"
+              @click="issue.scope === 'teacher' ? openTeacherMapping(issue) : openAttentionIssue(issue)"
+            >
+              {{ issue.scope === 'teacher' ? 'Назначить преподавателей' : (issue.action?.label || 'Показать файл') }}
             </button>
           </article>
           <p v-if="attentionIssues.length > 8" class="attention-more">Ещё решений: {{ attentionIssues.length - 8 }}. Они доступны в соответствующих файлах и итоговом отчёте.</p>
@@ -160,6 +164,54 @@ export function installOperatorFlowMarkup() {
     const warningTitle = document.querySelector('.warning-box > strong');
     if (warningTitle) warningTitle.textContent = 'Что система решила автоматически';
 
+    const appRoot = document.querySelector('#app');
+    insertOnce(appRoot, 'beforeend', '.teacher-mapping-backdrop', `
+      <div
+        v-if="teacherMappingOpen"
+        class="modal-backdrop teacher-mapping-backdrop"
+        role="presentation"
+        @click.self="closeTeacherMapping"
+      >
+        <section class="teacher-mapping-dialog" role="dialog" aria-modal="true" aria-labelledby="teacher-mapping-title">
+          <header class="teacher-mapping-header">
+            <div>
+              <span class="eyebrow">Ручное решение</span>
+              <h2 id="teacher-mapping-title">Назначить преподавателей</h2>
+              <p>{{ currentMappingFile?.filename }} · назначения действуют для этого файла и сохраняются в истории обработки.</p>
+            </div>
+            <button type="button" class="modal-close" aria-label="Закрыть" @click="closeTeacherMapping">×</button>
+          </header>
+          <div class="teacher-mapping-default">
+            <b>Без выбора:</b> занятие останется в разделе «Не назначен» и не будет потеряно.
+          </div>
+          <label class="teacher-mapping-search">
+            <span>Найти дисциплину или назначение</span>
+            <input v-model.trim="teacherMappingSearch" class="control" type="search" placeholder="Начните вводить название">
+          </label>
+          <div class="teacher-mapping-list">
+            <article v-for="subject in filteredMappingSubjects" :key="subject" class="teacher-mapping-row">
+              <div><strong>{{ subject }}</strong><small>Все нераспознанные занятия этой дисциплины в выбранном файле</small></div>
+              <select v-model="teacherMappingDraft[subject]" class="control">
+                <option value="">Не назначен — безопасное значение</option>
+                <option v-for="teacher in teacherMappingOptions" :key="teacher.id" :value="teacher.short_name">
+                  {{ teacher.full_name || teacher.short_name }}{{ teacher.position ? ' · ' + teacher.position : '' }}
+                </option>
+              </select>
+            </article>
+            <p v-if="!filteredMappingSubjects.length" class="teacher-mapping-empty">По запросу ничего не найдено.</p>
+          </div>
+          <footer class="teacher-mapping-footer">
+            <span>После применения файл будет пересчитан. Остальные книги и их ручные правки не изменятся.</span>
+            <div>
+              <button type="button" class="btn btn-secondary" :disabled="teacherMappingBusy" @click="closeTeacherMapping">Отмена</button>
+              <button type="button" class="btn btn-primary" :disabled="teacherMappingBusy" @click="saveTeacherMapping">
+                {{ teacherMappingBusy ? 'Пересчитываем…' : 'Применить назначения' }}
+              </button>
+            </div>
+          </footer>
+        </section>
+      </div>`);
+
     const toastStack = document.querySelector('.toast-stack');
     toastStack?.setAttribute('aria-live', 'polite');
     toastStack?.setAttribute('aria-relevant', 'additions');
@@ -203,7 +255,8 @@ export function installOperatorFlowRuntime() {
 
         if (event.key === 'Escape' && !editing) {
             const close = document.querySelector(
-                '.template-save-backdrop .template-save-actions .btn-secondary, '
+                '.teacher-mapping-backdrop .modal-close, '
+                + '.template-save-backdrop .template-save-actions .btn-secondary, '
                 + '.operations-backdrop .modal-close, '
                 + '.modal-backdrop .modal-close'
             );
