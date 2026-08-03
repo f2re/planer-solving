@@ -1,3 +1,4 @@
+from pathlib import Path
 import uuid
 
 from fastapi.testclient import TestClient
@@ -170,6 +171,35 @@ def test_manifest_write_failure_restores_previous_file_and_metadata(tmp_path, mo
     assert bad.get("analysis") is None
     assert restored["draft"]["result"]["filename"] == "old.xlsx"
     assert restored["draft"]["layouts"][good_id]
+
+
+def test_backup_cleanup_failure_does_not_rollback_committed_replacement(tmp_path, monkeypatch):
+    app = create_app(tmp_path)
+    client = TestClient(app)
+    session_id, _, bad_id, old_bad_path = _session(app, tmp_path)
+    replacement = tmp_path / "replacement.xlsx"
+    _workbook(replacement, subject="Коммит уже выполнен")
+    original_unlink = Path.unlink
+
+    def fail_only_backup_cleanup(path, *args, **kwargs):
+        if path.name.startswith(".replacement-backup-"):
+            raise OSError("synthetic cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_only_backup_cleanup)
+    with replacement.open("rb") as stream:
+        response = client.post(
+            f"/api/analysis/{session_id}/files/{bad_id}/replace",
+            files={"files": (replacement.name, stream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert response.status_code == 200
+    assert load_workbook(old_bad_path, data_only=True).active["D9"].value == "Коммит уже выполнен"
+    restored = client.get(f"/api/analysis/{session_id}").json()
+    bad = next(item for item in restored["files"] if item["file_id"] == bad_id)
+    assert bad["analysis"]
+    assert restored["draft"]["result"] is None
+    # A stale private backup may remain, but the active file and manifest agree.
+    assert list(old_bad_path.parent.glob(".replacement-backup-*.bak"))
 
 
 def test_replacement_rejects_non_excel_file_without_touching_session(tmp_path):
