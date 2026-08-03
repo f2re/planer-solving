@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planner Solving — разбор расписаний</title>
+    <title>Planner Solving — рабочее место оператора</title>
     <link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
@@ -13,24 +13,24 @@
             <span class="brand-mark">П</span>
             <span>Planner Solving</span>
         </div>
-        <span class="version">операторский разбор Excel</span>
+        <span class="version">Рабочее место оператора</span>
     </header>
 
     <main class="shell">
         <div class="steps" aria-label="Этапы работы">
-            <span class="step-chip" :class="{ active: step === 1, done: step > 1 }">1 · Загрузка</span>
-            <span class="step-chip" :class="{ active: step === 2, done: step > 2 }">2 · Разметка и проверка</span>
-            <span class="step-chip" :class="{ active: step === 3 }">3 · Результат</span>
+            <span class="step-chip" :class="{ active: step === 1, done: step > 1 }">1  Исходные файлы</span>
+            <span class="step-chip" :class="{ active: step === 2, done: step > 2 }">2  Проверка и исправление</span>
+            <span class="step-chip" :class="{ active: step === 3 }">3  Готовый результат</span>
         </div>
 
         <section v-if="step === 1">
             <div class="card upload-card">
                 <div class="upload-header">
-                    <h1 class="page-title">Загрузите расписания групп</h1>
+                    <h1 class="page-title">Сформировать расписание</h1>
                     <p class="page-lead">
-                        Система сначала найдёт структуру каждого листа, затем покажет оператору
-                        строки и столбцы для проверки. Формирование результата начнётся только
-                        после контрольного разбора.
+                        Загрузите книги расписаний. Система сама выберет безопасную разметку,
+                        сформирует результат из пригодных данных и покажет решения, которые можно
+                        уточнить. Любой файл исправляется на месте без повторной загрузки остальных.
                     </p>
                 </div>
 
@@ -50,8 +50,8 @@
                 >
                     <div v-if="!uploadBusy">
                         <div class="drop-icon">📑</div>
-                        <h2>Выберите или перетащите файлы</h2>
-                        <p>Можно загрузить несколько расписаний с разной геометрией листов.</p>
+                        <h2>Добавить файлы расписаний</h2>
+                        <p>Можно выбрать несколько книг с разной структурой и оформлением.</p>
                     </div>
                     <div v-else>
                         <div class="spinner" style="margin: 0 auto 14px;"></div>
@@ -60,76 +60,9 @@
                     </div>
                 </label>
                 <div class="format-note">
-                    Поддерживаются .xlsx и .xlsm. Старые .xls необходимо сохранить в современном формате.
+                    Поддерживаются .xlsx и .xlsm. Неподдерживаемый файл не блокирует остальные и остаётся доступным для замены.
                 </div>
             </div>
-
-            <section class="card teacher-card">
-                <button class="teacher-toggle" type="button" @click="showTeachers = !showTeachers">
-                    <span>Преподаватели кафедры</span>
-                    <span>{{ showTeachers ? 'Скрыть' : teachers.length + ' записей' }}</span>
-                </button>
-                <div v-if="showTeachers" class="teacher-body">
-                    <div style="overflow:auto;">
-                        <table class="teacher-table">
-                            <thead>
-                            <tr>
-                                <th>Краткое имя</th>
-                                <th>Полное ФИО</th>
-                                <th>Должность</th>
-                                <th></th>
-                            </tr>
-                            </thead>
-                            <tbody>
-                            <tr v-for="teacher in teachers" :key="teacher.id">
-                                <td><strong>{{ teacher.short_name }}</strong></td>
-                                <td>{{ teacher.full_name }}</td>
-                                <td>{{ teacher.position || '—' }}</td>
-                                <td style="white-space:nowrap;">
-                                    <button class="btn btn-secondary btn-small" @click="editTeacher(teacher)">Изменить</button>
-                                    <button class="btn btn-danger btn-small" @click="deleteTeacher(teacher)">Удалить</button>
-                                </td>
-                            </tr>
-                            <tr v-if="!teachers.length">
-                                <td colspan="4">Список пуст.</td>
-                            </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <form @submit.prevent="saveTeacher">
-                        <div class="field-grid">
-                            <div class="field">
-                                <label>Краткое имя</label>
-                                <input class="control" v-model.trim="teacherForm.short_name" required placeholder="Иванов И.И.">
-                            </div>
-                            <div class="field">
-                                <label>Полное ФИО</label>
-                                <input class="control" v-model.trim="teacherForm.full_name" required placeholder="Иванов Иван Иванович">
-                            </div>
-                            <div class="field full">
-                                <label>Должность</label>
-                                <input class="control" v-model.trim="teacherForm.position">
-                            </div>
-                            <div class="field">
-                                <label>Звание</label>
-                                <input class="control" v-model.trim="teacherForm.rank">
-                            </div>
-                            <div class="field">
-                                <label>Степень</label>
-                                <input class="control" v-model.trim="teacherForm.academic_degree">
-                            </div>
-                        </div>
-                        <div class="button-row" style="margin-top:12px;">
-                            <button class="btn btn-primary" :disabled="teacherBusy">
-                                {{ editingTeacher ? 'Сохранить' : 'Добавить' }}
-                            </button>
-                            <button v-if="editingTeacher" type="button" class="btn btn-secondary" @click="resetTeacherForm">
-                                Отмена
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </section>
         </section>
 
         <section v-else-if="step === 2">
@@ -246,14 +179,14 @@
                             <div class="panel-subtitle">Координаты совпадают с номерами строк Excel</div>
                         </div>
                         <button class="btn btn-secondary btn-small" @click="applySuggestion">
-                            Автовариант
+                            Вернуть исходный автоанализ
                         </button>
                     </div>
 
                     <div v-if="currentLayout" class="panel-body settings-scroll">
                         <section class="settings-section">
                             <h3>Шаблоны разметки</h3>
-                            <p class="section-note">Сохраните координаты для повторяющихся форматов. Шаблоны хранятся локально в браузере.</p>
+                            <p class="section-note">Шаблоны хранятся в активном пространстве на сервере. Локальная правка текущего файла сохраняется независимо от шаблона.</p>
                             <div class="field-grid">
                                 <div class="field full">
                                     <label>Название нового шаблона</label>
@@ -456,10 +389,10 @@
                         <section class="settings-section">
                             <div class="button-stack">
                                 <button class="btn btn-primary" @click="validateCurrent" :disabled="validateBusy">
-                                    Проверить разметку файла
+                                    Пересчитать этот файл
                                 </button>
                                 <button class="btn btn-secondary" @click="loadPreview" :disabled="previewBusy">
-                                    Обновить область предпросмотра
+                                    Обновить рабочий лист
                                 </button>
                             </div>
 
@@ -469,8 +402,9 @@
                                 :class="currentValidation.status"
                             >
                                 <strong>
-                                    {{ currentValidation.status === 'success' ? 'Разметка пригодна' :
-                                       currentValidation.status === 'warning' ? 'Есть замечания' : 'Разметка ошибочна' }}
+                                    {{ currentValidation.report.lesson_count ?
+                                       (currentValidation.status === 'success' ? 'Разметка готова' : 'Разметка готова с подсказками') :
+                                       'Нужно указать область занятий' }}
                                 </strong>
                                 <div class="metric-row">
                                     <div class="metric">
@@ -490,7 +424,7 @@
                                     <div
                                         v-for="(message, index) in currentValidation.report.errors"
                                         :key="'e' + index"
-                                        class="diagnostic error"
+                                        class="diagnostic warning"
                                     >{{ message }}</div>
                                     <div
                                         v-for="(message, index) in currentValidation.report.warnings"
@@ -506,7 +440,7 @@
 
             <div class="bottom-actions">
                 <div class="bottom-note">
-                    Выбрано файлов: {{ enabledFiles.length }}. Результат формируется только из файлов без критических ошибок.
+                    Результат создаётся из пригодных данных. Спорные решения сохраняются в отчёте и остаются доступными для исправления.
                 </div>
                 <div class="button-row">
                     <button class="btn btn-secondary" @click="resetWorkflow">Начать заново</button>
@@ -514,7 +448,7 @@
                         Проверить все
                     </button>
                     <button class="btn btn-primary" @click="generate" :disabled="generateBusy || !enabledFiles.length">
-                        {{ generateBusy ? 'Формирование…' : 'Сформировать расписание' }}
+                        {{ generateBusy ? 'Формируем…' : 'Сформировать результат' }}
                     </button>
                 </div>
             </div>
@@ -525,7 +459,7 @@
                 <div class="result-hero">
                     <div class="result-icon">✓</div>
                     <div>
-                        <h1 class="page-title" style="font-size:32px;">Расписание сформировано</h1>
+                        <h1 class="page-title" style="font-size:32px;">Результат сформирован</h1>
                         <p class="page-lead">{{ result.message }}</p>
                     </div>
                 </div>
@@ -558,7 +492,7 @@
                 </div>
 
                 <div v-if="result.warnings?.length" class="warning-box">
-                    <strong>Предупреждения</strong>
+                    <strong>Что система решила автоматически</strong>
                     <ul>
                         <li v-for="(warning, index) in result.warnings" :key="index">{{ warning }}</li>
                     </ul>
