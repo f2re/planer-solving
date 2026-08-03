@@ -1,4 +1,4 @@
-"""Atomic template-revision operations for the operations platform."""
+"""Atomic template-revision and account operations for the platform."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -6,12 +6,13 @@ import json
 from typing import Any, Dict
 
 from .platform_store import PlatformStore
+from .security import hash_password, iso_now
 from .template_learning import layout_diff
 from .workspace_domain import WorkspaceError, WorkspaceNotFound, normalize_template, now
 
 
 class TransactionalPlatformStore(PlatformStore):
-    """Platform store with template data and revision written atomically."""
+    """Platform store with related changes written atomically."""
 
     def create_template(self, workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         with self._transaction() as connection:
@@ -126,4 +127,25 @@ class TransactionalPlatformStore(PlatformStore):
             )
             result = deepcopy(template)
             result.update(self._profile(connection, workspace_id, template_id))
+            return result
+
+    def reset_user_password(self, user_id: str, password: str = "") -> Dict[str, Any]:
+        """Set any password, including empty, and revoke all active sessions."""
+
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT id, username, display_name, role, is_active, created_at FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if not row:
+                raise WorkspaceNotFound("Пользователь не найден.")
+            stamp = iso_now()
+            connection.execute(
+                "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (hash_password(password), stamp, user_id),
+            )
+            connection.execute("DELETE FROM auth_sessions WHERE user_id = ?", (user_id,))
+            result = dict(row)
+            result["is_active"] = bool(result["is_active"])
+            result["updated_at"] = stamp
             return result

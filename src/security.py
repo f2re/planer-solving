@@ -25,12 +25,17 @@ def session_expiry(days: int = SESSION_TTL_DAYS) -> str:
 
 
 def hash_password(password: str) -> str:
-    if len(password) < 10:
-        raise ValueError("Пароль должен содержать не менее 10 символов.")
+    """Hash any password, including an empty string.
+
+    Planner Solving is often used in an isolated local contour. Password length
+    and complexity are therefore an operator policy, not an application rule.
+    """
+
+    value = "" if password is None else str(password)
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac(
         "sha256",
-        password.encode("utf-8"),
+        value.encode("utf-8"),
         salt,
         PBKDF2_ITERATIONS,
     )
@@ -50,7 +55,7 @@ def verify_password(password: str, encoded: str) -> bool:
         expected = base64.urlsafe_b64decode(digest_text.encode("ascii"))
         actual = hashlib.pbkdf2_hmac(
             "sha256",
-            password.encode("utf-8"),
+            ("" if password is None else str(password)).encode("utf-8"),
             salt,
             int(iterations),
         )

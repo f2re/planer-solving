@@ -25,6 +25,7 @@ def build_session_router(context: ApplicationContext) -> APIRouter:
         col_start: Optional[int] = Query(None, ge=1),
         col_end: Optional[int] = Query(None, ge=1),
         sheet_name: Optional[str] = Query(None),
+        full_sheet: bool = Query(False),
     ) -> Dict[str, Any]:
         if region not in {"schedule", "legend", "custom"}:
             raise ApplicationError("Неизвестная область предпросмотра.")
@@ -33,22 +34,40 @@ def build_session_router(context: ApplicationContext) -> APIRouter:
         analysis = item.get("analysis")
         if not isinstance(analysis, dict):
             raise ApplicationError("Для файла нет результатов анализа.")
-        defaults = analysis["legend_preview"] if region == "legend" else analysis["schedule_preview"]
-        selected_row_start = row_start or int(defaults["row_start"])
-        selected_row_end = row_end or int(defaults["row_end"])
-        selected_col_start = col_start or int(defaults["col_start"])
-        selected_col_end = col_end or int(defaults["col_end"])
+
+        if full_sheet:
+            selected_row_start = 1
+            selected_row_end = int(analysis.get("max_row") or 1)
+            selected_col_start = 1
+            selected_col_end = int(analysis.get("max_column") or 1)
+            max_rows = 500
+            max_columns = 160
+        else:
+            defaults = analysis["legend_preview"] if region == "legend" else analysis["schedule_preview"]
+            selected_row_start = row_start or int(defaults["row_start"])
+            selected_row_end = row_end or int(defaults["row_end"])
+            selected_col_start = col_start or int(defaults["col_start"])
+            selected_col_end = col_end or int(defaults["col_end"])
+            max_rows = 140
+            max_columns = 60
+
         if selected_row_end < selected_row_start or selected_col_end < selected_col_start:
             raise ApplicationError("Неверно задан диапазон предпросмотра.")
         try:
-            return ScheduleAnalyzer().preview(
+            result = ScheduleAnalyzer().preview(
                 str(context.sessions.stored_path(session_id, item)),
                 sheet_name or str(analysis["selected_sheet"]),
                 selected_row_start,
                 selected_row_end,
                 selected_col_start,
                 selected_col_end,
+                max_rows=max_rows,
+                max_columns=max_columns,
             )
+            result["full_sheet"] = full_sheet
+            result["truncated_rows"] = bool(full_sheet and selected_row_end - selected_row_start + 1 > max_rows)
+            result["truncated_columns"] = bool(full_sheet and selected_col_end - selected_col_start + 1 > max_columns)
+            return result
         except ValueError as exc:
             raise ApplicationError(str(exc)) from exc
 

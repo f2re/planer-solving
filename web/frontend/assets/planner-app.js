@@ -4,6 +4,8 @@ import { installInteractionMarkup, createInteractionState } from './interaction-
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 import { installPlatformEnhancements } from './platform-enhancements.js';
 import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-layout-editor.js';
+import { createReactiveWorkspaceState } from './reactive-workspace.js';
+import { installEditorWorkspaceMarkup, createEditorWorkspaceState } from './editor-workspace.js';
 
 const { createApp, ref, onMounted } = Vue;
 
@@ -13,6 +15,8 @@ export function mount() {
     installPlatformMarkup();
     installPlatformEnhancements();
     installSampleLayoutMarkup();
+    installEditorWorkspaceMarkup();
+
     createApp({
         setup() {
             const toasts = ref([]);
@@ -29,9 +33,12 @@ export function mount() {
 
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
-            workspace.loadData = workspace.init;
-            workspace.loadSpaces = workspace.init;
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
+            const reactiveWorkspace = createReactiveWorkspaceState(addToast, workspace, schedule);
+            workspace.loadData = reactiveWorkspace.refreshData;
+            workspace.loadSpaces = reactiveWorkspace.refreshSpaces;
+            workspace.refreshWorkspace = reactiveWorkspace.refreshWorkspace;
+
             const interaction = createInteractionState(
                 addToast,
                 schedule,
@@ -39,9 +46,28 @@ export function mount() {
             );
             const sampleLayout = createSampleLayoutState(addToast, schedule);
             const platform = createPlatformState(addToast, workspace, schedule);
+            const editor = createEditorWorkspaceState(
+                addToast,
+                schedule,
+                interaction,
+                workspace,
+                platform
+            );
+
+            const rawRefreshSpaces = reactiveWorkspace.refreshSpaces;
+            workspace.loadSpaces = async preferred => {
+                const result = await rawRefreshSpaces(preferred, { silent: true });
+                if (platform.importJob.value?.status === 'committed') {
+                    await reactiveWorkspace.refreshData({ silent: true });
+                    platform.operationsOpen.value = false;
+                    workspace.openManager(platform.importKind.value === 'teachers' ? 'teachers' : 'templates');
+                }
+                return result;
+            };
 
             const rematchAfter = handler => async (...args) => {
                 const result = await handler(...args);
+                await reactiveWorkspace.refreshAfterMutation({ silent: true });
                 schedule.invalidateAll();
                 await interaction.rematchTemplates({ quiet: true });
                 return result;
@@ -49,6 +75,7 @@ export function mount() {
 
             const switchWorkspace = async id => {
                 await workspace.switchWorkspace(id);
+                await reactiveWorkspace.refreshWorkspace(id, { silent: true });
                 if (workspace.managerTab.value === 'spaces') {
                     workspace.editWorkspace(workspace.activeWorkspace.value);
                 }
@@ -67,6 +94,7 @@ export function mount() {
                     return;
                 }
                 await workspace.deleteTeacher(teacher);
+                await reactiveWorkspace.refreshAfterMutation({ silent: true });
                 schedule.invalidateAll();
                 await interaction.rematchTemplates({ quiet: true });
             };
@@ -120,8 +148,9 @@ export function mount() {
                         );
                         template = data;
                     }
-                    await workspace.init();
+                    await reactiveWorkspace.refreshWorkspace(workspace.activeWorkspaceId.value, { silent: true });
                     workspace.profileName.value = name;
+                    workspace.selectedProfile.value = template.name;
                     addToast(
                         'Шаблон сохранён',
                         `«${name}» сохранён версией ${template.current_revision}.`,
@@ -139,24 +168,21 @@ export function mount() {
             const applySelectedProfile = async () => {
                 if (workspace.selectedTemplate.value) {
                     await schedule.applyTemplate(workspace.selectedTemplate.value);
+                    await editor.recalculateNow();
                 }
             };
 
             const deleteSelectedProfile = async () => {
                 if (workspace.selectedTemplate.value) {
                     await workspace.deleteTemplate(workspace.selectedTemplate.value);
+                    await reactiveWorkspace.refreshAfterMutation({ silent: true });
                     await interaction.rematchTemplates({ quiet: true });
                 }
             };
 
             const migrateLocalTemplates = async () => {
                 const key = 'planner-solving-layout-profiles-v1';
-                if (
-                    workspace.layoutProfiles.value.length ||
-                    localStorage.getItem(`${key}-migrated`)
-                ) {
-                    return;
-                }
+                if (workspace.layoutProfiles.value.length || localStorage.getItem(`${key}-migrated`)) return;
                 try {
                     const oldTemplates = JSON.parse(localStorage.getItem(key) || '[]');
                     for (const item of Array.isArray(oldTemplates) ? oldTemplates : []) {
@@ -173,12 +199,8 @@ export function mount() {
                         }
                     }
                     if (oldTemplates.length) {
-                        await workspace.init();
-                        addToast(
-                            'Шаблоны перенесены',
-                            `На сервер перенесено: ${oldTemplates.length}.`,
-                            'success'
-                        );
+                        await reactiveWorkspace.refreshWorkspace(workspace.activeWorkspaceId.value, { silent: true });
+                        addToast('Шаблоны перенесены', `На сервер перенесено: ${oldTemplates.length}.`, 'success');
                     }
                     localStorage.setItem(`${key}-migrated`, '1');
                 } catch (_) {
@@ -189,16 +211,16 @@ export function mount() {
             const submitAuth = async () => {
                 const success = await platform.submitAuth();
                 if (success) {
-                    await workspace.init();
+                    await reactiveWorkspace.refreshWorkspace(null, { silent: true });
+                    reactiveWorkspace.startReactiveSync();
                     await migrateLocalTemplates();
                 }
                 return success;
             };
 
             const logout = async () => {
-                if (schedule.sessionId.value) {
-                    await schedule.resetWorkflow();
-                }
+                reactiveWorkspace.stopReactiveSync();
+                if (schedule.sessionId.value) await schedule.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
                 workspace.teachers.value = [];
@@ -207,9 +229,7 @@ export function mount() {
 
             const repeatRun = async run => {
                 if (!run || !workspace.activeWorkspaceId.value) return;
-                if (!confirm('Повторить обработку с архивными исходниками и прежней разметкой?')) {
-                    return;
-                }
+                if (!confirm('Повторить обработку с архивными исходниками и прежней разметкой?')) return;
                 try {
                     const { data } = await axios.post(
                         `/api/workspaces/${workspace.activeWorkspaceId.value}/runs/${run.id}/repeat`
@@ -232,7 +252,8 @@ export function mount() {
             onMounted(async () => {
                 const access = await platform.initAuth();
                 if (access?.setup_access || access?.authenticated) {
-                    await workspace.init();
+                    await reactiveWorkspace.refreshWorkspace(null, { silent: true });
+                    reactiveWorkspace.startReactiveSync();
                     await migrateLocalTemplates();
                 }
             });
@@ -243,6 +264,8 @@ export function mount() {
                 ...interaction,
                 ...sampleLayout,
                 ...platform,
+                ...reactiveWorkspace,
+                ...editor,
                 toasts,
                 addToast,
                 removeToast,
