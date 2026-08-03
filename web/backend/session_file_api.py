@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+import shutil
 import time
 from typing import Any, Dict, List
 import uuid
@@ -41,6 +42,7 @@ async def _analyze_upload(
     *,
     file_id: str | None = None,
     group_name: str | None = None,
+    storage_stem: str | None = None,
 ) -> Dict[str, Any]:
     """Store and analyze one upload without creating a new session."""
 
@@ -67,7 +69,7 @@ async def _analyze_upload(
         )
         return item
 
-    stored_name = f"{resolved_file_id}{extension}"
+    stored_name = f"{storage_stem or resolved_file_id}{extension}"
     stored_path = session_dir / stored_name
     item["stored_name"] = stored_name
     try:
@@ -75,6 +77,7 @@ async def _analyze_upload(
     except Exception:
         logger.exception("Cannot store workbook %s in session %s", original_name, session_id)
         stored_path.unlink(missing_ok=True)
+        item["stored_name"] = ""
         item["message"] = (
             "Не удалось сохранить файл. Проверьте свободное место и права каталога; "
             "другие файлы сеанса не затронуты."
@@ -83,6 +86,7 @@ async def _analyze_upload(
 
     if not item["bytes_written"]:
         stored_path.unlink(missing_ok=True)
+        item["stored_name"] = ""
         item["message"] = "Файл пуст. Замените только этот файл или исключите его из сеанса."
         return item
 
@@ -116,6 +120,13 @@ def _remove_stored_file(context: ApplicationContext, session_id: str, item: Dict
         path.unlink(missing_ok=True)
 
 
+def _backup_file(source: Path, destination: Path) -> None:
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
+
+
 def build_session_file_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["analysis-session-files"])
 
@@ -146,26 +157,68 @@ def build_session_file_router(context: ApplicationContext) -> APIRouter:
         manifest = context.sessions.load_manifest(session_id)
         existing = context.sessions.manifest_file(manifest, file_id)
         upload = await _single_upload(request)
+        staging_stem = f".replacement-{file_id}-{uuid.uuid4()}"
         replacement = await _analyze_upload(
             context,
             session_id,
             upload,
             file_id=file_id,
             group_name=str(existing.get("group_name") or ""),
+            storage_stem=staging_stem,
         )
-        old_stored_name = str(existing.get("stored_name") or "")
-        new_stored_name = str(replacement.get("stored_name") or "")
-        if old_stored_name and old_stored_name != new_stored_name:
-            _remove_stored_file(context, session_id, existing)
+        staging_name = str(replacement.get("stored_name") or "")
+        session_dir = context.sessions.path(session_id)
+        staging_path = (session_dir / staging_name).resolve() if staging_name else None
 
-        files = manifest.get("files", [])
-        for index, item in enumerate(files):
-            if isinstance(item, dict) and item.get("file_id") == file_id:
-                files[index] = replacement
-                break
-        manifest["updated_at"] = time.time()
-        context.sessions.save_manifest(session_id, manifest)
-        return _response_file(replacement)
+        if not replacement.get("analysis") or not staging_path or not staging_path.is_file():
+            if staging_path and staging_path.parent == session_dir:
+                staging_path.unlink(missing_ok=True)
+            raise ApplicationError(
+                "Новый файл не принят: он пуст, повреждён или имеет неподдерживаемый формат. "
+                "Прежний исходник и все правки сохранены.",
+                status_code=422,
+                code="replacement_rejected",
+            )
+
+        extension = Path(replacement["filename"]).suffix.lower()
+        target_name = f"{file_id}{extension}"
+        target_path = (session_dir / target_name).resolve()
+        old_stored_name = str(existing.get("stored_name") or "")
+        old_path = (session_dir / old_stored_name).resolve() if old_stored_name else None
+        backup_path = session_dir / f".replacement-backup-{file_id}-{uuid.uuid4()}{old_path.suffix if old_path else ''}"
+        backup_created = False
+
+        try:
+            if old_path and old_path.parent == session_dir and old_path.is_file():
+                _backup_file(old_path, backup_path)
+                backup_created = True
+
+            os.replace(staging_path, target_path)
+            replacement["stored_name"] = target_name
+            files = manifest.get("files", [])
+            for index, item in enumerate(files):
+                if isinstance(item, dict) and item.get("file_id") == file_id:
+                    files[index] = replacement
+                    break
+            manifest["updated_at"] = time.time()
+            context.sessions.save_manifest(session_id, manifest)
+        except Exception as exc:
+            logger.exception("Cannot atomically replace workbook %s in session %s", file_id, session_id)
+            if backup_created and backup_path.is_file() and old_path:
+                os.replace(backup_path, old_path)
+            if target_path != old_path:
+                target_path.unlink(missing_ok=True)
+            staging_path.unlink(missing_ok=True)
+            raise ApplicationError(
+                "Новый файл проверен, но переключение не завершено. Прежний исходник восстановлен.",
+                status_code=500,
+                code="replacement_commit_failed",
+            ) from exc
+        else:
+            if old_path and old_path != target_path:
+                old_path.unlink(missing_ok=True)
+            backup_path.unlink(missing_ok=True)
+            return _response_file(replacement)
 
     @router.delete("/api/analysis/{session_id}/files/{file_id}")
     def remove_file(session_id: str, file_id: str) -> Dict[str, Any]:
@@ -219,7 +272,7 @@ def build_session_file_router(context: ApplicationContext) -> APIRouter:
         removed_files = manifest.setdefault("removed_files", [])
         removed = next(
             (
-                item for item in removed_files
+                item for item in reversed(removed_files)
                 if isinstance(item, dict) and item.get("file_id") == file_id
             ),
             None,
@@ -244,7 +297,14 @@ def build_session_file_router(context: ApplicationContext) -> APIRouter:
                 restored["message"] = "Исходный файл уже недоступен. Замените только эту запись."
 
         manifest.setdefault("files", []).append(restored)
-        manifest["removed_files"] = [item for item in removed_files if item is not removed]
+        removed_once = False
+        retained: List[Dict[str, Any]] = []
+        for item in reversed(removed_files):
+            if not removed_once and item is removed:
+                removed_once = True
+                continue
+            retained.append(item)
+        manifest["removed_files"] = list(reversed(retained))
         manifest["updated_at"] = time.time()
         context.sessions.save_manifest(session_id, manifest)
         return _response_file(restored)
