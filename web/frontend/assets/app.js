@@ -19,7 +19,8 @@
         '/assets/workspace-editor.css',
         '/assets/operator-flow.css',
         '/assets/session-file-actions.css',
-        '/assets/session-draft.css'
+        '/assets/session-draft.css',
+        '/assets/history-ux.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
