@@ -1,30 +1,57 @@
 let passwordObserver = null;
 
-function relaxPasswordInputs() {
-    document.querySelectorAll('.auth-form input[type="password"], .user-form input[type="password"]').forEach(input => {
-        for (const attribute of ('required minlength :required v-bind:required').split(' ')) {
-            input.removeAttribute(attribute);
-        }
-        input.required = false;
-        input.minLength = 0;
-        input.setAttribute('placeholder', 'Можно оставить пустым');
-        input.setAttribute('aria-description', 'Ограничений по длине пароля нет');
-    });
+const PASSWORD_SELECTOR = '.auth-form input[type="password"], .user-form input[type="password"]';
+const PASSWORD_PLACEHOLDER = 'Можно оставить пустым';
+const PASSWORD_DESCRIPTION = 'Ограничений по длине пароля нет';
+
+function relaxPasswordInput(input) {
+    if (!input || typeof input.matches !== 'function' || !input.matches(PASSWORD_SELECTOR)) return;
+
+    // Удаляем только реально существующие ограничения. Нельзя присваивать
+    // input.minLength = 0: это снова создаёт атрибут minlength и при наблюдении
+    // за атрибутами запускает бесконечный цикл MutationObserver.
+    for (const attribute of ['required', 'minlength', ':required', 'v-bind:required']) {
+        if (input.hasAttribute(attribute)) input.removeAttribute(attribute);
+    }
+    if (input.getAttribute('placeholder') !== PASSWORD_PLACEHOLDER) {
+        input.setAttribute('placeholder', PASSWORD_PLACEHOLDER);
+    }
+    if (input.getAttribute('aria-description') !== PASSWORD_DESCRIPTION) {
+        input.setAttribute('aria-description', PASSWORD_DESCRIPTION);
+    }
+}
+
+function relaxPasswordInputs(root = document) {
+    if (!root) return;
+    if (typeof root.matches === 'function') relaxPasswordInput(root);
+    if (typeof root.querySelectorAll === 'function') {
+        root.querySelectorAll(PASSWORD_SELECTOR).forEach(relaxPasswordInput);
+    }
 }
 
 export function installPasswordInputPolicy() {
-    relaxPasswordInputs();
-    if (!passwordObserver) {
-        passwordObserver = new MutationObserver(() => relaxPasswordInputs());
-        passwordObserver.observe(document.documentElement, {
-            subtree: true,
-            childList: true,
-            attributes: true,
-            attributeFilter: ['required', 'minlength']
-        });
-    }
-    queueMicrotask(relaxPasswordInputs);
-    window.setTimeout(relaxPasswordInputs, 0);
+    relaxPasswordInputs(document);
+    if (passwordObserver) return () => passwordObserver?.disconnect();
+
+    passwordObserver = new MutationObserver(records => {
+        for (const record of records) {
+            if (record.type === 'attributes') {
+                relaxPasswordInput(record.target);
+                continue;
+            }
+            for (const node of record.addedNodes || []) relaxPasswordInputs(node);
+        }
+    });
+    passwordObserver.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['required', 'minlength']
+    });
+    return () => {
+        passwordObserver?.disconnect();
+        passwordObserver = null;
+    };
 }
 
 export function applyEditorRuntimeFixes(editor, schedule, interaction, platform, addToast) {
