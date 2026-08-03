@@ -1,4 +1,9 @@
-for (const href of ['assets/workspaces.css', 'assets/interaction.css']) {
+for (const href of [
+    'assets/workspaces.css',
+    'assets/interaction.css',
+    'assets/readability.css',
+    'assets/operations.css'
+]) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = href;
