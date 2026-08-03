@@ -25,11 +25,14 @@ export function installSessionDraftMarkup() {
     }
 
     const bottomNote = document.querySelector('.bottom-actions .bottom-note');
-    if (bottomNote && !document.querySelector('.analysis-draft-status')) {
-        bottomNote.insertAdjacentHTML('beforeend', `
-          <span v-if="sessionId" class="analysis-draft-status" :class="draftState" :title="draftError || 'Файлы и правки хранятся на сервере 24 часа'">
-            <span class="draft-status-dot"></span>{{ draftStateLabel }}
-          </span>`);
+    if (bottomNote) {
+        bottomNote.textContent = 'Файлов для результата: {{ recoverableFiles.length }}. Читаемые книги формируют расписание, неразобранные попадают в диагностический отчёт.';
+        if (!document.querySelector('.analysis-draft-status')) {
+            bottomNote.insertAdjacentHTML('beforeend', `
+              <span v-if="sessionId" class="analysis-draft-status" :class="draftState" :title="draftError || 'Файлы и правки хранятся на сервере 24 часа'">
+                <span class="draft-status-dot"></span>{{ draftStateLabel }}
+              </span>`);
+        }
     }
 
     const resultCard = document.querySelector('.result-card');
