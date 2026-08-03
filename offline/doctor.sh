@@ -20,7 +20,6 @@ while (($#)); do
     esac
 done
 
-STATUS=0
 TMP_REPORT="$(mktemp -t planner-solving-doctor-XXXXXX)"
 cleanup() { rm -f "$TMP_REPORT"; }
 trap cleanup EXIT
@@ -36,7 +35,9 @@ run() {
     return "$code"
 }
 
-{
+collect_report() {
+    local status=0 current="" runtime=""
+
     echo "Отчёт диагностики Planner Solving"
     echo "Дата: $(date -Is 2>/dev/null || date)"
     echo "Узел: $(hostname 2>/dev/null || echo unknown)"
@@ -54,36 +55,42 @@ run() {
     section "Структура установки"
     run ls -ld "$INSTALL_ROOT" "$INSTALL_ROOT/current" "$INSTALL_ROOT/releases" "$INSTALL_ROOT/shared" "$INSTALL_ROOT/state" || true
     if [[ -e "$INSTALL_ROOT/current" ]]; then
-        CURRENT="$(readlink -f "$INSTALL_ROOT/current" 2>/dev/null || true)"
-        echo "Активный выпуск: $CURRENT"
-        [[ -f "$CURRENT/VERSION" ]] && echo "Версия: $(cat "$CURRENT/VERSION")"
-        run ls -l "$CURRENT/.venv/bin/python" || true
-        run "$CURRENT/.venv/bin/python" --version || STATUS=1
-        run "$CURRENT/.venv/bin/python" -c 'import sys; print("executable=",sys.executable); print("prefix=",sys.prefix); print("base_prefix=",sys.base_prefix)' || STATUS=1
+        current="$(readlink -f "$INSTALL_ROOT/current" 2>/dev/null || true)"
+        echo "Активный выпуск: $current"
+        [[ -f "$current/VERSION" ]] && echo "Версия: $(cat "$current/VERSION")"
+        run ls -l "$current/.venv/bin/python" || true
+        run "$current/.venv/bin/python" --version || status=1
+        run "$current/.venv/bin/python" -c 'import sys; print("executable=",sys.executable); print("prefix=",sys.prefix); print("base_prefix=",sys.base_prefix)' || status=1
     else
         echo "ОШИБКА: ссылка current отсутствует"
-        STATUS=1
+        status=1
     fi
 
     section "Права на данные"
     run find "$INSTALL_ROOT/shared" -maxdepth 2 -printf '%M %u:%g %p\n' || true
 
     section "Стабильный запуск"
-    RUNTIME="$INSTALL_ROOT/state/run-service.sh"
-    if [[ -x "$RUNTIME" ]]; then
-        PLANNER_INSTALL_ROOT="$INSTALL_ROOT" PLANNER_PORT="$PORT" run "$RUNTIME" --print || STATUS=1
-        PLANNER_INSTALL_ROOT="$INSTALL_ROOT" PLANNER_PORT="$PORT" run "$RUNTIME" --check || STATUS=1
+    runtime="$INSTALL_ROOT/state/run-service.sh"
+    if [[ -x "$runtime" ]]; then
+        run env \
+            PLANNER_INSTALL_ROOT="$INSTALL_ROOT" \
+            PLANNER_PORT="$PORT" \
+            "$runtime" --print || status=1
+        run env \
+            PLANNER_INSTALL_ROOT="$INSTALL_ROOT" \
+            PLANNER_PORT="$PORT" \
+            "$runtime" --check || status=1
     else
-        echo "ОШИБКА: отсутствует $RUNTIME"
-        STATUS=1
+        echo "ОШИБКА: отсутствует $runtime"
+        status=1
     fi
 
     section "systemd"
     if command -v systemctl >/dev/null 2>&1; then
-        run systemctl cat "$SERVICE" || STATUS=1
-        run systemctl status "$SERVICE" --no-pager -l || STATUS=1
+        run systemctl cat "$SERVICE" || status=1
+        run systemctl status "$SERVICE" --no-pager -l || status=1
         run systemctl is-enabled "$SERVICE" || true
-        run systemctl is-active "$SERVICE" || STATUS=1
+        run systemctl is-active "$SERVICE" || status=1
         if command -v journalctl >/dev/null 2>&1; then
             run journalctl -u "$SERVICE" -n 120 --no-pager -o short-iso || true
         fi
@@ -98,9 +105,9 @@ run() {
         run netstat -ltnp || true
     fi
     if command -v curl >/dev/null 2>&1; then
-        run curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" || STATUS=1
-    elif [[ -x "${CURRENT:-}/.venv/bin/python" ]]; then
-        run "$CURRENT/.venv/bin/python" - "$PORT" <<'PY' || STATUS=1
+        run curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" || status=1
+    elif [[ -x "$current/.venv/bin/python" ]]; then
+        run "$current/.venv/bin/python" - "$PORT" <<'PY' || status=1
 import sys
 from urllib.request import urlopen
 port = int(sys.argv[1])
@@ -114,12 +121,16 @@ PY
     [[ -f "$INSTALL_ROOT/state/history.jsonl" ]] && tail -n 10 "$INSTALL_ROOT/state/history.jsonl" || true
 
     section "Итог"
-    if [[ $STATUS -eq 0 ]]; then
+    if [[ $status -eq 0 ]]; then
         echo "Критических проблем не обнаружено."
     else
-        echo "Обнаружены ошибки. Сохраните этот отчёт и исправьте первый неуспешный раздел."
+        echo "Обнаружены ошибки. Исправьте первый неуспешный раздел или повторите установку тем же автономным пакетом."
     fi
-} | tee "$TMP_REPORT"
+    return "$status"
+}
+
+collect_report | tee "$TMP_REPORT"
+STATUS=${PIPESTATUS[0]}
 
 if [[ -n "$OUTPUT" ]]; then
     install -m 0644 "$TMP_REPORT" "$OUTPUT"
