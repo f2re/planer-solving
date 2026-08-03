@@ -38,6 +38,34 @@ def test_result_can_return_to_the_problem_file_without_deleting_session():
     assert ".analysis-draft-status" in css
 
 
+def test_one_file_can_be_replaced_without_resetting_the_session():
+    draft = read("schedule-draft.js")
+    markup = read("session-draft-markup.js")
+    css = read("session-draft.css")
+    assert "/files/${fileId}/replace" in draft
+    assert "startFileReplacement" in draft
+    assert "replaceAnalysisFile" in draft
+    assert "Остальные файлы, ручные даты и разметки сохранены" in draft
+    assert "analysis-file-replacement" in markup
+    assert "Выбрать другой" in markup
+    assert "replace-session-file" in markup
+    assert ".replace-session-file" in css
+
+
+def test_teacher_mapping_action_opens_the_relevant_sheet_area():
+    draft = read("schedule-draft.js")
+    assert "action?.type === 'open_teacher_mapping'" in draft
+    assert "schedule.previewRegion.value = 'legend'" in draft
+    assert "Проверьте столбцы лектора" in draft
+
+
+def test_generation_flushes_the_completed_result_to_the_draft():
+    draft = read("schedule-draft.js")
+    assert "const originalGenerate = schedule.generate" in draft
+    assert "await originalGenerate();" in draft
+    assert "await flushDraft({ quiet: false })" in draft
+
+
 def test_bootstrap_loads_new_draft_styles_and_markup_before_mount():
     app = read("app.js")
     planner = read("planner-app.js")
