@@ -8,8 +8,8 @@ function relaxPasswordInput(input) {
     if (!input || typeof input.matches !== 'function' || !input.matches(PASSWORD_SELECTOR)) return;
 
     // Удаляем только реально существующие ограничения. Нельзя присваивать
-    // input.minLength = 0: это снова создаёт атрибут minlength и при наблюдении
-    // за атрибутами запускает бесконечный цикл MutationObserver.
+    // свойству minLength нулевое значение: оно снова создаёт одноимённый
+    // атрибут и при наблюдении запускает бесконечный цикл MutationObserver.
     for (const attribute of ['required', 'minlength', ':required', 'v-bind:required']) {
         if (input.hasAttribute(attribute)) input.removeAttribute(attribute);
     }
