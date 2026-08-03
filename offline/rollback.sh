@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=common.sh
+
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_ROOT/common.sh"
 
 INSTALL_ROOT="/opt/planner-solving"
@@ -15,43 +15,40 @@ while (($#)); do
         --port) PORT="$2"; shift 2 ;;
         --no-systemd) NO_SYSTEMD=1; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
-        --help|-h)
-            echo "rollback.sh [--install-dir PATH] [--port PORT] [--no-systemd] [--yes]"
-            exit 0
-            ;;
+        --help|-h) echo "rollback.sh [--install-dir PATH] [--port PORT] [--no-systemd] [--yes]"; exit 0 ;;
         *) die "Неизвестный параметр: $1" ;;
     esac
 done
 
 [[ -d "$INSTALL_ROOT" ]] || die "Каталог установки не найден: $INSTALL_ROOT"
-INSTALL_ROOT="$(cd "$INSTALL_ROOT" && pwd)"
-STATE="$INSTALL_ROOT/state/last-update.json"
+INSTALL_ROOT="$(cd "$INSTALL_ROOT" && pwd -P)"
+STATE_DIR="$INSTALL_ROOT/state"
+STATE="$STATE_DIR/last-update.json"
 SHARED="$INSTALL_ROOT/shared"
-RUNTIME="$INSTALL_ROOT/state/run-service.sh"
+RUNTIME="$STATE_DIR/run-service.sh"
 [[ -f "$STATE" ]] || die "Сведения о предыдущем обновлении не найдены: $STATE"
 [[ -d "$SHARED" ]] || die "Каталог данных не найден: $SHARED"
 [[ -x "$RUNTIME" ]] || die "Стабильный запускатель не найден: $RUNTIME"
 
+acquire_install_lock "$STATE_DIR"
+trap release_install_lock EXIT
+
 if [[ -z "$PORT" && -f /etc/default/planner-solving ]]; then
-    PORT="$(sed -n 's/^PLANNER_PORT=["'"']\{0,1\}\([^"'"']*\)["'"']\{0,1\}$/\1/p' /etc/default/planner-solving | tail -n 1)"
+    PORT="$(read_assignment /etc/default/planner-solving PLANNER_PORT)"
 fi
 PORT="${PORT:-8001}"
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((PORT >= 1 && PORT <= 65535)) || die "Некорректный порт: $PORT"
+if [[ $NO_SYSTEMD -eq 0 ]] && ! systemd_available; then NO_SYSTEMD=1; fi
 
-ACTIVE="$(readlink -f "$INSTALL_ROOT/current" 2>/dev/null || true)"
-[[ -x "$ACTIVE/.venv/bin/python" ]] || die "Python активного выпуска недоступен: $ACTIVE/.venv/bin/python"
-readarray -t META < <("$ACTIVE/.venv/bin/python" - "$STATE" <<'PY'
-import json, sys
-from pathlib import Path
-m=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(m.get("previous_release") or "")
-print(m.get("current_release") or "")
-print(m.get("backup_archive") or "")
-PY
-)
-PREVIOUS="${META[0]}"
-CURRENT="${META[1]}"
-BACKUP="${META[2]}"
+json_string() {
+    local key="$1"
+    sed -n 's/^[[:space:]]*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$STATE" | head -n 1
+}
+PREVIOUS="$(json_string previous_release)"
+RECORDED_CURRENT="$(json_string current_release)"
+BACKUP="$(json_string backup_archive)"
+CURRENT="$(readlink -f "$INSTALL_ROOT/current" 2>/dev/null || true)"
+[[ -n "$CURRENT" ]] || CURRENT="$RECORDED_CURRENT"
 [[ -d "$PREVIOUS" ]] || die "Предыдущий выпуск отсутствует: $PREVIOUS"
 [[ -x "$PREVIOUS/.venv/bin/python" ]] || die "В предыдущем выпуске нет рабочего venv: $PREVIOUS/.venv/bin/python"
 [[ -f "$BACKUP" ]] || die "Резервная копия данных отсутствует: $BACKUP"
@@ -66,7 +63,7 @@ SERVICE_GROUP="$(id -gn "$SERVICE_USER" 2>/dev/null || echo "$SERVICE_USER")"
 if [[ $ASSUME_YES -eq 0 ]]; then
     echo "Текущий выпуск: $CURRENT"
     echo "Будет восстановлен: $PREVIOUS"
-    echo "Будут восстановлены данные из: $BACKUP"
+    echo "Данные будут восстановлены из: $BACKUP"
     printf 'Продолжить? [y/N] '
     read -r answer
     [[ "$answer" =~ ^[YyДд]$ ]] || exit 0
@@ -78,11 +75,11 @@ log "Аварийная копия текущих данных: $EMERGENCY"
 
 rollback_rollback() {
     local code=$?
-    warn "Откат не завершён, возвращается состояние до попытки отката."
+    warn "Откат не завершён; возвращается состояние до попытки отката."
     [[ $NO_SYSTEMD -eq 1 ]] || service_stop || true
-    [[ -d "$CURRENT" ]] && atomic_link "$CURRENT" "$INSTALL_ROOT/current"
-    restore_shared "$SHARED" "$EMERGENCY"
-    set_shared_owner "$SHARED" "$SERVICE_USER:$SERVICE_GROUP"
+    [[ -d "$CURRENT" ]] && atomic_link "$CURRENT" "$INSTALL_ROOT/current" || true
+    restore_shared "$SHARED" "$EMERGENCY" || true
+    set_shared_owner "$SHARED" "$SERVICE_USER:$SERVICE_GROUP" || true
     [[ $NO_SYSTEMD -eq 1 ]] || service_start || true
     exit "$code"
 }
@@ -91,25 +88,21 @@ trap rollback_rollback ERR
 restore_shared "$SHARED" "$BACKUP"
 set_shared_owner "$SHARED" "$SERVICE_USER:$SERVICE_GROUP"
 atomic_link "$PREVIOUS" "$INSTALL_ROOT/current"
-
 run_as_user "$SERVICE_USER" env \
-    PLANNER_INSTALL_ROOT="$INSTALL_ROOT" \
-    PLANNER_PORT="$PORT" \
+    PLANNER_INSTALL_ROOT="$INSTALL_ROOT" PLANNER_PORT="$PORT" \
     "$RUNTIME" --check
 
 if [[ $NO_SYSTEMD -eq 0 ]]; then
     service_start
-    if ! wait_for_health "$PREVIOUS/.venv/bin/python" "$PORT" 60; then
-        warn "После отката служба не прошла HTTP-проверку."
-        journalctl -u planner-solving.service -n 100 --no-pager >&2 2>/dev/null || true
+    if ! wait_for_health "$PREVIOUS/.venv/bin/python" "$PORT" 75; then
+        journalctl -u planner-solving.service -n 120 --no-pager >&2 2>/dev/null || true
         false
     fi
 fi
 
 ROLLBACK_VERSION="$(cat "$PREVIOUS/VERSION" 2>/dev/null || echo unknown)"
-PYTHON_BIN="$PREVIOUS/.venv/bin/python"
-export PYTHON_BIN
-write_update_state "$STATE" "$CURRENT" "$PREVIOUS" "$EMERGENCY" "$ROLLBACK_VERSION"
+write_update_state "$STATE" "$CURRENT" "$PREVIOUS" "$EMERGENCY" "$ROLLBACK_VERSION" "$PREVIOUS/.venv/bin/python"
 trap - ERR
-log "Откат завершён. Текущий выпуск: $PREVIOUS"
+log "Откат завершён. Активный выпуск: $PREVIOUS"
+log "Рабочий venv: $PREVIOUS/.venv"
 log "Резервная копия состояния до отката: $EMERGENCY"
