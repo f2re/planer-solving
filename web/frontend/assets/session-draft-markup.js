@@ -63,7 +63,10 @@ export function installSessionDraftMarkup() {
             Вернуться к файлам и правкам
           </button>`);
         buttons.insertAdjacentHTML('beforebegin', `
-          <section v-if="resultCorrections.length || resultProblemFiles.length || result.warnings?.length" class="result-corrections-panel">
+          <section
+            v-if="resultCorrections.length || resultProblemFiles.length || resultExcludedFiles.length || result.warnings?.length"
+            class="result-corrections-panel"
+          >
             <div class="result-corrections-head">
               <div>
                 <strong>Результат можно уточнить</strong>
@@ -71,18 +74,45 @@ export function installSessionDraftMarkup() {
               </div>
               <span class="analysis-draft-status" :class="draftState"><span class="draft-status-dot"></span>{{ draftStateLabel }}</span>
             </div>
-            <div v-if="resultProblemFiles.length" class="result-problem-list">
-              <button
-                v-for="detail in resultProblemFiles"
-                :key="'problem-' + (detail.file_id || detail.filename)"
-                type="button"
-                class="result-problem-item"
-                @click="openResultFile(detail)"
-              >
-                <span><b>{{ detail.filename }}</b><small>{{ detail.message }}</small></span>
-                <span>Исправить →</span>
-              </button>
-            </div>
+
+            <section v-if="resultExcludedFiles.length" class="result-coverage-section">
+              <div class="result-section-caption">
+                <b>Не вошли в текущий результат: {{ resultExcludedFiles.length }}</b>
+                <span>Файлы не потеряны. Откройте, включите или замените их и повторите формирование.</span>
+              </div>
+              <div class="result-problem-list">
+                <button
+                  v-for="detail in resultExcludedFiles"
+                  :key="'excluded-' + (detail.file_id || detail.filename)"
+                  type="button"
+                  class="result-problem-item excluded"
+                  @click="openResultFile(detail)"
+                >
+                  <span><b>{{ detail.filename }}</b><small>{{ detail.message }}</small></span>
+                  <span>{{ detail.file_id ? 'Открыть →' : 'Проверить →' }}</span>
+                </button>
+              </div>
+            </section>
+
+            <section v-if="resultProblemFiles.length" class="result-coverage-section">
+              <div class="result-section-caption">
+                <b>Файлы с замечаниями: {{ resultProblemFiles.length }}</b>
+                <span>Они были использованы полностью или частично; замечания можно исправить в том же сеансе.</span>
+              </div>
+              <div class="result-problem-list">
+                <button
+                  v-for="detail in resultProblemFiles"
+                  :key="'problem-' + (detail.file_id || detail.filename)"
+                  type="button"
+                  class="result-problem-item"
+                  @click="openResultFile(detail)"
+                >
+                  <span><b>{{ detail.filename }}</b><small>{{ detail.message }}</small></span>
+                  <span>Исправить →</span>
+                </button>
+              </div>
+            </section>
+
             <details v-if="result.warnings?.length" class="result-correction-details result-warning-details" open>
               <summary>Предупреждения результата: {{ result.warnings.length }}</summary>
               <div class="result-warning-list">
