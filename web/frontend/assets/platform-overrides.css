@@ -1,0 +1,25 @@
+.import-dropzone.dragging {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, #fff);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+    transform: translateY(-2px);
+}
+
+.repeat-run-button {
+    align-self: center;
+    margin-left: auto;
+    min-height: 40px;
+}
+
+@media (max-width: 700px) {
+    .repeat-run-button {
+        width: 100%;
+        margin-left: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .import-dropzone.dragging {
+        transform: none;
+    }
+}
