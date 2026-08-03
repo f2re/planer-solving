@@ -6,6 +6,7 @@ import { installPlatformEnhancements } from './platform-enhancements.js';
 import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-layout-editor.js';
 import { createReactiveWorkspaceState } from './reactive-workspace.js';
 import { installEditorWorkspaceMarkup, createEditorWorkspaceState } from './editor-workspace.js';
+import { createEditorHistoryState } from './editor-history-state.js';
 import { createSessionFileActions } from './session-file-actions.js';
 import { createTeacherMappingState } from './teacher-mapping-state.js';
 
@@ -55,6 +56,11 @@ export function mount() {
                 interaction,
                 workspace,
                 platform
+            );
+            const editorHistory = createEditorHistoryState(
+                addToast,
+                schedule,
+                editor
             );
             const sessionFiles = createSessionFileActions(
                 addToast,
@@ -130,6 +136,7 @@ export function mount() {
                     }
                     schedule.invalidateAll();
                     teacherMapping.clearTeacherMappingState();
+                    editorHistory.resetEditorHistory();
                     if (schedule.currentFile.value?.analysis) await schedule.loadPreview();
                     addToast(
                         'Пространство изменено',
@@ -295,6 +302,7 @@ export function mount() {
                 reactiveWorkspace.stopReactiveSync();
                 sessionFiles.clearRemovedFileUndo();
                 teacherMapping.clearTeacherMappingState();
+                editorHistory.resetEditorHistory();
                 if (schedule.sessionId.value) await schedule.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
@@ -341,6 +349,7 @@ export function mount() {
                 ...platform,
                 ...reactiveWorkspace,
                 ...editor,
+                ...editorHistory,
                 ...sessionFiles,
                 ...teacherMapping,
                 toasts,
