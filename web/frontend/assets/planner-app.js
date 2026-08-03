@@ -1,12 +1,14 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
+import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 
 const { createApp, ref, onMounted } = Vue;
 
 export function mount() {
     installWorkspaceMarkup();
     installInteractionMarkup();
+    installPlatformMarkup();
     createApp({
         setup() {
             const toasts = ref([]);
@@ -23,12 +25,17 @@ export function mount() {
 
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
+            // Stable refresh aliases for operational modules without exposing
+            // internal implementation details of workspace-state.
+            workspace.loadData = workspace.init;
+            workspace.loadSpaces = workspace.init;
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
             const interaction = createInteractionState(
                 addToast,
                 schedule,
                 workspace.activeWorkspaceId
             );
+            const platform = createPlatformState(addToast, workspace, schedule);
 
             const rematchAfter = handler => async (...args) => {
                 const result = await handler(...args);
@@ -43,6 +50,9 @@ export function mount() {
                     workspace.editWorkspace(workspace.activeWorkspace.value);
                 }
                 await interaction.rematchTemplates({ quiet: true });
+                if (platform.operationsOpen.value) {
+                    await platform.selectOperationsTab(platform.operationsTab.value);
+                }
             };
 
             const deleteTeacher = async value => {
@@ -59,12 +69,27 @@ export function mount() {
             };
 
             const saveTeacher = rematchAfter(workspace.saveTeacher);
-            const importTeachers = rematchAfter(workspace.importTeachers);
-            const importTemplates = rematchAfter(workspace.importTemplates);
+            const importTeachers = () => platform.openOperations('import', 'teachers');
+            const importTemplates = () => platform.openOperations('import', 'templates');
             const saveWorkspace = rematchAfter(workspace.saveWorkspace);
             const duplicateWorkspace = rematchAfter(workspace.duplicateWorkspace);
             const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
             const importWorkspace = rematchAfter(workspace.importWorkspace);
+
+            const attachCurrentFingerprint = async template => {
+                const fingerprint = schedule.currentFile.value?.analysis?.fingerprint || {};
+                const response = await axios.put(
+                    `/api/workspaces/${workspace.activeWorkspaceId.value}/templates/${template.id}/profile`,
+                    {
+                        layout: schedule.normalizedLayout(schedule.currentLayout.value),
+                        composite: template.composite || [],
+                        fingerprint,
+                        comment: `Подтверждено оператором для «${schedule.currentFile.value?.filename || 'файла'}»`
+                    }
+                );
+                await workspace.init();
+                return response.data;
+            };
 
             const saveCurrentProfile = async () => {
                 const name = workspace.profileName.value.trim();
@@ -77,20 +102,22 @@ export function mount() {
                         item => item.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru')
                     );
                     const layout = schedule.normalizedLayout(schedule.currentLayout.value);
+                    let template;
                     if (existing) {
-                        await workspace.updateTemplateLayout(
+                        template = await workspace.updateTemplateLayout(
                             existing.id,
                             layout,
                             name,
                             existing.description || ''
                         );
                     } else {
-                        await workspace.createTemplate(name, '', layout);
+                        template = await workspace.createTemplate(name, '', layout);
                     }
+                    template = await attachCurrentFingerprint(template);
                     workspace.profileName.value = name;
                     addToast(
                         'Шаблон сохранён',
-                        `«${name}» сохранён в пространстве «${workspace.activeWorkspace.value?.name}».`,
+                        `«${name}» сохранён версией ${template.current_revision}.`,
                         'success'
                     );
                 } catch (error) {
@@ -148,14 +175,18 @@ export function mount() {
             };
 
             onMounted(async () => {
-                await workspace.init();
-                await migrateLocalTemplates();
+                const access = await platform.initAuth();
+                if (access?.setup_access || access?.authenticated) {
+                    await workspace.init();
+                    await migrateLocalTemplates();
+                }
             });
 
             return {
                 ...workspace,
                 ...schedule,
                 ...interaction,
+                ...platform,
                 toasts,
                 addToast,
                 removeToast,
