@@ -25,8 +25,7 @@ run_as_user() {
     local user="$1"
     shift
     if [[ $EUID -ne 0 || -z "$user" || "$user" == "root" || "$user" == "$(id -un)" ]]; then
-        exec_or_run=("$@")
-        "${exec_or_run[@]}"
+        "$@"
         return
     fi
     if command -v runuser >/dev/null 2>&1; then
@@ -101,7 +100,11 @@ resolve_python_bin() {
                     return 0
                 fi
             fi
-        done < <(find "$home/.pyenv/versions" -path "*/${version_glob}/bin/python3" -type f -o -type l 2>/dev/null | sort -Vr)
+        done < <(
+            find "$home/.pyenv/versions" \
+                -path "*/${version_glob}/bin/python3" \
+                \( -type f -o -type l \) 2>/dev/null | sort -Vr
+        )
     fi
 
     for candidate in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /usr/local/bin/python3; do
