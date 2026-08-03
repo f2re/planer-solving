@@ -48,7 +48,14 @@ def test_build_bundle_with_existing_wheelhouse(tmp_path: Path) -> None:
     (root / "VERSION").write_text("9.9.9\n", encoding="utf-8")
     (root / "requirements-runtime.txt").write_text("example==1\n", encoding="utf-8")
     (root / "src" / "app.py").write_text("value=1\n", encoding="utf-8")
-    for name in ("install_or_update.sh", "rollback.sh", "common.sh", "verify_bundle.py"):
+    for name in (
+        "install_or_update.sh",
+        "rollback.sh",
+        "common.sh",
+        "verify_bundle.py",
+        "runtime.sh",
+        "doctor.sh",
+    ):
         shutil.copy2(Path(__file__).parents[1] / "offline" / name, root / "offline" / name)
     wheelhouse = tmp_path / "wheels"
     wheelhouse.mkdir()
@@ -67,3 +74,5 @@ def test_build_bundle_with_existing_wheelhouse(tmp_path: Path) -> None:
     bundle_root = next(extracted.iterdir())
     assert verify_bundle(bundle_root)["ok"] is True
     assert (bundle_root / "app" / "src" / "app.py").exists()
+    assert (bundle_root / "runtime.sh").is_file()
+    assert (bundle_root / "doctor.sh").is_file()
