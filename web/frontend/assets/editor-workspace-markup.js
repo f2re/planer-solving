@@ -39,6 +39,7 @@ export function installEditorWorkspaceMarkup() {
           <button type="button" class="sheet-zoom-value" @click="fitSheetToScreen" title="Подогнать под экран">{{ Math.round(sheetZoom*100) }}%</button>
           <button type="button" class="sheet-tool icon-only" @click="zoomInSheet" title="Увеличить">+</button>
           <button type="button" class="sheet-tool" @click="fitSheetToScreen" title="Подогнать лист">⤢ <span>По экрану</span></button>
+          <button type="button" class="sheet-tool" @click="resetWorkspaceView" title="Сбросить сохранённое положение панелей и масштаб">↺ <span>Сбросить вид</span></button>
           <span class="sheet-toolbar-separator"></span>
           <button type="button" class="sheet-tool" :class="{active:liveRecalc}" @click="liveRecalc=!liveRecalc" title="Автоматический пересчёт">↻ <span>Авто</span></button>
           <button type="button" class="sheet-tool" @click="recalculateNow" :disabled="recalcState==='working'">✓ <span>Пересчитать</span></button>
