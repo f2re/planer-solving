@@ -6,6 +6,7 @@ import { installPlatformEnhancements } from './platform-enhancements.js';
 import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-layout-editor.js';
 import { createReactiveWorkspaceState } from './reactive-workspace.js';
 import { installEditorWorkspaceMarkup, createEditorWorkspaceState } from './editor-workspace.js';
+import { createSessionFileActions } from './session-file-actions.js';
 
 const { createApp, ref, onMounted } = Vue;
 
@@ -52,6 +53,11 @@ export function mount() {
                 interaction,
                 workspace,
                 platform
+            );
+            const sessionFiles = createSessionFileActions(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId
             );
 
             const rawRefreshSpaces = reactiveWorkspace.refreshSpaces;
@@ -220,6 +226,7 @@ export function mount() {
 
             const logout = async () => {
                 reactiveWorkspace.stopReactiveSync();
+                sessionFiles.clearRemovedFileUndo();
                 if (schedule.sessionId.value) await schedule.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
@@ -266,6 +273,7 @@ export function mount() {
                 ...platform,
                 ...reactiveWorkspace,
                 ...editor,
+                ...sessionFiles,
                 toasts,
                 addToast,
                 removeToast,
