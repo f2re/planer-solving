@@ -54,7 +54,8 @@ export function mount() {
                             await workspace.createTemplate(
                                 item.name,
                                 'Перенесён из локального хранилища браузера',
-                                item.layout
+                                item.layout,
+                                'Автоматический перенос из локального хранилища браузера.'
                             );
                         }
                     }
@@ -102,8 +103,26 @@ export function mount() {
                 if (workspace.managerTab.value === 'spaces') {
                     workspace.editWorkspace(workspace.activeWorkspace.value);
                 }
-                await operations.onWorkspaceChanged();
                 await interaction.rematchTemplates({ quiet: true });
+            };
+
+            const applyMatchCandidate = async key => {
+                const file = schedule.currentFile.value;
+                if (!file || !schedule.sessionId.value) return;
+                try {
+                    const { data } = await axios.post(
+                        `/api/analysis/${schedule.sessionId.value}/files/${file.file_id}/select-template`,
+                        { candidate_key: key }
+                    );
+                    await interaction.applyMatchCandidate(key);
+                    file.template_match = data;
+                } catch (error) {
+                    addToast(
+                        'Выбор разметки',
+                        error.response?.data?.detail || 'Не удалось сохранить выбранный вариант.',
+                        'error'
+                    );
+                }
             };
 
             const deleteTeacher = async value => {
@@ -140,10 +159,16 @@ export function mount() {
                             existing.id,
                             layout,
                             name,
-                            existing.description || ''
+                            existing.description || '',
+                            'Сохранена подтверждённая оператором разметка.'
                         );
                     } else {
-                        await workspace.createTemplate(name, '', layout);
+                        await workspace.createTemplate(
+                            name,
+                            '',
+                            layout,
+                            'Создано из подтверждённой оператором разметки.'
+                        );
                     }
                     workspace.profileName.value = name;
                     await operations.loadTemplateRevisions();
@@ -162,8 +187,15 @@ export function mount() {
             };
 
             const applySelectedProfile = async () => {
-                if (workspace.selectedTemplate.value) {
-                    await schedule.applyTemplate(workspace.selectedTemplate.value);
+                const selected = workspace.selectedTemplate.value;
+                if (!selected) return;
+                const candidate = schedule.currentFile.value?.template_candidates?.find(
+                    item => item.template_id === selected.id
+                );
+                if (candidate) {
+                    await applyMatchCandidate(candidate.candidate_key);
+                } else {
+                    await schedule.applyTemplate(selected);
                 }
             };
 
@@ -188,6 +220,7 @@ export function mount() {
                 addToast,
                 removeToast,
                 switchWorkspace,
+                applyMatchCandidate,
                 saveTeacher,
                 deleteTeacher,
                 saveWorkspace,
