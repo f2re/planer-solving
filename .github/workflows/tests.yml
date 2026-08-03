@@ -76,6 +76,7 @@ jobs:
           node --check web/frontend/assets/schedule-layout-utils.js
           node --check web/frontend/assets/schedule-state.js
           node --check web/frontend/assets/schedule-draft.js
+          node --check web/frontend/assets/schedule-result-coverage.js
           node --check web/frontend/assets/session-draft-markup.js
           node --check web/frontend/assets/interaction-ui.js
           node --check web/frontend/assets/interaction-markup.js
