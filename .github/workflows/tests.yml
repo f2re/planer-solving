@@ -75,6 +75,7 @@ jobs:
           node --check web/frontend/assets/session-file-actions.js
           node --check web/frontend/assets/session-draft-runtime.js
           node --check web/frontend/assets/teacher-mapping-state.js
+          node --check web/frontend/assets/editor-history-state.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/reactive-workspace.js
           node --check web/frontend/assets/schedule-layout-utils.js
