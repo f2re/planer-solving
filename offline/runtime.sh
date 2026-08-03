@@ -79,7 +79,8 @@ fi
 if [[ -f "$CURRENT/tools/service_preflight.py" ]]; then
     "$PYTHON" -m tools.service_preflight \
         --app-root "$CURRENT" \
-        --shared-dir "$INSTALL_ROOT/shared"
+        --shared-dir "$INSTALL_ROOT/shared" \
+        --full
 fi
 
 if [[ "$MODE" == "check" ]]; then
