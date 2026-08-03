@@ -9,6 +9,12 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
     const teacherMappingDraft = ref({});
     const teacherMappingSearch = ref('');
 
+    const originalResetWorkflow = schedule.resetWorkflow;
+    schedule.resetWorkflow = async (...args) => {
+        clearTeacherMappingState();
+        return originalResetWorkflow(...args);
+    };
+
     const currentMappingFile = computed(() => schedule.analyzedFiles.value.find(
         file => file.file_id === teacherMappingFileId.value
     ) || null);
