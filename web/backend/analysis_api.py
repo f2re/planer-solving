@@ -1,4 +1,4 @@
-"""Streaming schedule upload and automatic layout-template matching API."""
+"""Streaming schedule upload and automatic composite-template matching API."""
 from __future__ import annotations
 
 import logging
@@ -7,12 +7,15 @@ import time
 from typing import Any, Dict, List
 import uuid
 
-from fastapi import APIRouter, FastAPI, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, Request, UploadFile
 from pydantic import BaseModel
 
+from src.operations_domain import AuthenticatedUser
 from src.schedule_analyzer import ScheduleAnalyzer
 from src.template_matcher import evaluate_layout, rank_candidates
+from src.workbook_fingerprint import build_workbook_fingerprint
 from web.backend.app_context import ApplicationContext
+from web.backend.auth import operator_dependency
 from web.backend.errors import ApplicationError
 from web.backend.schemas import AnalysisFile, AnalyzeResponse
 
@@ -25,8 +28,6 @@ class TemplateMatchRequest(BaseModel):
 
 
 async def request_uploads(request: Request, field_name: str = "files") -> List[UploadFile]:
-    """Parse multipart data without an application file-count ceiling."""
-
     form = await request.form(max_files=float("inf"), max_fields=float("inf"))
     files = [
         item for item in form.getlist(field_name)
@@ -38,10 +39,9 @@ async def request_uploads(request: Request, field_name: str = "files") -> List[U
 
 
 async def stream_upload(upload: UploadFile, target: Path) -> int:
-    """Write an uploaded file incrementally without an application size limit."""
-
     written = 0
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("wb") as output:
             while True:
                 chunk = await upload.read(UPLOAD_CHUNK_SIZE)
@@ -60,8 +60,6 @@ def _response_file(item: Dict[str, Any]) -> AnalysisFile:
 
 
 async def analyze_files(context: ApplicationContext, files: List[UploadFile]) -> AnalyzeResponse:
-    """Analyze any number of workbooks while keeping their payloads off RAM."""
-
     session_id, session_dir = context.sessions.create()
     analyzer = ScheduleAnalyzer()
     response_files: List[AnalysisFile] = []
@@ -117,6 +115,7 @@ async def analyze_files(context: ApplicationContext, files: List[UploadFile]) ->
 
         try:
             analysis = analyzer.analyze(str(stored_path)).to_dict()
+            analysis["fingerprint"] = build_workbook_fingerprint(stored_path)
             item["analysis"] = analysis
             item["status"] = "success" if analysis["confidence"] >= 0.55 else "warning"
             item["message"] = (
@@ -146,9 +145,13 @@ async def analyze_files(context: ApplicationContext, files: List[UploadFile]) ->
 
 def build_analysis_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["analysis"])
+    operator = operator_dependency(context)
 
     @router.post("/api/analyze", response_model=AnalyzeResponse)
-    async def analyze_schedules(request: Request) -> AnalyzeResponse:
+    async def analyze_schedules(
+        request: Request,
+        _: AuthenticatedUser = Depends(operator),
+    ) -> AnalyzeResponse:
         return await analyze_files(context, await request_uploads(request))
 
     @router.post("/api/analysis/{session_id}/files/{file_id}/match-templates")
@@ -156,6 +159,7 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         session_id: str,
         file_id: str,
         request: TemplateMatchRequest,
+        _: AuthenticatedUser = Depends(operator),
     ) -> Dict[str, Any]:
         manifest = context.sessions.load_manifest(session_id)
         item = context.sessions.manifest_file(manifest, file_id)
@@ -170,12 +174,14 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
             workspace.get("teachers", []),
         )
         workbook_path = context.sessions.stored_path(session_id, item)
+        fingerprint = analysis.get("fingerprint") or {}
         common = {
             "file_path": workbook_path,
             "teachers_path": teachers_path,
             "group_name": item.get("group_name") or Path(item["filename"]).stem,
             "available_sheets": analysis.get("sheet_names", []),
             "fallback_sheet": analysis.get("selected_sheet", ""),
+            "workbook_fingerprint": fingerprint,
         }
 
         candidates = [
@@ -187,15 +193,32 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
             )
         ]
         for template in workspace.get("templates", []):
-            candidates.append(
-                evaluate_layout(
-                    **common,
-                    layout=template.get("layout", {}),
-                    source="template",
-                    name=template.get("name") or "Шаблон без названия",
-                    template_id=template.get("id"),
-                )
+            candidate = evaluate_layout(
+                **common,
+                layout=template.get("layout", {}),
+                source="template",
+                name=template.get("name") or "Шаблон без названия",
+                template_id=template.get("id"),
             )
+            revisions = context.operations.list_template_revisions(
+                workspace["id"], template["id"]
+            )
+            candidate["template_revision_id"] = revisions[0]["id"] if revisions else None
+            learning = context.operations.template_learning_summary(
+                template["id"], fingerprint.get("signature")
+            )
+            learning_bonus = min(35.0, learning["exact_successes"] * 12.0 + learning["success_rate"] * 14.0)
+            learning_penalty = min(25.0, learning["failures"] * 1.5)
+            candidate["learning"] = learning
+            candidate["score"] = round(
+                float(candidate["score"]) + learning_bonus - learning_penalty,
+                3,
+            )
+            if learning_bonus:
+                candidate["reasons"].append(
+                    f"Подтверждённые успешные применения: {learning['successes']}"
+                )
+            candidates.append(candidate)
 
         ranked = rank_candidates(candidates)
         selected = ranked[0]
@@ -208,12 +231,23 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
             "workspace_id": workspace["id"],
             "evaluated_at": time.time(),
             "selected": {
-                key: selected[key]
+                key: selected.get(key)
                 for key in (
-                    "candidate_key", "source", "name", "template_id", "score",
-                    "quality_percent", "metrics", "reasons", "improvement_over_automatic",
+                    "candidate_key", "source", "name", "template_id",
+                    "template_revision_id", "component_id", "component_label",
+                    "score", "quality_percent", "fingerprint_similarity",
+                    "metrics", "reasons", "improvement_over_automatic",
                 )
             },
+            "candidates": [{
+                key: candidate.get(key)
+                for key in (
+                    "candidate_key", "source", "name", "template_id",
+                    "template_revision_id", "component_id", "component_label",
+                    "score", "quality_percent", "fingerprint_similarity",
+                    "metrics", "reasons", "layout", "usable", "learning",
+                )
+            } for candidate in ranked],
         }
         context.sessions.save_manifest(session_id, manifest)
         return {
@@ -229,7 +263,5 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
 
 
 def install_analysis_api(app: FastAPI, context: ApplicationContext) -> FastAPI:
-    """Compatibility wrapper for extensions written before the app factory."""
-
     app.include_router(build_analysis_router(context))
     return app
