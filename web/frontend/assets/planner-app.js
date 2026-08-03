@@ -1,6 +1,7 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
 import { createScheduleDraftState } from './schedule-draft.js';
+import { installSessionDraftMarkup } from './session-draft-markup.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 import { installPlatformEnhancements } from './platform-enhancements.js';
@@ -17,6 +18,7 @@ export function mount() {
     installPlatformEnhancements();
     installSampleLayoutMarkup();
     installEditorWorkspaceMarkup();
+    installSessionDraftMarkup();
 
     createApp({
         setup() {
@@ -147,6 +149,7 @@ export function mount() {
                                 name,
                                 description: '',
                                 layout,
+                                composite: [],
                                 comment,
                                 fingerprint
                             }
