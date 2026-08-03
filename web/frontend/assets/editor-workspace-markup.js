@@ -43,6 +43,22 @@ export function installEditorWorkspaceMarkup() {
           <span class="sheet-toolbar-separator"></span>
           <button type="button" class="sheet-tool" :class="{active:liveRecalc}" @click="liveRecalc=!liveRecalc" title="Автоматический пересчёт">↻ <span>Авто</span></button>
           <button type="button" class="sheet-tool" @click="recalculateNow" :disabled="recalcState==='working'">✓ <span>Пересчитать</span></button>
+          <button
+            type="button"
+            class="sheet-tool icon-only sheet-history-undo"
+            :disabled="!canUndoEditor || applyingHistory"
+            :title="canUndoEditor ? 'Отменить изменение · Ctrl/Cmd+Z' : 'Нет изменений для отмены'"
+            aria-label="Отменить изменение"
+            @click="undoEditorChange"
+          >↶</button>
+          <button
+            type="button"
+            class="sheet-tool icon-only sheet-history-redo"
+            :disabled="!canRedoEditor || applyingHistory"
+            :title="canRedoEditor ? 'Вернуть изменение · Ctrl/Cmd+Shift+Z или Ctrl+Y' : 'Нет изменений для возврата'"
+            aria-label="Вернуть изменение"
+            @click="redoEditorChange"
+          >↷</button>
           <span class="sheet-file-save-state" :class="{dirty:layoutDirty}">
             {{ layoutDirty ? 'Изменения файла — в черновике' : 'Разметка файла сохранена' }}
           </span>
