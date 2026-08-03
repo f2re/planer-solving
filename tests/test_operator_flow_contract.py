@@ -30,6 +30,7 @@ def test_operator_flow_states_nonblocking_policy() -> None:
     assert "Ничего не блокируется" in source
     assert "Результат создаётся из пригодных данных" in source
     assert "остаются доступными для исправления" in source
+    assert "Ручная правка необязательна" in source
 
 
 def test_operator_flow_has_primary_keyboard_actions() -> None:
@@ -53,6 +54,19 @@ def test_active_session_supports_individual_file_actions() -> None:
     assert "createSessionFileActions" in application
     assert "Ранее исправленные файлы не изменены" in state
     assert "Прежний исходник и все правки сохранены" in state
+
+
+def test_attention_queue_explains_default_and_impact() -> None:
+    markup = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
+    state = (ASSETS / "session-file-actions.js").read_text(encoding="utf-8")
+
+    assert "Контроль решений" in markup
+    assert "По умолчанию:" in markup
+    assert "issue.default_decision" in markup
+    assert "issue.impact" in markup
+    assert "openAttentionIssue" in markup
+    assert "defaultResolution" in state
+    assert "attentionIssues" in state
 
 
 def test_ux_audit_defines_issue_resolution_contract() -> None:
