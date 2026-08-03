@@ -49,6 +49,8 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
     const draftSavedAt = ref(null);
     const draftRestored = ref(false);
     const draftError = ref('');
+    const replacementFileId = ref(null);
+    const replacementBusy = ref(false);
     let restoring = false;
     let saveTimer = null;
     let saveChain = Promise.resolve();
@@ -243,7 +245,10 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
             };
         } catch (error) {
             const status = Number(error.response?.status || 0);
-            if (status === 404 || status === 410) rememberSession(null);
+            if (status === 404 || status === 410) {
+                rememberSession(null);
+                addToast('Черновик истёк', 'Сохранённые исходники удалены по сроку хранения. Начните новый сеанс.', 'info');
+            }
             draftState.value = 'idle';
             return { restored: false, expired: status === 404 || status === 410 };
         } finally {
@@ -271,6 +276,96 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         await returnToCorrections(detail?.file_id || null);
     }
 
+    function startFileReplacement(fileId = null) {
+        const target = fileId || schedule.currentFile.value?.file_id;
+        if (!target || replacementBusy.value) return;
+        replacementFileId.value = target;
+        nextTick(() => document.getElementById('analysis-file-replacement')?.click());
+    }
+
+    async function replaceAnalysisFile(event) {
+        const input = event?.target;
+        const file = input?.files?.[0];
+        const fileId = replacementFileId.value;
+        if (!file || !fileId || !schedule.sessionId.value) {
+            if (input) input.value = '';
+            return;
+        }
+        replacementBusy.value = true;
+        const form = new FormData();
+        form.append('files', file);
+        try {
+            const { data } = await axios.post(
+                `/api/analysis/${schedule.sessionId.value}/files/${fileId}/replace`,
+                form,
+                { headers: { 'Content-Type': 'multipart/form-data' } }
+            );
+            const index = schedule.analyzedFiles.value.findIndex(item => item.file_id === fileId);
+            const previous = index >= 0 ? schedule.analyzedFiles.value[index] : {};
+            const replacement = {
+                ...previous,
+                ...data,
+                enabled: Boolean(data.analysis),
+                group_name: data.group_name || previous.group_name || file.name.replace(/\.[^.]+$/, '')
+            };
+            if (index >= 0) schedule.analyzedFiles.value.splice(index, 1, replacement);
+            else schedule.analyzedFiles.value.push(replacement);
+            if (data.analysis) {
+                schedule.layouts[fileId] = clone(data.analysis.layout);
+                schedule.periodOverrides[fileId] = { week_day_dates: {}, week_months: {} };
+                delete schedule.validations[fileId];
+                schedule.selectedFileId.value = fileId;
+                schedule.result.value = null;
+                schedule.step.value = 2;
+                schedule.previewRegion.value = 'schedule';
+                await nextTick();
+                await schedule.loadPreview();
+                await schedule.validateCurrent();
+            }
+            await flushDraft({ quiet: false });
+            addToast('Файл заменён', 'Остальные файлы, ручные даты и разметки сохранены.', 'success');
+        } catch (error) {
+            addToast(
+                'Файл не заменён',
+                error.response?.data?.detail || 'Новый файл не удалось обработать; прежний файл сохранён.',
+                'warning'
+            );
+        } finally {
+            replacementBusy.value = false;
+            replacementFileId.value = null;
+            if (input) input.value = '';
+        }
+    }
+
+    const originalApplyParserAction = schedule.applyParserAction;
+    async function applyParserAction(action) {
+        if (action?.type === 'replace_file') {
+            startFileReplacement(action.file_id || schedule.currentFile.value?.file_id);
+            return;
+        }
+        if (action?.type === 'open_teacher_mapping') {
+            schedule.step.value = 2;
+            schedule.previewRegion.value = 'legend';
+            await schedule.loadPreview();
+            await nextTick();
+            const target = document.querySelector('.editor-settings-panel, .settings-panel, .exact-layout-editor');
+            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            addToast(
+                'Преподаватели',
+                'Проверьте столбцы лектора и остальных преподавателей либо измените справочник пространства.',
+                'info'
+            );
+            return;
+        }
+        return originalApplyParserAction(action);
+    }
+
+    const originalGenerate = schedule.generate;
+    async function generate() {
+        await originalGenerate();
+        if (schedule.result.value?.filename) await flushDraft({ quiet: false });
+    }
+
     const originalResetWorkflow = schedule.resetWorkflow;
     async function resetWorkflow() {
         restoring = true;
@@ -283,6 +378,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
             draftSavedAt.value = null;
             draftRestored.value = false;
             draftError.value = '';
+            replacementFileId.value = null;
             restoring = false;
         }
     }
@@ -339,10 +435,16 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         draftError,
         resultCorrections,
         resultProblemFiles,
+        replacementFileId,
+        replacementBusy,
         restoreDraft,
         flushDraft,
         returnToCorrections,
         openResultFile,
+        startFileReplacement,
+        replaceAnalysisFile,
+        applyParserAction,
+        generate,
         resetWorkflow
     };
 }
