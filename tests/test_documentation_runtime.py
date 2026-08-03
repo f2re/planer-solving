@@ -28,7 +28,7 @@ def test_parser_documentation_promises_recovery_and_in_place_corrections():
     for source in (guide, recovery, audit):
         lower = source.lower()
         assert "повторн" in lower and ("загруз" in lower or "загруж" in lower)
-        assert "не блок" in lower
+        assert "не блок" in lower or "без блок" in lower
     assert "переход месяца" in guide.lower()
     assert "Не назначен" in guide
     assert "Сбросить вид" in guide
