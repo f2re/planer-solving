@@ -130,13 +130,127 @@ class AnalysisSessionStore:
                 return item
         raise UploadedFileNotFound("Файл в сеансе не найден.")
 
+    @staticmethod
+    def _same_file(left: Path, right: Path) -> bool:
+        try:
+            return os.path.samestat(left.stat(), right.stat())
+        except OSError:
+            return False
+
+    def _display_alias(
+        self,
+        session_dir: Path,
+        canonical: Path,
+        file_item: Dict[str, Any],
+    ) -> Path:
+        """Return a safe path whose basename is the user's original filename.
+
+        Files are stored under opaque internal names so sessions cannot collide.
+        Parsers and reports, however, must never expose those UUID names. A
+        per-file alias keeps the original basename without changing the manifest
+        or duplicating large workbooks on normal Linux filesystems.
+        """
+
+        display_name = Path(str(file_item.get("filename") or canonical.name)).name
+        if not display_name or display_name in {".", ".."} or display_name == canonical.name:
+            return canonical
+        file_id = Path(str(file_item.get("file_id") or canonical.stem)).name
+        if not file_id or file_id in {".", ".."}:
+            file_id = canonical.stem or "source"
+        alias_dir = session_dir / ".display" / file_id
+        alias_dir.mkdir(parents=True, exist_ok=True)
+        alias = alias_dir / display_name
+
+        # Remove aliases left by a previous per-file replacement. They are
+        # private session artefacts and never referenced from the manifest.
+        try:
+            for candidate in alias_dir.iterdir():
+                if candidate != alias:
+                    if candidate.is_dir() and not candidate.is_symlink():
+                        shutil.rmtree(candidate, ignore_errors=True)
+                    else:
+                        candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        if alias.is_symlink():
+            try:
+                if alias.resolve() == canonical:
+                    return alias
+            except OSError:
+                pass
+        elif alias.is_file() and self._same_file(alias, canonical):
+            return alias
+
+        try:
+            alias.unlink(missing_ok=True)
+        except OSError:
+            return canonical
+
+        # A relative symlink stays valid when the complete installation is
+        # moved or restored from an offline backup.
+        try:
+            relative_target = os.path.relpath(canonical, alias.parent)
+            alias.symlink_to(relative_target)
+            if alias.resolve() == canonical:
+                return alias
+        except OSError:
+            try:
+                alias.unlink(missing_ok=True)
+            except OSError:
+                return canonical
+
+        # Restricted environments may disallow symlinks. A hard link preserves
+        # the original name without copying; stored_path detects a stale inode
+        # after atomic replacement and recreates it on the next access.
+        try:
+            os.link(canonical, alias)
+            if self._same_file(alias, canonical):
+                return alias
+        except OSError:
+            try:
+                alias.unlink(missing_ok=True)
+            except OSError:
+                return canonical
+
+        # Last resort for unusual filesystems. This is normally executed only
+        # once per source file; metadata lets later calls reuse the copy until
+        # the canonical workbook changes.
+        metadata = alias_dir / ".source.json"
+        try:
+            signature = {
+                "source": str(canonical),
+                "size": canonical.stat().st_size,
+                "mtime_ns": canonical.stat().st_mtime_ns,
+            }
+            if alias.is_file() and metadata.is_file():
+                previous = json.loads(metadata.read_text(encoding="utf-8"))
+                if previous == signature:
+                    return alias
+            temporary = alias.with_name(f".{alias.name}.{uuid.uuid4().hex}.tmp")
+            shutil.copy2(canonical, temporary)
+            os.replace(temporary, alias)
+            self.atomic_json_write(metadata, signature)
+            return alias
+        except (OSError, json.JSONDecodeError):
+            try:
+                alias.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return canonical
+
     def stored_path(self, session_id: str, file_item: Dict[str, Any]) -> Path:
         session_dir = self.path(session_id)
         stored_name = str(file_item.get("stored_name") or "")
-        path = (session_dir / stored_name).resolve()
-        if not stored_name or path.parent != session_dir or not path.is_file():
+        canonical = (session_dir / stored_name).resolve()
+        if (
+            not stored_name
+            or canonical == session_dir
+            or session_dir not in canonical.parents
+            or not canonical.is_file()
+        ):
             raise UploadedFileNotFound("Загруженный файл не найден.")
-        return path
+        return self._display_alias(session_dir, canonical, file_item)
 
     def write_snapshot(self, session_id: str, name: str, payload: Any) -> Path:
         safe_name = Path(name).name
