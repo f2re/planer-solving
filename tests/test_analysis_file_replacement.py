@@ -167,7 +167,7 @@ def test_manifest_write_failure_restores_previous_file_and_metadata(tmp_path, mo
     restored = client.get(f"/api/analysis/{session_id}").json()
     bad = next(item for item in restored["files"] if item["file_id"] == bad_id)
     assert bad["filename"] == "bad.xlsx"
-    assert bad["analysis"] is None
+    assert bad.get("analysis") is None
     assert restored["draft"]["result"]["filename"] == "old.xlsx"
     assert restored["draft"]["layouts"][good_id]
 
