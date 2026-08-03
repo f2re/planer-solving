@@ -60,7 +60,7 @@ export function installOperatorFlowMarkup() {
         <div class="readiness-metrics">
           <span><b>{{ checkedFilesCount }}</b><small>пересчитано</small></span>
           <span><b>{{ enabledFiles.filter(file => (validations[file.file_id]?.report?.unknown_teacher_lessons || 0) > 0).length }}</b><small>нужно назначить</small></span>
-          <span><b>{{ enabledFiles.filter(file => validations[file.file_id]?.status === 'warning').length }}</b><small>есть подсказки</small></span>
+          <span><b>{{ attentionIssues.length }}</b><small>решений показано</small></span>
         </div>
         <div class="operator-primary-actions">
           <label class="btn btn-secondary operator-add-files" :class="{disabled:fileMutationBusy}">
@@ -76,7 +76,35 @@ export function installOperatorFlowMarkup() {
         <div><b>Файл убран из сеанса</b><small>{{ lastRemovedFile.file.filename }} · разметка и группа сохранены для отмены</small></div>
         <button type="button" class="btn btn-secondary btn-small" :disabled="fileMutationBusy" @click="undoRemoveSessionFile">Вернуть файл</button>
         <button type="button" class="session-undo-close" aria-label="Скрыть сообщение" @click="clearRemovedFileUndo">×</button>
-      </div>`);
+      </div>
+      <section class="attention-queue" aria-label="Решения по замечаниям">
+        <header class="attention-header">
+          <div>
+            <span class="eyebrow">Контроль решений</span>
+            <strong>{{ attentionIssues.length ? 'Есть решения, которые можно уточнить' : 'Без обязательных действий' }}</strong>
+            <small v-if="attentionIssues.length">Система уже выбрала безопасный вариант для каждого пункта. Ручная правка необязательна.</small>
+            <small v-else>Проверьте файлы, чтобы увидеть принятые системой решения до формирования.</small>
+          </div>
+          <button type="button" class="btn btn-secondary btn-small" :disabled="validateBusy || !enabledFiles.length" @click="validateAll">
+            {{ validateBusy ? 'Проверяем…' : 'Проверить все файлы' }}
+          </button>
+        </header>
+        <div v-if="attentionIssues.length" class="attention-list">
+          <article v-for="issue in attentionIssues.slice(0,8)" :key="issue.file_id + ':' + issue.code + ':' + issue.message" class="attention-item" :class="issue.severity">
+            <span class="attention-dot"></span>
+            <div class="attention-copy">
+              <div class="attention-meta"><b>{{ issue.filename }}</b><span>{{ issue.scope === 'teacher' ? 'Преподаватель' : issue.scope === 'calendar' ? 'Календарь' : issue.scope === 'range' ? 'Разметка' : issue.scope === 'sheet' ? 'Лист' : 'Файл' }}</span></div>
+              <strong>{{ issue.message }}</strong>
+              <p><b>По умолчанию:</b> {{ issue.default_decision }}</p>
+              <small>{{ issue.impact }}</small>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" @click="openAttentionIssue(issue)">
+              {{ issue.action?.label || 'Показать файл' }}
+            </button>
+          </article>
+          <p v-if="attentionIssues.length > 8" class="attention-more">Ещё решений: {{ attentionIssues.length - 8 }}. Они доступны в соответствующих файлах и итоговом отчёте.</p>
+        </div>
+      </section>`);
 
     const groupInput = document.querySelector('.file-item .group-input');
     insertOnce(groupInput, 'afterend', '.file-resolution-state', `
