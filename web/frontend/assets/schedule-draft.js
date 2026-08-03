@@ -44,7 +44,12 @@ function rememberSession(sessionId, workspaceId) {
     }
 }
 
-export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) {
+export function createScheduleDraftState(
+    addToast,
+    schedule,
+    activeWorkspaceId,
+    interaction = null
+) {
     const draftState = ref('idle');
     const draftSavedAt = ref(null);
     const draftRestored = ref(false);
@@ -141,6 +146,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
 
     function queueDraftSave() {
         if (restoring || disposed || !schedule.sessionId.value) return;
+        rememberSession(schedule.sessionId.value, activeWorkspaceId.value);
         draftState.value = 'pending';
         window.clearTimeout(saveTimer);
         saveTimer = window.setTimeout(() => {
@@ -194,7 +200,10 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
                 return {
                     ...item,
                     group_name: saved?.group_name || item.group_name,
-                    enabled: saved ? Boolean(saved.enabled && item.analysis) : Boolean(item.analysis)
+                    enabled: saved ? Boolean(saved.enabled && item.analysis) : Boolean(item.analysis),
+                    matching: false,
+                    template_match: item.template_match?.selected || item.template_match || null,
+                    template_candidates: []
                 };
             });
             if (!files.length) {
@@ -291,8 +300,12 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         if (target) {
             schedule.selectedFileId.value = target.file_id;
             schedule.previewRegion.value = 'schedule';
+            interaction?.clearRangeSelection?.();
             await nextTick();
-            if (target.analysis) await schedule.loadPreview();
+            if (target.analysis) {
+                await schedule.loadPreview();
+                await schedule.validateCurrent();
+            }
         }
         await flushDraft();
     }
@@ -331,6 +344,9 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
                 ...previous,
                 ...data,
                 enabled: Boolean(data.analysis),
+                matching: false,
+                template_match: null,
+                template_candidates: [],
                 group_name: data.group_name || previous.group_name || file.name.replace(/\.[^.]+$/, '')
             };
             if (index >= 0) schedule.analyzedFiles.value.splice(index, 1, replacement);
@@ -343,8 +359,13 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
                 schedule.result.value = null;
                 schedule.step.value = 2;
                 schedule.previewRegion.value = 'schedule';
+                interaction?.clearRangeSelection?.();
                 await nextTick();
-                await schedule.loadPreview();
+                if (interaction?.rematchTemplates) {
+                    await interaction.rematchTemplates({ quiet: true });
+                } else {
+                    await schedule.loadPreview();
+                }
                 await schedule.validateCurrent();
             }
             await flushDraft({ quiet: false });
@@ -370,6 +391,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         }
         if (action?.type === 'open_teacher_mapping') {
             schedule.step.value = 2;
+            interaction?.setSelectionMode?.('legend');
             schedule.previewRegion.value = 'legend';
             await schedule.loadPreview();
             await nextTick();
@@ -391,21 +413,21 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
         if (schedule.result.value?.filename) await flushDraft({ quiet: false });
     }
 
-    const originalHandleFileInput = schedule.handleFileInput;
+    const originalHandleFileInput = interaction?.handleFileInput || schedule.handleFileInput;
     async function handleFileInput(event) {
         await originalHandleFileInput(event);
         exposeUnparsedSession();
         await flushDraft();
     }
 
-    const originalHandleDrop = schedule.handleDrop;
+    const originalHandleDrop = interaction?.handleDrop || schedule.handleDrop;
     async function handleDrop(event) {
         await originalHandleDrop(event);
         exposeUnparsedSession();
         await flushDraft();
     }
 
-    const originalResetWorkflow = schedule.resetWorkflow;
+    const originalResetWorkflow = interaction?.resetWorkflow || schedule.resetWorkflow;
     async function resetWorkflow() {
         restoring = true;
         window.clearTimeout(saveTimer);
@@ -446,6 +468,7 @@ export function createScheduleDraftState(addToast, schedule, activeWorkspaceId) 
     function beforeUnload() {
         const id = schedule.sessionId.value;
         if (!id || restoring) return;
+        rememberSession(id, activeWorkspaceId.value);
         const body = JSON.stringify(draftPayload());
         try {
             fetch(`/api/analysis/${id}/draft`, {
