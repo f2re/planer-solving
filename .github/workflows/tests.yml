@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,13 +32,18 @@ jobs:
         run: |
           python -m py_compile \
             src/schedule_analyzer.py src/data_loader.py src/template_matcher.py \
+            src/template_definition.py src/workbook_fingerprint.py src/import_wizard.py \
+            src/import_commit.py src/operations_domain.py src/operations_store.py \
             src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \
             src/data_migrations.py tools/migrate.py tools/healthcheck.py \
             offline/build_bundle.py offline/verify_bundle.py \
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
-            web/backend/errors.py web/backend/analysis_api.py \
+            web/backend/errors.py web/backend/auth.py web/backend/auth_api.py \
+            web/backend/analysis_api.py web/backend/analysis_selection_api.py \
             web/backend/session_api.py web/backend/system_api.py \
-            web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
+            web/backend/workspace_api.py web/backend/workspace_schedule.py \
+            web/backend/import_api.py web/backend/template_revision_api.py \
+            web/backend/history_api.py web/backend/audit_api.py web/backend/schemas.py
 
       - name: Assert clean backend architecture
         run: |
@@ -47,6 +52,7 @@ jobs:
           ! grep -R "app.router.routes\[:\]" -n web/backend
           ! grep -R "WorkspaceStore.load =" -n web/backend
           ! grep -R "class WorkspaceStore" -n src
+          ! grep -R "schedule_start_date.*2026" -n src web/backend web/frontend/assets
 
       - name: Check shell scripts
         run: |
@@ -61,10 +67,13 @@ jobs:
           node --check web/frontend/assets/app.js
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/workspace-state.js
+          node --check web/frontend/assets/workspace-state-v2.js
           node --check web/frontend/assets/schedule-state.js
           node --check web/frontend/assets/interaction-ui.js
           node --check web/frontend/assets/interaction-markup.js
           node --check web/frontend/assets/interaction-state.js
+          node --check web/frontend/assets/operations-ui.js
+          node --check web/frontend/assets/operations-state.js
 
       - name: Build real offline bundle
         run: bash offline/build_offline_bundle.sh --output dist
