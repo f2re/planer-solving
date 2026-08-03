@@ -111,6 +111,39 @@
     font-size: 11px;
     font-weight: 800;
 }
+.result-warning-details {
+    border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+    background: color-mix(in srgb, var(--warning) 3%, #fff);
+}
+.result-warning-list {
+    display: grid;
+    gap: 6px;
+    max-height: 280px;
+    overflow: auto;
+    padding: 0 10px 10px;
+}
+.result-warning-list article {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+    font-size: 10px;
+    line-height: 1.45;
+}
+.result-warning-symbol {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--warning) 12%, #fff);
+    color: var(--warning);
+    font-weight: 900;
+}
 .result-correction-list {
     display: grid;
     gap: 6px;
