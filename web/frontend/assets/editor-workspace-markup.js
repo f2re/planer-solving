@@ -29,7 +29,7 @@ export function installEditorWorkspaceMarkup() {
     const previewToolbar = canvasPanel?.querySelector('.preview-toolbar');
     previewToolbar?.insertAdjacentHTML('afterend', `
       <div class="sheet-command-bar" :class="{fullscreen:sheetWorkspaceOpen}">
-        <button v-if="!sheetWorkspaceOpen" type="button" class="btn btn-primary btn-small" @click="enterSheetWorkspace">Развернуть рабочий лист</button>
+        <button v-if="!sheetWorkspaceOpen" type="button" class="btn btn-primary btn-small" @click="enterSheetWorkspace(false)">Развернуть рабочий лист</button>
         <template v-else>
           <button type="button" class="sheet-tool" :class="{active:filesPanelVisible}" @click="filesPanelVisible=!filesPanelVisible" title="Файлы">☰ <span>Файлы</span></button>
           <button type="button" class="sheet-tool" :class="{active:settingsPanelVisible}" @click="settingsPanelVisible=!settingsPanelVisible" title="Параметры">⚙ <span>Параметры</span></button>
