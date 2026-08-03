@@ -1,0 +1,134 @@
+.analysis-draft-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 25px;
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.bottom-note .analysis-draft-status { margin-left: 10px; }
+.draft-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+.analysis-draft-status.pending .draft-status-dot {
+    background: var(--warning);
+    animation: draft-pulse 1s ease-in-out infinite;
+}
+.analysis-draft-status.saved .draft-status-dot { background: var(--success); }
+.analysis-draft-status.error {
+    border-color: color-mix(in srgb, var(--danger) 25%, var(--line));
+    color: var(--danger);
+}
+.analysis-draft-status.error .draft-status-dot { background: var(--danger); }
+.result-icon.warning {
+    background: color-mix(in srgb, var(--warning) 13%, #fff);
+    color: var(--warning);
+}
+.result-file-fix { margin-left: auto; }
+.result-corrections-panel {
+    display: grid;
+    gap: 12px;
+    margin: 16px 0;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--line));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--primary) 3%, #fff);
+}
+.result-corrections-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+.result-corrections-head > div { display: grid; gap: 3px; }
+.result-corrections-head strong { font-size: 14px; }
+.result-corrections-head span:not(.analysis-draft-status) {
+    color: var(--muted);
+    font-size: 11px;
+}
+.result-problem-list { display: grid; gap: 7px; }
+.result-problem-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+.result-problem-item:hover {
+    border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
+    background: color-mix(in srgb, var(--primary) 3%, #fff);
+}
+.result-problem-item > span:first-child { display: grid; gap: 2px; min-width: 0; }
+.result-problem-item b,
+.result-problem-item small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.result-problem-item small { color: var(--muted); font-size: 10px; }
+.result-problem-item > span:last-child {
+    color: var(--primary);
+    font-size: 10px;
+    font-weight: 850;
+    white-space: nowrap;
+}
+.result-correction-details {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+}
+.result-correction-details summary {
+    padding: 10px 11px;
+    cursor: pointer;
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 800;
+}
+.result-correction-list {
+    display: grid;
+    gap: 6px;
+    max-height: 300px;
+    overflow: auto;
+    padding: 0 10px 10px;
+}
+.result-correction-list article {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.35fr) minmax(180px, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    padding: 8px;
+    border-radius: 8px;
+    background: var(--surface-soft);
+    font-size: 10px;
+}
+.result-correction-list article span { color: var(--text); line-height: 1.4; }
+.result-correction-list article small { color: var(--muted); white-space: nowrap; }
+@keyframes draft-pulse {
+    0%, 100% { opacity: .35; transform: scale(.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+@media (max-width: 760px) {
+    .result-corrections-head { flex-direction: column; }
+    .result-file-fix { width: 100%; margin-left: 0; }
+    .result-correction-list article { grid-template-columns: 1fr; }
+    .result-correction-list article small { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .analysis-draft-status.pending .draft-status-dot { animation: none; }
+}
