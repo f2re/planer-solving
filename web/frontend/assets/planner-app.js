@@ -1,6 +1,7 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
 import { createScheduleDraftState } from './schedule-draft.js';
+import { createScheduleDiagnosticGenerationState } from './schedule-diagnostic-generation.js';
 import { createScheduleResultCoverageState } from './schedule-result-coverage.js';
 import { installSessionDraftMarkup } from './session-draft-markup.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
@@ -51,6 +52,12 @@ export function mount() {
                 schedule,
                 workspace.activeWorkspaceId,
                 interaction
+            );
+            const scheduleDiagnosticGeneration = createScheduleDiagnosticGenerationState(
+                addToast,
+                schedule,
+                scheduleDraft,
+                workspace.activeWorkspaceId
             );
             const scheduleResultCoverage = createScheduleResultCoverageState(schedule);
             const reactiveWorkspace = createReactiveWorkspaceState(addToast, workspace, schedule);
@@ -289,6 +296,9 @@ export function mount() {
                 // upload progress, template matching or range cleanup.
                 ...scheduleDraft,
                 ...scheduleResultCoverage,
+                // The generation controller is last so even an entirely
+                // unreadable set can produce a diagnostic workbook.
+                ...scheduleDiagnosticGeneration,
                 ...sampleLayout,
                 ...platform,
                 ...reactiveWorkspace,
