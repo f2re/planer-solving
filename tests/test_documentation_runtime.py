@@ -18,3 +18,18 @@ def test_runtime_documentation_covers_installation_python_discovery_and_diagnost
     assert "MutationObserver" in troubleshooting
     assert "ModuleNotFoundError" in troubleshooting
     assert "journalctl -u planner-solving" in troubleshooting
+
+
+def test_parser_documentation_promises_recovery_and_in_place_corrections():
+    docs = Path(__file__).parents[1] / "docs"
+    guide = (docs / "OPERATOR_GUIDE.md").read_text(encoding="utf-8")
+    recovery = (docs / "PARSER_RECOVERY.md").read_text(encoding="utf-8")
+    audit = (docs / "PARSER_AUDIT_2_15.md").read_text(encoding="utf-8")
+    for source in (guide, recovery, audit):
+        assert "повторной загруз" in source.lower() or "повторно загруж" in source.lower()
+        assert "не блок" in source.lower()
+    assert "переход месяца" in guide.lower()
+    assert "Не назначен" in guide
+    assert "Сбросить вид" in guide
+    assert "диагностический Excel" in recovery
+    assert "week" not in audit or "недел" in audit.lower()
