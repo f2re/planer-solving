@@ -6,7 +6,11 @@ warn() { printf '[planner] ПРЕДУПРЕЖДЕНИЕ: %s\n' "$*" >&2; }
 die() { printf '[planner] ОШИБКА: %s\n' "$*" >&2; exit 2; }
 
 require_command() {
-    command -v "$1" >/dev/null 2>&1 || die "Не найдена команда: $1"
+    if [[ "$1" == */* ]]; then
+        [[ -x "$1" ]] || die "Не найдена исполняемая команда: $1"
+    else
+        command -v "$1" >/dev/null 2>&1 || die "Не найдена команда: $1"
+    fi
 }
 
 atomic_link() {
@@ -14,95 +18,109 @@ atomic_link() {
     local temporary="${link}.next.$$"
     rm -f "$temporary"
     ln -s "$target" "$temporary"
-    # GNU mv -T не поддерживается на BSD/macOS, пробуем с -T, при неудаче — без
     mv -Tf "$temporary" "$link" 2>/dev/null || mv -f "$temporary" "$link"
 }
 
-# ---------------------------------------------------------------------------
-# resolve_python_bin — находит корректный Python даже при запуске через sudo.
-#
-# Проблема: pyenv/пользовательский venv установлен у SERVICE_USER, но root
-# не видит pyenv shims через обычный PATH.
-#
-# Стратегия поиска (в порядке приоритета):
-#   1) Явно заданный --python / $PYTHON_BIN (если существует и работает)
-#   2) Пользовательский pyenv:  ~SERVICE_USER/.pyenv/shims/python3
-#   3) Пользовательский venv:   ~SERVICE_USER/.local/share/planner-solving/venv/bin/python
-#   4) Системный python3
-# ---------------------------------------------------------------------------
-resolve_python_bin() {
-    local candidate="" user="${1:-}" home=""
+run_as_user() {
+    local user="$1"
+    shift
+    if [[ $EUID -ne 0 || -z "$user" || "$user" == "root" || "$user" == "$(id -un)" ]]; then
+        exec_or_run=("$@")
+        "${exec_or_run[@]}"
+        return
+    fi
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$user" -- "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo -u "$user" -- "$@"
+    elif command -v su >/dev/null 2>&1; then
+        local quoted=""
+        printf -v quoted '%q ' "$@"
+        su -s /bin/bash "$user" -c "$quoted"
+    else
+        die "Нельзя выполнить команду от имени $user: отсутствуют runuser, sudo и su."
+    fi
+}
 
-    # Если PYTHON_BIN уже задан явно и команда работает — используем его
-    if [[ -n "${PYTHON_BIN:-}" ]] && command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-        printf '%s\n' "$PYTHON_BIN"
+_python_matches() {
+    local candidate="$1" expected_major="${2:-}" expected_minor="${3:-}"
+    [[ -x "$candidate" ]] || return 1
+    if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
+        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (int(sys.argv[1]), int(sys.argv[2])) else 1)' \
+            "$expected_major" "$expected_minor" >/dev/null 2>&1
+    else
+        "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+    fi
+}
+
+resolve_python_bin() {
+    local user="${1:-}" expected_major="${2:-}" expected_minor="${3:-}" install_root="${4:-/opt/planner-solving}"
+    local candidate="" home="" version_glob=""
+
+    if [[ -n "${PYTHON_BIN:-}" ]]; then
+        candidate="$(command -v "$PYTHON_BIN" 2>/dev/null || true)"
+        [[ -z "$candidate" && -x "$PYTHON_BIN" ]] && candidate="$PYTHON_BIN"
+        _python_matches "$candidate" "$expected_major" "$expected_minor" || \
+            die "Указанный Python не подходит пакету: $PYTHON_BIN"
+        printf '%s\n' "$candidate"
         return 0
     fi
 
-    # Определяем домашний каталог целевого пользователя
-    if [[ -n "$user" ]]; then
-        home="$(eval echo "~$user" 2>/dev/null)" || home=""
-    fi
-    if [[ -z "$home" || "$home" == "~"* ]]; then
-        home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)" || home=""
-    fi
-
-    # 1) pyenv — версия из .pyenv/versions
-    if [[ -n "$home" && -d "$home/.pyenv/versions" ]]; then
-        # Берём самую свежую python3 из pyenv
-        candidate="$(find "$home/.pyenv/versions" -maxdepth 3 -name 'python3' -path '*/bin/python3' 2>/dev/null \
-            | sort -V | tail -1)"
-        if [[ -n "$candidate" && -x "$candidate" ]]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-        # Если точный python3 не найден, ищем python3.XX
-        candidate="$(find "$home/.pyenv/versions" -maxdepth 3 -regex '.*/bin/python3\.[0-9]+' 2>/dev/null \
-            | sort -V | tail -1)"
-        if [[ -n "$candidate" && -x "$candidate" ]]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    fi
-
-    # 2) Пользовательский venv (если установка не в /opt)
-    if [[ -n "$home" ]]; then
+    if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
         for candidate in \
-            "$home/.local/opt/planner-solving/current/.venv/bin/python" \
-            "$home/.local/share/planner-solving/venv/bin/python"; do
-            if [[ -x "$candidate" ]]; then
+            "$install_root/python/bin/python${expected_major}.${expected_minor}" \
+            "$install_root/python/bin/python3" \
+            "/opt/python${expected_major}.${expected_minor}/bin/python${expected_major}.${expected_minor}" \
+            "/usr/local/bin/python${expected_major}.${expected_minor}" \
+            "/usr/bin/python${expected_major}.${expected_minor}"; do
+            if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
                 printf '%s\n' "$candidate"
                 return 0
             fi
         done
-    fi
-
-    # 3) pyenv shims через PATH пользователя (sudo -u)
-    if [[ -n "$user" ]]; then
-        candidate="$(sudo -u "$user" bash -lc 'command -v python3' 2>/dev/null)" || candidate=""
-        if [[ -n "$candidate" && -x "$candidate" ]]; then
+        candidate="$(command -v "python${expected_major}.${expected_minor}" 2>/dev/null || true)"
+        if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
             printf '%s\n' "$candidate"
             return 0
         fi
     fi
 
-    # 4) Системный fallback
-    if command -v python3 >/dev/null 2>&1; then
-        printf '%s\n' "python3"
-        return 0
+    if [[ -n "$user" ]]; then
+        home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6 || true)"
+    fi
+    if [[ -n "$home" && -d "$home/.pyenv/versions" ]]; then
+        if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
+            version_glob="${expected_major}.${expected_minor}*"
+        else
+            version_glob="*"
+        fi
+        while IFS= read -r candidate; do
+            if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
+                if run_as_user "$user" "$candidate" -c 'import sys; print(sys.executable)' >/dev/null 2>&1; then
+                    printf '%s\n' "$candidate"
+                    return 0
+                fi
+            fi
+        done < <(find "$home/.pyenv/versions" -path "*/${version_glob}/bin/python3" -type f -o -type l 2>/dev/null | sort -Vr)
     fi
 
-    die "Python 3 не найден. Укажите путь к Python через --python или переменную PYTHON_BIN."
+    for candidate in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /usr/local/bin/python3; do
+        if _python_matches "$candidate" "$expected_major" "$expected_minor"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    if [[ -n "$expected_major" && -n "$expected_minor" ]]; then
+        die "Не найден Python ${expected_major}.${expected_minor}. Установите его в /usr/bin, /usr/local/bin или /opt/python${expected_major}.${expected_minor}, либо укажите --python PATH."
+    fi
+    die "Не найден Python 3.11+. Укажите путь через --python или PYTHON_BIN."
 }
 
 service_stop() {
-    local service
     command -v systemctl >/dev/null 2>&1 || return 0
-    for service in planner-solving.service planner-web.service; do
-        if systemctl list-unit-files "$service" >/dev/null 2>&1; then
-            systemctl stop "$service" >/dev/null 2>&1 || true
-        fi
-    done
+    systemctl stop planner-solving.service >/dev/null 2>&1 || true
+    systemctl stop planner-web.service >/dev/null 2>&1 || true
 }
 
 service_start() {
@@ -113,9 +131,10 @@ service_start() {
 
 set_shared_owner() {
     local shared="$1" owner="$2"
-    chmod 0755 "$shared" 2>/dev/null || true
-    chown -R "$owner" "$shared/data" "$shared/input" "$shared/output" 2>/dev/null || true
-    chown "$owner" "$shared/teachers.json" "$shared/config.json" 2>/dev/null || true
+    mkdir -p "$shared/data" "$shared/input" "$shared/output" "$shared/backups" "$shared/home" "$shared/cache"
+    chown -R "$owner" "$shared" 2>/dev/null || true
+    find "$shared" -type d -exec chmod 0750 {} + 2>/dev/null || true
+    find "$shared" -type f -exec chmod u+rw,g+r,o-rwx {} + 2>/dev/null || true
 }
 
 backup_shared() {
@@ -138,7 +157,7 @@ restore_shared() {
     rm -f "$shared/teachers.json" "$shared/config.json"
     mkdir -p "$shared"
     tar -xzf "$archive" -C "$shared"
-    mkdir -p "$shared/data"
+    mkdir -p "$shared/data" "$shared/input" "$shared/output" "$shared/backups" "$shared/home" "$shared/cache"
     [[ -f "$shared/teachers.json" ]] || printf '[]\n' > "$shared/teachers.json"
     [[ -f "$shared/config.json" ]] || printf '{}\n' > "$shared/config.json"
 }
@@ -169,7 +188,8 @@ PY
 
 write_update_state() {
     local state_path="$1" previous="$2" current="$3" backup="$4" version="$5"
-    "${PYTHON_BIN:-python3}" - "$state_path" "$previous" "$current" "$backup" "$version" <<'PY'
+    local writer="${PYTHON_BIN:-python3}"
+    "$writer" - "$state_path" "$previous" "$current" "$backup" "$version" <<'PY'
 import json
 from datetime import datetime, timezone
 from pathlib import Path
