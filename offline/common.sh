@@ -13,7 +13,85 @@ atomic_link() {
     local target="$1" link="$2" temporary="${link}.next.$$"
     rm -f "$temporary"
     ln -s "$target" "$temporary"
-    mv -Tf "$temporary" "$link"
+    # GNU mv -T не поддерживается на BSD/macOS, пробуем с -T, при неудаче — без
+    mv -Tf "$temporary" "$link" 2>/dev/null || mv -f "$temporary" "$link"
+}
+
+# ---------------------------------------------------------------------------
+# resolve_python_bin — находит корректный Python даже при запуске через sudo.
+#
+# Проблема: pyenv/пользовательский venv установлен у SERVICE_USER, но root
+# не видит pyenv shims через обычный PATH.
+#
+# Стратегия поиска (в порядке приоритета):
+#   1) Явно заданный --python / $PYTHON_BIN (если существует и работает)
+#   2) Пользовательский pyenv:  ~SERVICE_USER/.pyenv/shims/python3
+#   3) Пользовательский venv:   ~SERVICE_USER/.local/share/planner-solving/venv/bin/python
+#   4) Системный python3
+# ---------------------------------------------------------------------------
+resolve_python_bin() {
+    local candidate="" user="${1:-}" home=""
+
+    # Если PYTHON_BIN уже задан явно и команда работает — используем его
+    if [[ -n "${PYTHON_BIN:-}" ]] && command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        printf '%s\n' "$PYTHON_BIN"
+        return 0
+    fi
+
+    # Определяем домашний каталог целевого пользователя
+    if [[ -n "$user" ]]; then
+        home="$(eval echo "~$user" 2>/dev/null)" || home=""
+    fi
+    if [[ -z "$home" || "$home" == "~"* ]]; then
+        home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)" || home=""
+    fi
+
+    # 1) pyenv — версия из .pyenv/versions
+    if [[ -n "$home" && -d "$home/.pyenv/versions" ]]; then
+        # Берём самую свежую python3 из pyenv
+        candidate="$(find "$home/.pyenv/versions" -maxdepth 3 -name 'python3' -path '*/bin/python3' 2>/dev/null \
+            | sort -V | tail -1)"
+        if [[ -n "$candidate" && -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+        # Если точный python3 не найден, ищем python3.XX
+        candidate="$(find "$home/.pyenv/versions" -maxdepth 3 -regex '.*/bin/python3\.[0-9]+' 2>/dev/null \
+            | sort -V | tail -1)"
+        if [[ -n "$candidate" && -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    fi
+
+    # 2) Пользовательский venv (если установка не в /opt)
+    if [[ -n "$home" ]]; then
+        for candidate in \
+            "$home/.local/opt/planner-solving/current/.venv/bin/python" \
+            "$home/.local/share/planner-solving/venv/bin/python"; do
+            if [[ -x "$candidate" ]]; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        done
+    fi
+
+    # 3) pyenv shims через PATH пользователя (sudo -u)
+    if [[ -n "$user" ]]; then
+        candidate="$(sudo -u "$user" bash -lc 'command -v python3' 2>/dev/null)" || candidate=""
+        if [[ -n "$candidate" && -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    fi
+
+    # 4) Системный fallback
+    if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "python3"
+        return 0
+    fi
+
+    die "Python 3 не найден. Укажите путь к Python через --python или переменную PYTHON_BIN."
 }
 
 service_stop() {

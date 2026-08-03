@@ -6,9 +6,10 @@ source "$SCRIPT_ROOT/common.sh"
 
 INSTALL_ROOT=""
 PORT="8001"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 NO_SYSTEMD=0
 ASSUME_YES=0
+_ROLLBACK_USER="${SUDO_USER:-$(id -un)}"
 while (($#)); do
     case "$1" in
         --install-dir) INSTALL_ROOT="$2"; shift 2 ;;
@@ -28,6 +29,12 @@ STATE="$INSTALL_ROOT/state/last-update.json"
 SHARED="$INSTALL_ROOT/shared"
 [[ -f "$STATE" ]] || die "Сведения о предыдущем обновлении не найдены: $STATE"
 SHARED_OWNER="$(stat -c '%u:%g' "$SHARED/data")"
+
+# Определяем Python, если не указан явно
+if [[ -z "$PYTHON_BIN" ]]; then
+    PYTHON_BIN="$(resolve_python_bin "$_ROLLBACK_USER")"
+    log "Обнаружен Python пользователя $_ROLLBACK_USER: $PYTHON_BIN"
+fi
 
 readarray -t META < <("$PYTHON_BIN" - "$STATE" <<'PY'
 import json, sys

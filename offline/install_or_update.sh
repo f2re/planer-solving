@@ -9,7 +9,7 @@ LEGACY_DIR=""
 SERVICE_USER="${SUDO_USER:-$(id -un)}"
 SERVICE_GROUP=""
 PORT="8001"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-}"  # пустой — будет определён через resolve_python_bin
 NO_SYSTEMD=0
 ASSUME_YES=0
 
@@ -49,7 +49,17 @@ if [[ -z "$INSTALL_ROOT" ]]; then
 fi
 INSTALL_ROOT="$(mkdir -p "$INSTALL_ROOT" && cd "$INSTALL_ROOT" && pwd)"
 
+# ---------------------------------------------------------------------------
+# Определяем Python: если пользователь не указал --python, ищем через
+# resolve_python_bin у SERVICE_USER (pyenv, пользовательский venv, системный).
+# ---------------------------------------------------------------------------
+if [[ -z "$PYTHON_BIN" ]]; then
+    PYTHON_BIN="$(resolve_python_bin "$SERVICE_USER")"
+    log "Обнаружен Python пользователя $SERVICE_USER: $PYTHON_BIN"
+fi
 require_command "$PYTHON_BIN"
+log "Используется Python: $($PYTHON_BIN --version 2>&1) — $PYTHON_BIN"
+
 require_command tar
 [[ -f "$BUNDLE_ROOT/manifest.json" ]] || die "manifest.json не найден. Запускайте сценарий из распакованного офлайн-пакета."
 "$PYTHON_BIN" "$BUNDLE_ROOT/verify_bundle.py" "$BUNDLE_ROOT"
@@ -114,11 +124,41 @@ mkdir -p "$RELEASE"
 cp -a "$BUNDLE_ROOT/app/." "$RELEASE/"
 cp -a "$BUNDLE_ROOT/manifest.json" "$RELEASE/.offline-manifest.json"
 
-if ! "$PYTHON_BIN" -m venv "$RELEASE/.venv"; then
-    rm -rf "$RELEASE"
-    die "Не удалось создать виртуальное окружение. Установите пакет python${EXPECTED_MAJOR}.${EXPECTED_MINOR}-venv на машине подготовки ОС."
+# ---------------------------------------------------------------------------
+# Создаём venv и устанавливаем зависимости ОТ ИМЕНИ SERVICE_USER.
+# Это критически важно: pyenv/venv пользователя недоступен для root,
+# а файлы, созданные root-ом, будут недоступны SERVICE_USER при запуске.
+# ---------------------------------------------------------------------------
+_create_venv() {
+    "$PYTHON_BIN" -m venv "$RELEASE/.venv" && \
+    "$RELEASE/.venv/bin/python" -m pip install --no-index \
+        --find-links "$BUNDLE_ROOT/wheelhouse" \
+        --requirement "$RELEASE/requirements-runtime.txt"
+}
+
+if [[ $EUID -eq 0 && "$SERVICE_USER" != "root" ]]; then
+    # Запускаем создание venv от имени пользователя-службы
+    chown -R "$SERVICE_USER" "$RELEASE"
+    if ! sudo -u "$SERVICE_USER" \
+        PYTHON_BIN="$PYTHON_BIN" \
+        RELEASE="$RELEASE" \
+        BUNDLE_ROOT="$BUNDLE_ROOT" \
+        bash -c '
+            set -Eeuo pipefail
+            "$PYTHON_BIN" -m venv "$RELEASE/.venv" || exit 1
+            "$RELEASE/.venv/bin/python" -m pip install --no-index \
+                --find-links "$BUNDLE_ROOT/wheelhouse" \
+                --requirement "$RELEASE/requirements-runtime.txt"
+        '; then
+        rm -rf "$RELEASE"
+        die "Не удалось создать виртуальное окружение от имени $SERVICE_USER. Убедитесь, что Python $PYTHON_BIN доступен пользователю $SERVICE_USER и содержит модуль venv."
+    fi
+else
+    if ! _create_venv; then
+        rm -rf "$RELEASE"
+        die "Не удалось создать виртуальное окружение. Установите пакет python${EXPECTED_MAJOR}.${EXPECTED_MINOR}-venv."
+    fi
 fi
-"$RELEASE/.venv/bin/python" -m pip install --no-index --find-links "$BUNDLE_ROOT/wheelhouse" --requirement "$RELEASE/requirements-runtime.txt"
 
 rm -rf "$RELEASE/data" "$RELEASE/input" "$RELEASE/output"
 ln -s "$SHARED/data" "$RELEASE/data"
@@ -170,14 +210,23 @@ rollback_failed_update() {
 }
 trap rollback_failed_update ERR
 
-(
-    cd "$RELEASE"
-    PYTHONPATH="$RELEASE" "$RELEASE/.venv/bin/python" -m tools.migrate \
-        --data-dir "$SHARED/data" --legacy-teachers "$SHARED/teachers.json" \
-        --backup-dir "$BACKUPS/migrations"
-    PYTHONPATH="$RELEASE" "$RELEASE/.venv/bin/python" -m tools.healthcheck \
-        --app-root "$RELEASE" --data-dir "$SHARED/data"
-)
+_run_as_service_user() {
+    # Запускает команду от имени SERVICE_USER, если мы root.
+    # Использование: _run_as_service_user <команда> [аргументы...]
+    if [[ $EUID -eq 0 && "$SERVICE_USER" != "root" ]]; then
+        sudo -u "$SERVICE_USER" \
+            env PYTHONPATH="$RELEASE" \
+            bash -c 'cd "$1" && shift && exec "$@"' _ "$RELEASE" "$@"
+    else
+        (cd "$RELEASE" && PYTHONPATH="$RELEASE" "$@")
+    fi
+}
+
+_run_as_service_user "$RELEASE/.venv/bin/python" -m tools.migrate \
+    --data-dir "$SHARED/data" --legacy-teachers "$SHARED/teachers.json" \
+    --backup-dir "$BACKUPS/migrations"
+_run_as_service_user "$RELEASE/.venv/bin/python" -m tools.healthcheck \
+    --app-root "$RELEASE" --data-dir "$SHARED/data"
 
 atomic_link "$RELEASE" "$INSTALL_ROOT/current"
 
