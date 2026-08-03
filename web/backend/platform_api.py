@@ -31,6 +31,8 @@ class ImportCommitRequest(BaseModel):
 
 
 class TemplateProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
     layout: Optional[Dict[str, Any]] = None
     composite: List[Dict[str, Any]] = Field(default_factory=list)
     fingerprint: Dict[str, Any] = Field(default_factory=dict)
@@ -41,7 +43,13 @@ class RestoreRevisionRequest(BaseModel):
     revision_no: int = Field(ge=1)
 
 
-def _classify_job(context: ApplicationContext, workspace_id: str, kind: str, source: Mapping[str, Any], mapping: Mapping[str, str]) -> Dict[str, Any]:
+def _classify_job(
+    context: ApplicationContext,
+    workspace_id: str,
+    kind: str,
+    source: Mapping[str, Any],
+    mapping: Mapping[str, str],
+) -> Dict[str, Any]:
     repository = context.workspace_repository
     rows = list(source.get("rows") or [])
     if kind == "teachers":
@@ -108,7 +116,13 @@ def build_platform_router(context: ApplicationContext) -> APIRouter:
         job = store.get_import_job(job_id)
         if job["workspace_id"] != workspace_id:
             raise ApplicationError("Импорт относится к другому пространству.", status_code=404)
-        preview = _classify_job(context, workspace_id, job["kind"], job["source"], payload.mapping)
+        preview = _classify_job(
+            context,
+            workspace_id,
+            job["kind"],
+            job["source"],
+            payload.mapping,
+        )
         updated = store.update_import_preview(job_id, mapping=payload.mapping, preview=preview)
         updated["teacher_fields"] = [
             {"id": field, "name": TEACHER_LABELS[field]}
@@ -142,7 +156,11 @@ def build_platform_router(context: ApplicationContext) -> APIRouter:
         )
 
     @router.get("/api/workspaces/{workspace_id}/templates/{template_id}/revisions")
-    def template_revisions(workspace_id: str, template_id: str, request: Request) -> Dict[str, Any]:
+    def template_revisions(
+        workspace_id: str,
+        template_id: str,
+        request: Request,
+    ) -> Dict[str, Any]:
         require_role(request, "viewer")
         return {"items": store.list_template_revisions(workspace_id, template_id)}
 
@@ -166,7 +184,10 @@ def build_platform_router(context: ApplicationContext) -> APIRouter:
             entity_type="template",
             entity_id=template_id,
             workspace_id=workspace_id,
-            summary=f"Восстановлена версия {payload.revision_no} шаблона «{template['name']}»",
+            summary=(
+                f"Восстановлена версия {payload.revision_no} "
+                f"шаблона «{template['name']}»"
+            ),
         )
         return template
 
@@ -183,6 +204,12 @@ def build_platform_router(context: ApplicationContext) -> APIRouter:
         if not current:
             raise ApplicationError("Шаблон не найден.", status_code=404)
         update = {
+            "name": payload.name or current["name"],
+            "description": (
+                current.get("description", "")
+                if payload.description is None
+                else payload.description
+            ),
             "layout": payload.layout or current["layout"],
             "composite": normalize_composite_rules(payload.composite),
             "fingerprint": payload.fingerprint,
@@ -216,12 +243,21 @@ def build_platform_router(context: ApplicationContext) -> APIRouter:
         offset: int = Query(0, ge=0),
     ) -> Dict[str, Any]:
         require_role(request, "viewer")
-        return {"items": store.list_audit(workspace_id=workspace_id, limit=limit, offset=offset)}
+        return {
+            "items": store.list_audit(
+                workspace_id=workspace_id,
+                limit=limit,
+                offset=offset,
+            )
+        }
 
     @router.get("/api/operations/summary")
     def operations_summary(request: Request) -> Dict[str, Any]:
         actor = actor_from_request(request)
-        workspace_id = request.query_params.get("workspace_id") or store.default_workspace_id()
+        workspace_id = (
+            request.query_params.get("workspace_id")
+            or store.default_workspace_id()
+        )
         runs = store.list_processing_runs(workspace_id, 20)
         imports = store.list_import_jobs(workspace_id, 20)
         templates = store.list_templates(workspace_id)
@@ -241,7 +277,8 @@ def build_platform_router(context: ApplicationContext) -> APIRouter:
                 "total": len(templates),
                 "used": sum(1 for item in templates if item.get("last_used_at")),
                 "average_quality": round(
-                    sum(float(item.get("avg_quality") or 0) for item in templates) / max(1, len(templates)),
+                    sum(float(item.get("avg_quality") or 0) for item in templates)
+                    / max(1, len(templates)),
                     1,
                 ),
             },
