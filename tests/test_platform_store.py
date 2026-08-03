@@ -1,10 +1,13 @@
 from pathlib import Path
 
-from src.platform_store import PLATFORM_SCHEMA_VERSION, PlatformStore
+import pytest
+
+from src.platform_store import PLATFORM_SCHEMA_VERSION
+from src.transactional_platform_store import TransactionalPlatformStore
 
 
-def make_store(tmp_path: Path) -> PlatformStore:
-    return PlatformStore(
+def make_store(tmp_path: Path) -> TransactionalPlatformStore:
+    return TransactionalPlatformStore(
         tmp_path / "data" / "planner-solving.sqlite3",
         tmp_path / "data" / "workspaces.json",
         tmp_path / "teachers.json",
@@ -50,6 +53,23 @@ def test_template_revisions_composite_rules_and_restore(tmp_path: Path):
     assert restored["layout"]["weeks_row"] == 7
     assert restored["current_revision"] == 3
     assert store.schema_version() == PLATFORM_SCHEMA_VERSION
+
+
+def test_template_and_revision_rollback_together(tmp_path: Path, monkeypatch):
+    store = make_store(tmp_path)
+    workspace_id = store.default_workspace_id()
+
+    def broken_revision(*args, **kwargs):
+        raise RuntimeError("revision failed")
+
+    monkeypatch.setattr(store, "_record_revision", broken_revision)
+    with pytest.raises(RuntimeError, match="revision failed"):
+        store.create_template(
+            workspace_id,
+            {"name": "Не должен сохраниться", "layout": {"weeks_row": 7}},
+        )
+
+    assert store.list_templates(workspace_id) == []
 
 
 def test_processing_history_keeps_checksums_reports_and_artifacts(tmp_path: Path):
