@@ -93,6 +93,7 @@ jobs:
           node --check web/frontend/assets/platform-ui.js
           node --check web/frontend/assets/platform-enhancements.js
           node tests/frontend_runtime_probe.mjs
+          node tests/editor_history_probe.mjs
 
       - name: Build autonomous runtime bundle
         run: bash offline/build_offline_bundle.sh --output dist --python "$(command -v python)"
