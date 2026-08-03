@@ -47,7 +47,7 @@ WORKERS="${PLANNER_WORKERS:-1}"
 
 "$PYTHON" -m tools.service_preflight \
     --app-root "$ROOT" \
-    --shared-dir "$(dirname "$DATA_DIR")"
+    --shared-dir "$DATA_DIR"
 "$PYTHON" -m tools.migrate \
     --data-dir "$DATA_DIR" \
     --legacy-teachers "$ROOT/teachers.json" \
