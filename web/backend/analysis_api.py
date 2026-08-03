@@ -172,7 +172,12 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         file_id: str,
         request: Request,
     ) -> AnalysisFile:
-        """Atomically replace one workbook while preserving every other draft item."""
+        """Replace one workbook as a file+manifest transaction.
+
+        The new payload is parsed before touching the active file. The previous
+        file is moved to a private backup, the manifest is committed atomically,
+        and any failure restores the previous bytes and metadata-visible path.
+        """
 
         uploads = await request_uploads(request)
         if len(uploads) != 1:
@@ -197,7 +202,31 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         manifest = context.sessions.load_manifest(session_id)
         item = context.sessions.manifest_file(manifest, file_id)
         session_dir = context.sessions.path(session_id)
-        temporary = session_dir / f".replacement-{file_id}-{uuid.uuid4().hex}{extension}"
+        token = uuid.uuid4().hex
+        temporary = session_dir / f".replacement-{file_id}-{token}{extension}"
+        backup = session_dir / f".replacement-backup-{file_id}-{token}.bak"
+        old_name = str(item.get("stored_name") or "")
+        old_path = (session_dir / old_name).resolve() if old_name else None
+        if old_path is not None and old_path.parent != session_dir:
+            raise ApplicationError(
+                "Путь прежнего файла сеанса повреждён. Замена отменена.",
+                status_code=409,
+                code="replacement_source_path",
+            )
+        # Keep the existing internal name when possible. This leaves the
+        # manifest path valid even during a process interruption between the
+        # file swap and the atomic JSON commit.
+        final_name = old_name or f"{file_id}{extension}"
+        final_path = (session_dir / final_name).resolve()
+        if final_path.parent != session_dir:
+            raise ApplicationError(
+                "Новый путь файла вышел за каталог сеанса.",
+                status_code=409,
+                code="replacement_target_path",
+            )
+
+        backup_created = False
+        replacement_installed = False
         try:
             written = await stream_upload(upload, temporary)
             if not written:
@@ -217,13 +246,11 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                     code="replacement_unreadable",
                 ) from exc
 
-            final_name = f"{file_id}{extension}"
-            final_path = session_dir / final_name
-            old_name = str(item.get("stored_name") or "")
-            old_path = (session_dir / old_name).resolve() if old_name else None
+            if old_path and old_path.is_file():
+                os.replace(old_path, backup)
+                backup_created = True
             os.replace(temporary, final_path)
-            if old_path and old_path != final_path.resolve() and old_path.parent == session_dir:
-                old_path.unlink(missing_ok=True)
+            replacement_installed = True
 
             item.update({
                 "filename": original_name,
@@ -256,9 +283,18 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                 draft["saved_at"] = time.time()
             manifest["updated_at"] = time.time()
             context.sessions.save_manifest(session_id, manifest)
+            backup.unlink(missing_ok=True)
+            backup_created = False
             return _response_file(item)
+        except Exception:
+            if replacement_installed:
+                final_path.unlink(missing_ok=True)
+            if backup_created and backup.is_file() and old_path is not None:
+                os.replace(backup, old_path)
+            raise
         finally:
             temporary.unlink(missing_ok=True)
+            backup.unlink(missing_ok=True)
 
     @router.post("/api/analysis/{session_id}/files/{file_id}/match-templates")
     def match_templates(
