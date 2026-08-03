@@ -1,6 +1,7 @@
 """Fault-tolerant Excel exporters for summary and teacher schedules."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Mapping, Sequence
@@ -397,7 +398,10 @@ def _fallback_workbook(
             _teacher_value(teacher, "rank"),
         ])
     report.append([])
-    report.append(["Период", transformed_data.get("period_report") or {}])
+    report.append([
+        "Период",
+        json.dumps(transformed_data.get("period_report") or {}, ensure_ascii=False, default=str),
+    ])
     report.column_dimensions["A"].width = 34
     report.column_dimensions["B"].width = 70
     report.column_dimensions["C"].width = 28
