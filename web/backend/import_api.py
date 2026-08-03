@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import io
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List
 import uuid
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -72,6 +72,47 @@ def _public_job(job: Dict[str, Any], row_limit: int = 200) -> Dict[str, Any]:
     }
 
 
+def _review_evaluation(context: ApplicationContext, job: Dict[str, Any]) -> Dict[str, Any]:
+    """Return detailed reviewed rows even after commit replaced evaluation statistics.
+
+    A committed import stores its authoritative commit result in ``evaluation_json``.
+    The immutable source rows and mapping remain available, so the human-readable
+    report can always be regenerated without touching persistent workspace data.
+    """
+
+    evaluation = dict(job.get("evaluation") or {})
+    rows = list(evaluation.get("rows") or [])
+    if rows and any(isinstance(item, dict) and item.get("record") for item in rows):
+        return evaluation
+
+    source = job.get("source") or {}
+    source_rows = source.get("rows") or []
+    if job["kind"] == "teachers":
+        return evaluate_teacher_rows(
+            source_rows,
+            job.get("mapping") or source.get("suggested_mapping") or {},
+            context.workspace_repository.list_teachers(job["workspace_id"]),
+        )
+    if job["kind"] == "templates":
+        return evaluate_template_rows(
+            source_rows,
+            context.workspace_repository.list_templates(job["workspace_id"]),
+        )
+    if source_rows:
+        return {
+            "kind": "workspace",
+            "summary": {"add": 1, "update": 0, "conflict": 0, "skip": 0, "error": 0},
+            "rows": [{
+                "row_index": 0,
+                "record": source_rows[0],
+                "suggested_action": "add",
+                "message": "Создано новое пространство.",
+            }],
+            "total_rows": 1,
+        }
+    return {"rows": [], "summary": {}, "total_rows": 0}
+
+
 def build_import_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["imports"])
     operator = operator_dependency(context)
@@ -85,26 +126,27 @@ def build_import_router(context: ApplicationContext) -> APIRouter:
     ) -> Dict[str, Any]:
         _can_import_kind(user, kind)
         context.workspace_repository.get_workspace(workspace_id)
+        original_name = file.filename or "import.dat"
         upload_id = str(uuid.uuid4())
-        suffix = Path(file.filename or "import.dat").suffix.lower()
+        suffix = Path(original_name).suffix.lower()
         target = context.paths.import_root / f"{upload_id}{suffix}"
         await stream_upload(file, target)
         payload = target.read_bytes()
         if kind == "teachers":
-            parsed = parse_teacher_source(payload, file.filename or "teachers.csv")
+            parsed = parse_teacher_source(payload, original_name)
             evaluation = evaluate_teacher_rows(
                 parsed["rows"],
                 parsed["suggested_mapping"],
                 context.workspace_repository.list_teachers(workspace_id),
             )
         elif kind == "templates":
-            parsed = parse_template_source(payload, file.filename or "templates.json")
+            parsed = parse_template_source(payload, original_name)
             evaluation = evaluate_template_rows(
                 parsed["rows"],
                 context.workspace_repository.list_templates(workspace_id),
             )
         else:
-            parsed = parse_workspace_source(payload, file.filename or "workspace.json")
+            parsed = parse_workspace_source(payload, original_name)
             evaluation = {
                 "kind": "workspace",
                 "summary": {"add": 1, "update": 0, "conflict": 0, "skip": 0, "error": 0},
@@ -124,7 +166,7 @@ def build_import_router(context: ApplicationContext) -> APIRouter:
             workspace_id=workspace_id,
             user_id=user.id,
             kind=kind,
-            filename=file.filename or target.name,
+            filename=original_name,
             source_path=str(target),
             source={
                 "columns": parsed.get("columns", []),
@@ -210,7 +252,14 @@ def build_import_router(context: ApplicationContext) -> APIRouter:
         else:
             source_rows = (job.get("source") or {}).get("rows") or []
             created = context.workspace_repository.import_workspace(source_rows[0])
-            result = {"added": 1, "updated": 0, "skipped": 0, "errors": 0, "workspace": created}
+            context.operations.ensure_template_revisions(created["id"])
+            result = {
+                "added": 1,
+                "updated": 0,
+                "skipped": 0,
+                "errors": 0,
+                "workspace": created,
+            }
             context.operations.mark_import_committed(
                 job_id,
                 user_id=user.id,
@@ -227,15 +276,23 @@ def build_import_router(context: ApplicationContext) -> APIRouter:
         job = context.operations.get_import_job(job_id)
         if job["user_id"] != user.id and user.role != "admin":
             raise PermissionDenied("Этот предварительный импорт создан другим пользователем.")
-        rows = (job.get("evaluation") or {}).get("rows") or []
+        evaluation = _review_evaluation(context, job)
+        rows = evaluation.get("rows") or []
         buffer = io.StringIO()
         writer = csv.writer(buffer, delimiter=";")
-        writer.writerow(["Строка", "Действие", "Сообщение", "Краткое имя", "Полное ФИО", "Название"])
+        writer.writerow([
+            "Строка",
+            "Действие",
+            "Сообщение",
+            "Краткое имя",
+            "Полное ФИО",
+            "Название",
+        ])
         for item in rows:
             record = item.get("record") or {}
             writer.writerow([
                 int(item.get("row_index", 0)) + 1,
-                item.get("suggested_action", ""),
+                item.get("suggested_action", item.get("action", "")),
                 item.get("message", ""),
                 record.get("short_name", ""),
                 record.get("full_name", ""),
