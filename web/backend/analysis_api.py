@@ -176,7 +176,8 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
 
         The new payload is parsed before touching the active file. The previous
         file is moved to a private backup, the manifest is committed atomically,
-        and any failure restores the previous bytes and metadata-visible path.
+        and a failure before that commit restores the previous bytes. Cleanup
+        after a successful commit is deliberately non-fatal.
         """
 
         uploads = await request_uploads(request)
@@ -227,6 +228,7 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
 
         backup_created = False
         replacement_installed = False
+        manifest_committed = False
         try:
             written = await stream_upload(upload, temporary)
             if not written:
@@ -282,19 +284,37 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
                 draft["result"] = None
                 draft["saved_at"] = time.time()
             manifest["updated_at"] = time.time()
+
+            # Validate the response before committing metadata. A pydantic
+            # failure here is still safely rollbackable.
+            response = _response_file(item)
             context.sessions.save_manifest(session_id, manifest)
-            backup.unlink(missing_ok=True)
-            backup_created = False
-            return _response_file(item)
+            manifest_committed = True
+            return response
         except Exception:
-            if replacement_installed:
-                final_path.unlink(missing_ok=True)
-            if backup_created and backup.is_file() and old_path is not None:
-                os.replace(backup, old_path)
+            if not manifest_committed:
+                if backup_created and backup.is_file() and old_path is not None:
+                    # Replacing the destination restores the previous file even
+                    # if the newly installed file cannot be unlinked separately.
+                    os.replace(backup, old_path)
+                    backup_created = False
+                elif replacement_installed:
+                    final_path.unlink(missing_ok=True)
             raise
         finally:
-            temporary.unlink(missing_ok=True)
-            backup.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Cannot remove replacement temporary file: %s", temporary, exc_info=True)
+            if manifest_committed and backup_created:
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError:
+                    # The active file and manifest already agree. A stale
+                    # private backup is harmless and can be removed by session
+                    # cleanup; it must never turn a successful replacement into
+                    # an apparent failure or trigger rollback.
+                    logger.warning("Cannot remove committed replacement backup: %s", backup, exc_info=True)
 
     @router.post("/api/analysis/{session_id}/files/{file_id}/match-templates")
     def match_templates(
