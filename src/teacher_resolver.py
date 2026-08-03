@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from .schedule_analyzer import WorksheetMatrix, normalize_text
 from .schedule_period import canonical_month, extract_date_parts
@@ -32,7 +32,13 @@ class TeacherResolver:
         self.last_report: Dict[str, Any] = {}
         self.loaded_periods: List[Tuple[str, Dict[str, Any]]] = []
         self.teachers_by_surname: Dict[str, List[Dict[str, Any]]] = {}
+        self.teacher_aliases: Dict[str, str] = {}
+        self.teacher_overrides: Dict[str, str] = {}
         self._index_teachers()
+
+    @staticmethod
+    def _teacher_key(value: Any) -> str:
+        return re.sub(r"\s+", " ", normalize_text(value).lower().replace("ё", "е")).strip()
 
     def _index_teachers(self) -> None:
         for teacher in self.teachers_config:
@@ -41,6 +47,10 @@ class TeacherResolver:
             parts = (full or short).split()
             if not parts:
                 continue
+            for alias in (short, full):
+                key = self._teacher_key(alias)
+                if key:
+                    self.teacher_aliases[key] = short
             surname = parts[0].lower().replace("ё", "е")
             patterns = []
             if len(parts) >= 3 and parts[1] and parts[2]:
@@ -51,6 +61,26 @@ class TeacherResolver:
                     re.compile(rf"{s}\s+{first}\.?{middle}\.?", re.I),
                 ]
             self.teachers_by_surname.setdefault(surname, []).append({"short": short, "patterns": patterns})
+
+    def set_teacher_overrides(self, values: Mapping[str, Any] | None) -> Dict[str, str]:
+        """Set per-file subject assignments, accepting only workspace teachers."""
+
+        normalized: Dict[str, str] = {}
+        for raw_subject, raw_teacher in dict(values or {}).items():
+            subject_key = self._subject_key(raw_subject)
+            teacher_key = self._teacher_key(raw_teacher)
+            if not subject_key or not teacher_key:
+                continue
+            teacher = self.teacher_aliases.get(teacher_key)
+            if not teacher:
+                self.warnings.append(
+                    f"Ручное назначение для «{normalize_text(raw_subject)}» пропущено: "
+                    f"преподаватель «{normalize_text(raw_teacher)}» не найден в пространстве."
+                )
+                continue
+            normalized[subject_key] = teacher
+        self.teacher_overrides = normalized
+        return dict(normalized)
 
     def _extract_teachers(self, value: Any) -> List[str]:
         text = normalize_text(value)
@@ -67,6 +97,19 @@ class TeacherResolver:
         return list(dict.fromkeys(found))
 
     def _assign_teacher(self, week: int, day: str, pair: int, subject: str, lesson_type: str, candidates: Sequence[str]) -> str:
+        manual = self.teacher_overrides.get(self._subject_key(subject))
+        if manual:
+            key = (week, day, pair, manual)
+            occupied = self.occupancy.get(key)
+            if occupied and occupied != subject:
+                self.warnings.append(
+                    f"Ручное назначение: {manual} уже занят на {occupied} "
+                    f"(неделя {week}, {day}, {pair} пара); также назначено {subject}."
+                )
+            else:
+                self.occupancy[key] = subject
+            return manual
+
         teachers = list(dict.fromkeys(normalize_text(item) for item in candidates if normalize_text(item)))
         if not teachers:
             return "Unknown"
