@@ -1,7 +1,10 @@
-"""Analysis-session preview, cleanup and generated-file download routes."""
+"""Analysis-session restore, draft, preview, cleanup and download routes."""
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import time
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Query
@@ -10,10 +13,125 @@ from fastapi.responses import FileResponse
 from src.schedule_analyzer import ScheduleAnalyzer
 from web.backend.app_context import ApplicationContext
 from web.backend.errors import ApplicationError, UploadedFileNotFound
+from web.backend.schemas import AnalysisDraftRequest
+
+
+MAX_DRAFT_BYTES = 4 * 1024 * 1024
+
+
+def _model_dict(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _public_file(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Return enough state to rebuild the editor without exposing server paths."""
+
+    result = {
+        key: item.get(key)
+        for key in (
+            "file_id",
+            "filename",
+            "group_name",
+            "status",
+            "message",
+            "analysis",
+            "bytes_written",
+            "template_match",
+        )
+    }
+    return {key: value for key, value in result.items() if value is not None}
 
 
 def build_session_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["analysis"])
+
+    @router.get("/api/analysis/{session_id}")
+    def restore_analysis_session(session_id: str) -> Dict[str, Any]:
+        manifest = context.sessions.load_manifest(session_id)
+        # Reading an active draft extends its 24-hour lifetime. The directory
+        # mtime, not the browser cache, is the cleanup source of truth.
+        try:
+            os.utime(context.sessions.path(session_id), None)
+        except OSError:
+            pass
+        return {
+            "session_id": session_id,
+            "created_at": manifest.get("created_at"),
+            "updated_at": manifest.get("updated_at") or manifest.get("created_at"),
+            "files": [_public_file(item) for item in manifest.get("files", []) if isinstance(item, dict)],
+            "draft": manifest.get("draft") or {},
+        }
+
+    @router.put("/api/analysis/{session_id}/draft")
+    def save_analysis_draft(
+        session_id: str,
+        payload: AnalysisDraftRequest,
+    ) -> Dict[str, Any]:
+        manifest = context.sessions.load_manifest(session_id)
+        draft = _model_dict(payload)
+        known_ids = {
+            str(item.get("file_id"))
+            for item in manifest.get("files", [])
+            if isinstance(item, dict) and item.get("file_id")
+        }
+        supplied_ids = [item["file_id"] for item in draft.get("files", [])]
+        unknown = sorted(set(supplied_ids) - known_ids)
+        if unknown:
+            raise ApplicationError(
+                "Черновик содержит файлы, которых нет в текущем сеансе: " + ", ".join(unknown[:5]),
+                status_code=409,
+                code="draft_file_mismatch",
+            )
+        if len(supplied_ids) != len(set(supplied_ids)):
+            raise ApplicationError(
+                "Один файл повторяется в черновике несколько раз.",
+                status_code=409,
+                code="draft_file_duplicate",
+            )
+        selected_file_id = draft.get("selected_file_id")
+        if selected_file_id and selected_file_id not in known_ids:
+            raise ApplicationError(
+                "Выбранный файл отсутствует в текущем сеансе.",
+                status_code=409,
+                code="draft_selected_file_missing",
+            )
+        for field_name in ("layouts", "period_overrides"):
+            extra = sorted(set((draft.get(field_name) or {}).keys()) - known_ids)
+            if extra:
+                raise ApplicationError(
+                    f"Поле {field_name} содержит неизвестные файлы: " + ", ".join(extra[:5]),
+                    status_code=409,
+                    code="draft_file_mismatch",
+                )
+
+        encoded = json.dumps(draft, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > MAX_DRAFT_BYTES:
+            raise ApplicationError(
+                "Черновик слишком велик. Удалите лишние диагностические данные и повторите сохранение.",
+                status_code=413,
+                code="draft_too_large",
+            )
+
+        file_state = {item["file_id"]: item for item in draft.get("files", [])}
+        for item in manifest.get("files", []):
+            state = file_state.get(str(item.get("file_id")))
+            if not state:
+                continue
+            item["group_name"] = str(state.get("group_name") or item.get("group_name") or "")[:240]
+
+        now = time.time()
+        draft["saved_at"] = now
+        manifest["draft"] = draft
+        manifest["updated_at"] = now
+        context.sessions.save_manifest(session_id, manifest)
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "saved_at": now,
+            "bytes": len(encoded),
+        }
 
     @router.get("/api/analysis/{session_id}/files/{file_id}/preview")
     def preview_schedule(
