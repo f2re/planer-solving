@@ -16,7 +16,10 @@ def _run_discovery(hint: Path, tmp_path: Path) -> str:
 set -Eeuo pipefail
 source "{COMMON}"
 source "{DISCOVERY}"
-resolve_python_runtime "{hint}" {major} {minor} "{tmp_path / 'install'}" "$(id -un)" "" 0 1
+if ! resolve_python_runtime "{hint}" {major} {minor} "{tmp_path / 'install'}" "$(id -un)" "" 0 1; then
+    python_print_attempts >&2
+    exit 1
+fi
 printf 'SELECTED=%s\\n' "$PYTHON_SELECTED"
 printf 'LIB=%s\\n' "$PYTHON_SELECTED_LD_LIBRARY_PATH"
 printf 'VERSION=%s\\n' "$PYTHON_SELECTED_VERSION"
@@ -45,13 +48,25 @@ def test_pyenv_with_missing_libpython_is_recovered_and_directory_hints_work(tmp_
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
+    # Реальный pyenv создаёт все три имени. Проверяем как версионный файл,
+    # так и ссылки python/python3, которые используются при поиске корня.
+    (bin_dir / "python3").symlink_to(wrapper.name)
+    (bin_dir / "python").symlink_to(wrapper.name)
     (lib_dir / f"libpython{major}.{minor}.so.1.0").write_bytes(b"probe marker")
     (pyenv_bin / "pyenv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (pyenv_bin / "pyenv").chmod(0o755)
     (shims / f"python{major}.{minor}").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
     (shims / f"python{major}.{minor}").chmod(0o755)
 
-    hints = [pyenv, version, bin_dir, wrapper, stdlib, pyenv_bin / "pyenv", shims / f"python{major}.{minor}"]
+    hints = [
+        pyenv,
+        version,
+        bin_dir,
+        wrapper,
+        stdlib,
+        pyenv_bin / "pyenv",
+        shims / f"python{major}.{minor}",
+    ]
     for hint in hints:
         output = _run_discovery(hint, tmp_path)
         assert f"LIB={lib_dir}" in output
