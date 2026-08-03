@@ -69,6 +69,20 @@ def test_attention_queue_explains_default_and_impact() -> None:
     assert "attentionIssues" in state
 
 
+def test_unknown_teachers_can_be_assigned_without_leaving_flow() -> None:
+    markup = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
+    state = (ASSETS / "teacher-mapping-state.js").read_text(encoding="utf-8")
+    application = (ASSETS / "planner-app.js").read_text(encoding="utf-8")
+
+    assert "Назначить преподавателей" in markup
+    assert "Не назначен — безопасное значение" in markup
+    assert "openTeacherMapping(issue)" in markup
+    assert "saveTeacherMapping" in markup
+    assert "teacher_overrides" in state
+    assert "createTeacherMappingState" in application
+    assert "...teacherMapping" in application
+
+
 def test_ux_audit_defines_issue_resolution_contract() -> None:
     audit = (ROOT / "docs" / "UX_OPERATOR_FLOW_AUDIT.md").read_text(encoding="utf-8")
 
