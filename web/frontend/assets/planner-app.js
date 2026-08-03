@@ -119,6 +119,24 @@ export function mount() {
             const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
             const importWorkspace = rematchAfter(workspace.importWorkspace);
 
+            const leaveSheetWorkspace = () => {
+                if (!editor.layoutDirty.value) {
+                    editor.leaveSheetWorkspace();
+                    return;
+                }
+                editor.templateSaveOpen.value = false;
+                editor.pendingEditorExit.value = false;
+                editor.sheetWorkspaceOpen.value = false;
+                editor.sheetWorkspacePreferred.value = false;
+                document.documentElement.classList.remove('sheet-workspace-open');
+                window.__plannerSessionDraft?.flush?.();
+                addToast(
+                    'Разметка файла сохранена',
+                    'Изменения остались в текущем серверном черновике. Глобальный шаблон не изменён.',
+                    'success'
+                );
+            };
+
             const saveCurrentProfile = async () => {
                 const name = workspace.profileName.value.trim();
                 if (!name || !schedule.currentLayout.value) {
@@ -286,6 +304,7 @@ export function mount() {
                 addToast,
                 removeToast,
                 switchWorkspace,
+                leaveSheetWorkspace,
                 saveTeacher,
                 deleteTeacher,
                 importTeachers,
