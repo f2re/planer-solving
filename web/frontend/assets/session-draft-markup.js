@@ -63,7 +63,7 @@ export function installSessionDraftMarkup() {
             Вернуться к файлам и правкам
           </button>`);
         buttons.insertAdjacentHTML('beforebegin', `
-          <section v-if="resultCorrections.length || resultProblemFiles.length" class="result-corrections-panel">
+          <section v-if="resultCorrections.length || resultProblemFiles.length || result.warnings?.length" class="result-corrections-panel">
             <div class="result-corrections-head">
               <div>
                 <strong>Результат можно уточнить</strong>
@@ -83,6 +83,15 @@ export function installSessionDraftMarkup() {
                 <span>Исправить →</span>
               </button>
             </div>
+            <details v-if="result.warnings?.length" class="result-correction-details result-warning-details" open>
+              <summary>Предупреждения результата: {{ result.warnings.length }}</summary>
+              <div class="result-warning-list">
+                <article v-for="(warning,index) in result.warnings" :key="'warning-' + index">
+                  <span class="result-warning-symbol">!</span>
+                  <span>{{ warning }}</span>
+                </article>
+              </div>
+            </details>
             <details v-if="resultCorrections.length" class="result-correction-details">
               <summary>Автоматические и ручные коррекции: {{ resultCorrections.length }}</summary>
               <div class="result-correction-list">
