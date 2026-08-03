@@ -12,7 +12,8 @@ from typing import Any, Dict, Optional, Protocol
 import uuid
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION, MigrationError, detect_schema_version
-from src.platform_store import PLATFORM_SCHEMA_VERSION, PlatformStore
+from src.platform_store import PLATFORM_SCHEMA_VERSION
+from src.transactional_platform_store import TransactionalPlatformStore
 from src.workspace_domain import WorkspaceError
 from web.backend.errors import SessionCorrupted, SessionNotFound, UploadedFileNotFound
 
@@ -170,7 +171,7 @@ class ApplicationContext:
         if workspace_repository is None:
             self._validate_storage_schema()
             self._validate_legacy_schema_before_import()
-            workspace_repository = PlatformStore(
+            workspace_repository = TransactionalPlatformStore(
                 self.paths.workspace_database,
                 self.paths.workspaces_json,
                 self.paths.teachers_json,
@@ -197,7 +198,7 @@ class ApplicationContext:
                 f"База SQLite имеет версию {version}, а приложение поддерживает только "
                 f"версию {PLATFORM_SCHEMA_VERSION}. Установите более новую версию приложения."
             )
-        # Versions 0..4 are migrated transactionally by PlatformStore.
+        # Versions 0..4 are migrated transactionally by TransactionalPlatformStore.
 
     def _validate_legacy_schema_before_import(self) -> None:
         if self.paths.workspace_database.exists() or not self.paths.workspaces_json.exists():
