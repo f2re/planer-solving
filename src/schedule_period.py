@@ -68,6 +68,7 @@ def resolve_schedule_calendar(
     )
     manual_values = (overrides or {}).get("week_day_dates") or {}
     applied = []
+    manual_slots: set[str] = set()
     for raw_slot, raw_value in manual_values.items():
         try:
             raw_week, day_name = str(raw_slot).split(":", 1)
@@ -77,17 +78,35 @@ def resolve_schedule_calendar(
         manual = _manual_date(raw_value)
         if manual is None or day_name not in DAY_INDEX or key not in result.week_day_to_date:
             continue
+        slot = f"{key[0]}:{key[1]}"
+        manual_slots.add(slot)
         previous = result.week_day_to_date[key]
         result.week_day_to_date[key] = manual
         if previous != manual:
             applied.append({
                 "type": "operator_date",
-                "slot": f"{key[0]}:{key[1]}",
+                "slot": slot,
                 "before": previous.isoformat(),
                 "after": manual.isoformat(),
                 "reason": "Точная ручная правка оператора.",
                 "blocking": False,
             })
+
+    if manual_slots:
+        # Remove provisional automatic decisions for cells whose final value is
+        # explicitly controlled by the operator. The report must not claim that
+        # an operator date was rejected and accepted at the same time.
+        result.report["corrections"] = [
+            item for item in result.report.get("corrections", [])
+            if str(item.get("slot") or "") not in manual_slots
+        ]
+        result.report["issues"] = [
+            item for item in result.report.get("issues", [])
+            if not (
+                item.get("code") == "calendar_source_conflict"
+                and str((item.get("action") or {}).get("slot") or "") in manual_slots
+            )
+        ]
 
     if applied:
         values = list(result.week_day_to_date.values())
@@ -106,6 +125,14 @@ def resolve_schedule_calendar(
             "action": {},
         })
         result.report["operator_override_count"] = len(applied)
+
+    warnings = [
+        str(item.get("message") or "")
+        for item in result.report.get("issues", [])
+        if item.get("severity") == "warning" and item.get("message")
+    ]
+    result.report["warnings"] = warnings
+    result.warnings = warnings
     return result
 
 
