@@ -6,24 +6,32 @@ INSTALL_ROOT="/opt/planner-solving"
 ARCHIVE=""
 SERVICE_USER=""
 PORT="8001"
+HOST="0.0.0.0"
+WORKERS="1"
+KEEP_RELEASES="3"
 PYTHON_BIN=""
 NO_SYSTEMD=0
 ASSUME_YES=1
+ALLOW_UNSIGNED=0
 
 usage() {
     cat <<'EOF'
-Распаковка, установка или обновление Planner Solving.
+Установка или обновление Planner Solving одним сценарием.
 
   sudo ./install-planner-solving.sh [параметры]
 
 Параметры:
   --archive PATH       архив planner-solving-offline-*.tar.gz
   --install-dir PATH   каталог установки, по умолчанию /opt/planner-solving
-  --service-user USER  пользователь службы; существующая настройка сохраняется
+  --service-user USER  пользователь службы; прежняя настройка сохраняется
   --port PORT          порт, по умолчанию 8001
-  --python PATH        Python 3.11+
+  --host ADDRESS       адрес прослушивания, по умолчанию 0.0.0.0
+  --workers N          число процессов Uvicorn, по умолчанию 1
+  --python PATH        Python точной версии пакета
+  --keep-releases N    число сохранённых выпусков, по умолчанию 3
   --no-systemd         не устанавливать службу
-  --ask                запросить подтверждение внутреннего установщика
+  --ask                запросить подтверждение
+  --allow-unsigned     разрешить пакет без файла .sha256
 EOF
 }
 
@@ -33,9 +41,13 @@ while (($#)); do
         --install-dir) INSTALL_ROOT="$2"; shift 2 ;;
         --service-user) SERVICE_USER="$2"; shift 2 ;;
         --port) PORT="$2"; shift 2 ;;
+        --host) HOST="$2"; shift 2 ;;
+        --workers) WORKERS="$2"; shift 2 ;;
         --python) PYTHON_BIN="$2"; shift 2 ;;
+        --keep-releases) KEEP_RELEASES="$2"; shift 2 ;;
         --no-systemd) NO_SYSTEMD=1; shift ;;
         --ask) ASSUME_YES=0; shift ;;
+        --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
         --help|-h) usage; exit 0 ;;
         *) echo "Неизвестный параметр: $1" >&2; usage; exit 2 ;;
     esac
@@ -46,12 +58,19 @@ if [[ $EUID -ne 0 ]]; then
         echo "Для установки в /opt требуются права root или команда sudo." >&2
         exit 2
     }
-    reexec=(--install-dir "$INSTALL_ROOT" --port "$PORT")
+    reexec=(
+        --install-dir "$INSTALL_ROOT"
+        --port "$PORT"
+        --host "$HOST"
+        --workers "$WORKERS"
+        --keep-releases "$KEEP_RELEASES"
+    )
     [[ -n "$ARCHIVE" ]] && reexec+=(--archive "$ARCHIVE")
     [[ -n "$SERVICE_USER" ]] && reexec+=(--service-user "$SERVICE_USER")
     [[ -n "$PYTHON_BIN" ]] && reexec+=(--python "$PYTHON_BIN")
     [[ $NO_SYSTEMD -eq 1 ]] && reexec+=(--no-systemd)
     [[ $ASSUME_YES -eq 0 ]] && reexec+=(--ask)
+    [[ $ALLOW_UNSIGNED -eq 1 ]] && reexec+=(--allow-unsigned)
     exec sudo -E bash "$0" "${reexec[@]}"
 fi
 
@@ -69,10 +88,19 @@ ARCHIVE="$(readlink -f "$ARCHIVE")"
 [[ -f "$ARCHIVE" ]] || { echo "Архив не найден: $ARCHIVE" >&2; exit 2; }
 
 checksum_file="$ARCHIVE.sha256"
+if [[ ! -f "$checksum_file" && $ALLOW_UNSIGNED -eq 0 ]]; then
+    echo "Отсутствует обязательный файл контрольной суммы: $checksum_file" >&2
+    echo "Скопируйте рядом архив, .sha256 и install-planner-solving.sh." >&2
+    exit 2
+fi
 if [[ -f "$checksum_file" ]]; then
     if command -v sha256sum >/dev/null 2>&1; then
         (cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$checksum_file")")
     else
+        command -v python3 >/dev/null 2>&1 || {
+            echo "Не найдены sha256sum и python3 для проверки архива." >&2
+            exit 2
+        }
         python3 - "$ARCHIVE" "$checksum_file" <<'PY'
 import hashlib
 from pathlib import Path
@@ -89,7 +117,7 @@ print("Контрольная сумма архива подтверждена")
 PY
     fi
 else
-    echo "Предупреждение: файл $checksum_file отсутствует." >&2
+    echo "ПРЕДУПРЕЖДЕНИЕ: установка неподписанного пакета разрешена явно." >&2
 fi
 
 if [[ -z "$SERVICE_USER" && -f /etc/systemd/system/planner-solving.service ]]; then
@@ -97,20 +125,10 @@ if [[ -z "$SERVICE_USER" && -f /etc/systemd/system/planner-solving.service ]]; t
 fi
 SERVICE_USER="${SERVICE_USER:-planner-solving}"
 
-if ! id "$SERVICE_USER" >/dev/null 2>&1; then
-    if command -v useradd >/dev/null 2>&1; then
-        useradd --system --user-group --home-dir "$INSTALL_ROOT" --shell /usr/sbin/nologin "$SERVICE_USER"
-    elif command -v adduser >/dev/null 2>&1; then
-        adduser --system --group --home "$INSTALL_ROOT" --no-create-home "$SERVICE_USER"
-    else
-        echo "Не удалось создать системного пользователя $SERVICE_USER." >&2
-        exit 2
-    fi
-fi
-
 TEMP_DIR="$(mktemp -d -t planner-solving-install-XXXXXX)"
 cleanup() { rm -rf "$TEMP_DIR"; }
 trap cleanup EXIT
+chmod 0755 "$TEMP_DIR"
 
 tar -xzf "$ARCHIVE" -C "$TEMP_DIR"
 BUNDLE_ROOT="$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d -name 'planner-solving-offline-*' | head -n 1)"
@@ -123,6 +141,9 @@ args=(
     --install-dir "$INSTALL_ROOT"
     --service-user "$SERVICE_USER"
     --port "$PORT"
+    --host "$HOST"
+    --workers "$WORKERS"
+    --keep-releases "$KEEP_RELEASES"
 )
 [[ -n "$PYTHON_BIN" ]] && args+=(--python "$PYTHON_BIN")
 [[ $NO_SYSTEMD -eq 1 ]] && args+=(--no-systemd)
@@ -130,21 +151,18 @@ args=(
 
 bash "$BUNDLE_ROOT/install_or_update.sh" "${args[@]}"
 
-mkdir -p "$INSTALL_ROOT/state"
-cat > "$INSTALL_ROOT/state/admin.sh" <<EOF
-#!/usr/bin/env bash
-set -Eeuo pipefail
-cd "$INSTALL_ROOT/current"
-exec "$INSTALL_ROOT/current/.venv/bin/python" -m tools.user_admin \
-  --data-dir "$INSTALL_ROOT/shared/data" \
-  --legacy-teachers "$INSTALL_ROOT/shared/teachers.json" "\$@"
-EOF
-chmod 0755 "$INSTALL_ROOT/state/admin.sh"
-ln -sfn "$INSTALL_ROOT/state/admin.sh" /usr/local/bin/planner-solving-admin 2>/dev/null || true
+echo
+if [[ $NO_SYSTEMD -eq 0 ]]; then
+    "$INSTALL_ROOT/state/doctor.sh" \
+        --install-dir "$INSTALL_ROOT" \
+        --port "$PORT" \
+        --output "$INSTALL_ROOT/state/last-doctor-report.txt" || true
+fi
 
 echo
 echo "Planner Solving установлен в $INSTALL_ROOT"
-echo "Данные и пароли сохранены в $INSTALL_ROOT/shared/data"
-echo "Управление пользователями: sudo planner-solving-admin list"
-echo "Сброс пароля: sudo planner-solving-admin reset-password admin"
-echo "Пустой пароль: sudo planner-solving-admin reset-password admin --empty"
+echo "Интерфейс: http://127.0.0.1:$PORT"
+echo "Данные: $INSTALL_ROOT/shared"
+echo "Диагностика: sudo planner-solving-doctor"
+echo "Журнал службы: sudo journalctl -u planner-solving -n 100 --no-pager"
+echo "Пользователи: sudo planner-solving-admin list"

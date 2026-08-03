@@ -37,8 +37,23 @@ def test_workspace_refresh_is_explicit_and_background_synchronized():
     assert "workspace.loadSpaces = reactiveWorkspace.refreshSpaces" in planner
 
 
-def test_password_inputs_have_no_html_length_or_required_policy():
+def test_password_policy_is_idempotent_and_cannot_starve_vue_mount():
     source = read("ui-runtime-fixes.js")
+    bootstrap = read("app.js")
     assert "removeAttribute(attribute)" in source
-    assert "minlength" in source
-    assert ":required" in source
+    assert "attributeFilter: ['required', 'minlength']" in source
+    assert "input.minLength =" not in source
+    assert "queueMicrotask(relaxPasswordInputs)" not in source
+    assert "window.setTimeout(relaxPasswordInputs" not in source
+    assert "if (passwordObserver) return" in source
+    assert bootstrap.index("application.mount()") < bootstrap.index("import('/assets/ui-runtime-fixes.js')")
+
+
+def test_frontend_bootstrap_has_watchdog_and_visible_failure_path():
+    source = read("app.js")
+    assert "__plannerSolvingBoot" in source
+    assert "planner-startup-error" in source
+    assert "unhandledrejection" in source
+    assert "Превышено время запуска интерфейса" in source
+    assert "window.clearTimeout(watchdog)" in source
+    assert "if (window[bootKey]?.started) return" in source

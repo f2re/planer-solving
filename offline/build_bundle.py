@@ -20,7 +20,7 @@ if str(ROOT_HINT) not in sys.path:
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION
 
-BUNDLE_FORMAT_VERSION = 1
+BUNDLE_FORMAT_VERSION = 2
 EXCLUDED_NAMES = {
     ".git", ".github", ".gemini", ".idea", ".vscode", ".venv", "venv", "env",
     "__pycache__", ".pytest_cache", ".offline-cache", "dist", "build", "backups",
@@ -148,10 +148,18 @@ def build(args: argparse.Namespace) -> Path:
                 "--requirement", str(requirements), "--only-binary=:all:",
             ], cwd=root)
 
-        for script in ("install_or_update.sh", "rollback.sh", "common.sh", "verify_bundle.py"):
+        scripts = (
+            "install_or_update.sh",
+            "rollback.sh",
+            "common.sh",
+            "verify_bundle.py",
+            "runtime.sh",
+            "doctor.sh",
+        )
+        for script in scripts:
             shutil.copy2(root / "offline" / script, stage / script)
-        for script in (stage / "install_or_update.sh", stage / "rollback.sh"):
-            script.chmod(0o755)
+        for script in ("install_or_update.sh", "rollback.sh", "runtime.sh", "doctor.sh"):
+            (stage / script).chmod(0o755)
 
         manifest_path = stage / "manifest.json"
         manifest = {
@@ -197,7 +205,7 @@ def build(args: argparse.Namespace) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Сборка офлайн-пакета Planner Solving")
+    parser = argparse.ArgumentParser(description="Сборка автономного пакета Planner Solving")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--python", default=sys.executable, help="Python, для которого скачиваются колёса")
