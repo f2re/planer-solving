@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, Protocol
 import uuid
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION, MigrationError, detect_schema_version
+from src.operations_store import OPERATIONS_SCHEMA_VERSION, OperationsStore
 from src.sqlite_workspace_store import SQLITE_SCHEMA_VERSION, SQLiteWorkspaceStore
 from src.workspace_store import WorkspaceError
 from web.backend.errors import SessionCorrupted, SessionNotFound, UploadedFileNotFound
@@ -32,6 +33,8 @@ class ApplicationPaths:
     input_dir: Path
     output_dir: Path
     session_root: Path
+    import_root: Path
+    history_root: Path
     frontend_dir: Path
     teachers_json: Path
     workspaces_json: Path
@@ -50,6 +53,8 @@ class ApplicationPaths:
             input_dir=input_dir,
             output_dir=base / "output",
             session_root=input_dir / "analysis_sessions",
+            import_root=data / "imports",
+            history_root=data / "history",
             frontend_dir=base / "web" / "frontend",
             teachers_json=base / "teachers.json",
             workspaces_json=data / "workspaces.json",
@@ -69,7 +74,10 @@ class AnalysisSessionStore:
     def atomic_json_write(path: Path, data: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        with temporary.open("w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2, default=str)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
 
     def cleanup_old(self) -> None:
@@ -165,6 +173,8 @@ class ApplicationContext:
             self.paths.input_dir,
             self.paths.output_dir,
             self.paths.session_root,
+            self.paths.import_root,
+            self.paths.history_root,
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self.sessions = AnalysisSessionStore(self.paths.session_root)
@@ -177,6 +187,11 @@ class ApplicationContext:
                 self.paths.teachers_json,
             )
         self.workspace_repository = workspace_repository
+        self.operations = OperationsStore(
+            self.paths.workspace_database,
+            self.paths.workspaces_json,
+            self.paths.teachers_json,
+        )
 
     def _validate_storage_schema(self) -> None:
         database = self.paths.workspace_database
@@ -241,12 +256,12 @@ class ApplicationContext:
             "app_version": self.application_version(),
             "data_schema_version": int(document.get("version", schema_version)),
             "storage_schema_version": schema_version,
+            "operations_schema_version": OPERATIONS_SCHEMA_VERSION,
             "supported_data_schema_version": CURRENT_SCHEMA_VERSION,
             "storage": "sqlite" if self.paths.workspace_database.exists() else "custom",
+            "setup_required": self.operations.user_count() == 0,
         }
 
-    # Temporary compatibility aliases for extensions that are migrated in the
-    # same release. They are instance attributes, not mutable module globals.
     @property
     def BASE_DIR(self) -> Path:
         return self.paths.base_dir
