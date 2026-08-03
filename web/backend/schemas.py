@@ -124,6 +124,9 @@ class FileUploadDetail(BaseModel):
     message: str
     file_id: Optional[str] = None
     lesson_count: Optional[int] = None
+    used: bool = True
+    warning_count: int = 0
+    action_count: int = 0
 
 
 class ScheduleUploadResponse(BaseModel):
@@ -135,6 +138,7 @@ class ScheduleUploadResponse(BaseModel):
     details: List[FileUploadDetail] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     reports: List[Dict[str, Any]] = Field(default_factory=list)
+    corrections: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class AnalysisFile(BaseModel):
@@ -156,6 +160,7 @@ class ValidateLayoutRequest(BaseModel):
     group_name: str
     layout: Dict[str, Any]
     workspace_id: Optional[str] = None
+    period_overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ValidateLayoutResponse(BaseModel):
@@ -168,8 +173,11 @@ class GenerateFileSpec(BaseModel):
     group_name: str
     layout: Dict[str, Any]
     enabled: bool = True
+    period_overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
 class GenerateScheduleRequest(BaseModel):
     files: List[GenerateFileSpec] = Field(default_factory=list)
     workspace_id: Optional[str] = None
+    calendar_overrides: Dict[str, Any] = Field(default_factory=dict)
+    allow_partial: bool = True
