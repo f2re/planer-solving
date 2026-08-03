@@ -6,12 +6,12 @@ from fastapi.testclient import TestClient
 import pytest
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION
-from src.sqlite_workspace_store import SQLITE_SCHEMA_VERSION
-from src.workspace_store import WorkspaceError
+from src.platform_store import PLATFORM_SCHEMA_VERSION
+from src.workspace_domain import WorkspaceError
 from web.backend.app_factory import create_app
 
 
-def test_health_reports_application_and_schema_versions(tmp_path: Path) -> None:
+def test_health_reports_operations_platform_features(tmp_path: Path) -> None:
     teachers = tmp_path / "teachers.json"
     teachers.write_text(json.dumps([
         {"id": 1, "short_name": "Иванов", "full_name": "Иванов Иван Иванович"}
@@ -24,14 +24,14 @@ def test_health_reports_application_and_schema_versions(tmp_path: Path) -> None:
     assert payload["status"] == "ok"
     assert payload["app_version"] == "test-version"
     assert payload["data_schema_version"] == CURRENT_SCHEMA_VERSION
-    assert payload["supported_data_schema_version"] == CURRENT_SCHEMA_VERSION
-    assert payload["storage_schema_version"] == SQLITE_SCHEMA_VERSION
-    assert payload["storage"] == "sqlite"
+    assert payload["storage_schema_version"] == PLATFORM_SCHEMA_VERSION
+    assert payload["storage"] == "sqlite-platform"
+    assert all(payload["features"].values())
     assert (tmp_path / "data" / "workspaces.json").exists()
     assert (tmp_path / "data" / "planner-solving.sqlite3").exists()
 
 
-def test_future_schema_is_blocked_without_rewriting(tmp_path: Path) -> None:
+def test_future_document_schema_is_blocked_without_rewriting(tmp_path: Path) -> None:
     teachers = tmp_path / "teachers.json"
     teachers.write_text("[]\n", encoding="utf-8")
     data_dir = tmp_path / "data"
@@ -53,11 +53,11 @@ def test_future_schema_is_blocked_without_rewriting(tmp_path: Path) -> None:
     assert not (data_dir / "planner-solving.sqlite3").exists()
 
 
-def test_future_sqlite_schema_is_blocked_without_downgrade(tmp_path: Path) -> None:
+def test_future_platform_schema_is_blocked_without_downgrade(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     database = data_dir / "planner-solving.sqlite3"
-    future_version = SQLITE_SCHEMA_VERSION + 1
+    future_version = PLATFORM_SCHEMA_VERSION + 1
     connection = sqlite3.connect(database)
     try:
         connection.execute(f"PRAGMA user_version = {future_version}")
