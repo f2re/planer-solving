@@ -53,6 +53,47 @@
     outline-offset: 2px;
 }
 
+.sheet-file-save-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 230px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    color: rgba(226, 232, 240, 0.86);
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.sheet-file-save-state::before {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #63c58b;
+    content: '';
+}
+
+.sheet-file-save-state.dirty {
+    color: #ffe7a3;
+    background: rgba(245, 190, 54, 0.12);
+}
+
+.sheet-file-save-state.dirty::before {
+    background: #f5be36;
+}
+
+@media (max-width: 1120px) {
+    .sheet-file-save-state {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
 @media (prefers-reduced-motion: no-preference) {
     .server-draft-status.saving::before,
     .server-draft-status.restoring::before {
