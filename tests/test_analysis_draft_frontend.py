@@ -68,6 +68,23 @@ def test_result_can_return_to_the_problem_file_without_deleting_session():
     assert ".result-warning-list" in css
 
 
+def test_result_discloses_every_input_file_omitted_from_backend_details():
+    coverage = read("schedule-result-coverage.js")
+    markup = read("session-draft-markup.js")
+    planner = read("planner-app.js")
+    css = read("session-draft.css")
+    assert "resultExcludedFiles" in coverage
+    assert "!includedIds.has" in coverage
+    assert "!file.analysis || !file.enabled" in coverage
+    assert "createScheduleResultCoverageState" in planner
+    assert "...scheduleResultCoverage" in planner
+    assert "resultExcludedFiles.length" in markup
+    assert "Не вошли в текущий результат" in markup
+    assert "Откройте, включите или замените" in markup
+    assert ".result-coverage-section" in css
+    assert ".result-problem-item.excluded" in css
+
+
 def test_one_file_can_be_replaced_without_resetting_the_session():
     draft = read("schedule-draft.js")
     markup = read("session-draft-markup.js")
