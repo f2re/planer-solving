@@ -234,6 +234,166 @@
     text-decoration: none;
 }
 
+.teacher-mapping-backdrop {
+    z-index: 130;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+}
+
+.teacher-mapping-dialog {
+    display: grid;
+    grid-template-rows: auto auto auto minmax(160px, 1fr) auto;
+    width: min(860px, 100%);
+    max-height: min(780px, calc(100vh - 48px));
+    overflow: hidden;
+    border: 1px solid var(--operator-border, rgba(15, 23, 42, 0.10));
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 30px 90px rgba(15, 23, 42, 0.25);
+    backdrop-filter: blur(28px) saturate(150%);
+}
+
+.teacher-mapping-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 20px 22px 15px;
+    border-bottom: 1px solid var(--operator-border, rgba(15, 23, 42, 0.10));
+}
+
+.teacher-mapping-header .eyebrow {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--primary);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.teacher-mapping-header h2 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: -0.035em;
+}
+
+.teacher-mapping-header p {
+    margin: 5px 0 0;
+    color: var(--operator-muted, #667085);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.teacher-mapping-header .modal-close {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 10px;
+    color: #667085;
+    background: rgba(15, 23, 42, 0.06);
+    cursor: pointer;
+    font-size: 20px;
+}
+
+.teacher-mapping-header .modal-close:hover {
+    background: rgba(15, 23, 42, 0.10);
+}
+
+.teacher-mapping-default {
+    margin: 14px 22px 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(49, 94, 251, 0.15);
+    border-radius: 11px;
+    color: #3f4a63;
+    background: rgba(49, 94, 251, 0.055);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.teacher-mapping-search {
+    display: grid;
+    gap: 5px;
+    padding: 13px 22px 11px;
+}
+
+.teacher-mapping-search > span {
+    color: var(--operator-muted, #667085);
+    font-size: 10px;
+    font-weight: 650;
+}
+
+.teacher-mapping-list {
+    overflow: auto;
+    padding: 0 22px 16px;
+}
+
+.teacher-mapping-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.1fr);
+    align-items: center;
+    gap: 18px;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.075);
+}
+
+.teacher-mapping-row:last-child {
+    border-bottom: 0;
+}
+
+.teacher-mapping-row strong,
+.teacher-mapping-row small {
+    display: block;
+}
+
+.teacher-mapping-row strong {
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.teacher-mapping-row small {
+    margin-top: 3px;
+    color: var(--operator-muted, #667085);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.teacher-mapping-row select {
+    width: 100%;
+}
+
+.teacher-mapping-empty {
+    margin: 18px 0;
+    color: var(--operator-muted, #667085);
+    text-align: center;
+    font-size: 12px;
+}
+
+.teacher-mapping-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px 22px;
+    border-top: 1px solid var(--operator-border, rgba(15, 23, 42, 0.10));
+    background: rgba(248, 249, 251, 0.86);
+}
+
+.teacher-mapping-footer > span {
+    max-width: 480px;
+    color: var(--operator-muted, #667085);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.teacher-mapping-footer > div {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 8px;
+}
+
 @media (max-width: 1000px) {
     .operator-primary-actions {
         align-self: stretch;
@@ -284,5 +444,43 @@
     .attention-item > .btn {
         grid-column: 2;
         width: 100%;
+    }
+
+    .teacher-mapping-backdrop {
+        padding: 8px;
+    }
+
+    .teacher-mapping-dialog {
+        max-height: calc(100vh - 16px);
+        border-radius: 16px;
+    }
+
+    .teacher-mapping-header,
+    .teacher-mapping-footer {
+        padding-inline: 15px;
+    }
+
+    .teacher-mapping-default {
+        margin-inline: 15px;
+    }
+
+    .teacher-mapping-search,
+    .teacher-mapping-list {
+        padding-inline: 15px;
+    }
+
+    .teacher-mapping-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .teacher-mapping-footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .teacher-mapping-footer > div {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
     }
 }
