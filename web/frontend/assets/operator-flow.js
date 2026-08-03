@@ -28,7 +28,7 @@ export function installOperatorFlowMarkup() {
     text('.upload-header .page-title', 'Сформировать расписание');
     text(
         '.upload-header .page-lead',
-        'Загрузите книги расписаний. Система сама выберет безопасную разметку, сформирует результат из пригодных данных и покажет всё, что стоит уточнить. Любой файл можно исправить на месте без повторной загрузки.'
+        'Загрузите книги расписаний. Система сама выберет безопасную разметку, сформирует результат из пригодных данных и покажет всё, что стоит уточнить. Любой файл можно исправить на месте без повторной загрузки остальных.'
     );
     text('.dropzone h2', 'Добавить файлы расписаний');
     text('.dropzone p', 'Можно выбрать несколько книг с разной структурой и оформлением.');
@@ -43,7 +43,7 @@ export function installOperatorFlowMarkup() {
       <div class="operator-principles" aria-label="Принципы обработки">
         <article><span>1</span><div><b>Автоматика сначала</b><small>Система применяет лучший безопасный вариант без лишних вопросов.</small></div></article>
         <article><span>2</span><div><b>Ничего не блокируется</b><small>Пригодные данные попадут в результат, сомнительные останутся доступными для уточнения.</small></div></article>
-        <article><span>3</span><div><b>Правка на месте</b><small>Разметка, календарь и назначения исправляются в текущем сеансе.</small></div></article>
+        <article><span>3</span><div><b>Правка на месте</b><small>Файл, разметка, календарь и назначения исправляются в текущем сеансе.</small></div></article>
       </div>`);
 
     const workflow = document.querySelector('.workflow-grid');
@@ -54,7 +54,7 @@ export function installOperatorFlowMarkup() {
           <strong>{{ enabledFiles.length }} {{ enabledFiles.length === 1 ? 'файл включён' : 'файлов включено' }}</strong>
           <small>
             {{ enabledFiles.filter(file => (validations[file.file_id]?.report?.lesson_count || 0) > 0).length }} уже дают занятия.
-            Остальные система попробует восстановить при формировании.
+            Файлы без найденных занятий останутся в отчёте и доступны для исправления.
           </small>
         </div>
         <div class="readiness-metrics">
@@ -62,10 +62,21 @@ export function installOperatorFlowMarkup() {
           <span><b>{{ enabledFiles.filter(file => (validations[file.file_id]?.report?.unknown_teacher_lessons || 0) > 0).length }}</b><small>нужно назначить</small></span>
           <span><b>{{ enabledFiles.filter(file => validations[file.file_id]?.status === 'warning').length }}</b><small>есть подсказки</small></span>
         </div>
-        <button type="button" class="btn btn-primary operator-generate" @click="generate" :disabled="generateBusy || !canGenerate">
-          {{ generateBusy ? 'Формируем…' : 'Сформировать результат' }}
-        </button>
-      </section>`);
+        <div class="operator-primary-actions">
+          <label class="btn btn-secondary operator-add-files" :class="{disabled:fileMutationBusy}">
+            Добавить файлы
+            <input id="session-add-files" hidden type="file" multiple accept=".xlsx,.xlsm" :disabled="fileMutationBusy" @change="appendSessionFiles">
+          </label>
+          <button type="button" class="btn btn-primary operator-generate" @click="generate" :disabled="generateBusy || fileMutationBusy || !canGenerate">
+            {{ generateBusy ? 'Формируем…' : 'Сформировать результат' }}
+          </button>
+        </div>
+      </section>
+      <div v-if="lastRemovedFile" class="session-undo" role="status">
+        <div><b>Файл убран из сеанса</b><small>{{ lastRemovedFile.file.filename }} · разметка и группа сохранены для отмены</small></div>
+        <button type="button" class="btn btn-secondary btn-small" :disabled="fileMutationBusy" @click="undoRemoveSessionFile">Вернуть файл</button>
+        <button type="button" class="session-undo-close" aria-label="Скрыть сообщение" @click="clearRemovedFileUndo">×</button>
+      </div>`);
 
     const groupInput = document.querySelector('.file-item .group-input');
     insertOnce(groupInput, 'afterend', '.file-resolution-state', `
@@ -75,6 +86,13 @@ export function installOperatorFlowMarkup() {
         </span>
         <span v-else-if="validations[file.file_id]" class="attention">Нужно указать область занятий</span>
         <span v-else class="neutral">Будет проверено автоматически</span>
+      </div>
+      <div class="file-session-actions" @click.stop>
+        <label class="file-action" :class="{disabled:fileMutationBusy}">
+          {{ mutatingFileId === file.file_id ? 'Заменяем…' : 'Заменить' }}
+          <input hidden type="file" accept=".xlsx,.xlsm" :disabled="fileMutationBusy" @change="replaceSessionFile(file.file_id,$event)">
+        </label>
+        <button type="button" class="file-action remove" :disabled="fileMutationBusy" @click.stop="removeSessionFile(file)">Убрать</button>
       </div>`);
 
     const validateButton = document.querySelector('.settings-section .button-stack .btn-primary');
@@ -84,11 +102,12 @@ export function installOperatorFlowMarkup() {
 
     const bottomNote = document.querySelector('.bottom-note');
     if (bottomNote) {
-        bottomNote.textContent = 'Результат будет создан в любом случае: пригодные данные используются, спорные решения сохраняются для последующей правки.';
+        bottomNote.textContent = 'Результат создаётся из пригодных данных. Спорные решения сохраняются в отчёте и остаются доступными для исправления.';
     }
     const bottomPrimary = document.querySelector('.bottom-actions .btn-primary');
     if (bottomPrimary) {
         bottomPrimary.innerHTML = "{{ generateBusy ? 'Формируем…' : 'Сформировать результат' }}";
+        bottomPrimary.setAttribute(':disabled', 'generateBusy || fileMutationBusy || !enabledFiles.length');
     }
 
     const resultTitle = document.querySelector('.result-card .page-title');
@@ -136,7 +155,8 @@ export function installOperatorFlowRuntime() {
             || target?.isContentEditable;
 
         if (modifier && event.key.toLowerCase() === 'o' && !editing) {
-            const input = document.querySelector('#schedule-files');
+            const input = document.querySelector('#session-add-files')
+                || document.querySelector('#schedule-files');
             if (input && !input.disabled) {
                 event.preventDefault();
                 input.click();
