@@ -1,4 +1,29 @@
 export function installSessionDraftMarkup() {
+    const app = document.querySelector('#app');
+    if (app && !document.getElementById('analysis-file-replacement')) {
+        app.insertAdjacentHTML('beforeend', `
+          <input
+            id="analysis-file-replacement"
+            hidden
+            type="file"
+            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12"
+            @change="replaceAnalysisFile"
+          >`);
+    }
+
+    const fileItem = document.querySelector('.file-list .file-item');
+    if (fileItem && !fileItem.querySelector('.replace-session-file')) {
+        fileItem.insertAdjacentHTML('beforeend', `
+          <button
+            type="button"
+            class="btn btn-secondary btn-small replace-session-file"
+            :class="{urgent:!file.analysis}"
+            :disabled="replacementBusy"
+            @click.stop="startFileReplacement(file.file_id)"
+            :title="file.analysis ? 'Заменить только этот Excel, сохранив остальные файлы и правки' : 'Выбрать исправную копию этого файла'"
+          >{{ replacementBusy && replacementFileId === file.file_id ? 'Заменяем…' : (file.analysis ? 'Заменить' : 'Выбрать другой') }}</button>`);
+    }
+
     const bottomNote = document.querySelector('.bottom-actions .bottom-note');
     if (bottomNote && !document.querySelector('.analysis-draft-status')) {
         bottomNote.insertAdjacentHTML('beforeend', `
