@@ -34,7 +34,7 @@ jobs:
             src/schedule_analyzer.py src/data_loader.py src/template_matcher.py \
             src/template_learning.py src/import_wizard.py src/security.py \
             src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \
-            src/platform_store.py src/data_migrations.py \
+            src/platform_store.py src/transactional_platform_store.py src/data_migrations.py \
             tools/migrate.py tools/healthcheck.py \
             offline/build_bundle.py offline/verify_bundle.py \
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
