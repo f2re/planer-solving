@@ -3,9 +3,12 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tarfile
 
 from offline.build_bundle import build, copy_application
+from offline.python_runtime import export_runtime
 from offline.verify_bundle import verify_bundle
 
 
@@ -53,8 +56,11 @@ def test_build_bundle_with_existing_wheelhouse(tmp_path: Path) -> None:
         "rollback.sh",
         "common.sh",
         "verify_bundle.py",
+        "verify_bundle.sh",
         "runtime.sh",
         "doctor.sh",
+        "python_discovery.sh",
+        "python_runtime.py",
     ):
         shutil.copy2(Path(__file__).parents[1] / "offline" / name, root / "offline" / name)
     wheelhouse = tmp_path / "wheels"
@@ -64,8 +70,11 @@ def test_build_bundle_with_existing_wheelhouse(tmp_path: Path) -> None:
     archive = build(argparse.Namespace(
         root=root,
         output=output,
-        python="python3",
+        python=sys.executable,
+        runtime_python=None,
         use_wheelhouse=wheelhouse,
+        use_python_runtime=None,
+        include_python_runtime=False,
     ))
     assert archive.exists()
     extracted = tmp_path / "extracted"
@@ -76,3 +85,22 @@ def test_build_bundle_with_existing_wheelhouse(tmp_path: Path) -> None:
     assert (bundle_root / "app" / "src" / "app.py").exists()
     assert (bundle_root / "runtime.sh").is_file()
     assert (bundle_root / "doctor.sh").is_file()
+    assert (bundle_root / "python_discovery.sh").is_file()
+    assert (bundle_root / "python_runtime.py").is_file()
+    assert not (bundle_root / "python-runtime").exists()
+
+
+def test_exported_python_runtime_runs_and_creates_venv(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    info = export_runtime(runtime)
+    assert info["major"] == sys.version_info.major
+    assert info["minor"] == sys.version_info.minor
+    assert (runtime / "python").is_file()
+    subprocess.run([
+        str(runtime / "python"),
+        "-c",
+        "import ensurepip,ssl,sqlite3,sys,venv; print(sys.version)",
+    ], check=True)
+    venv = tmp_path / "runtime-venv"
+    subprocess.run([str(runtime / "python"), "-m", "venv", "--copies", str(venv)], check=True)
+    subprocess.run([str(venv / "bin" / "python"), "-c", "import ssl,sqlite3"], check=True)
