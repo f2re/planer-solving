@@ -32,8 +32,11 @@ def build_layered_schedule(path: Path) -> None:
     for day_index, day_name in enumerate(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]):
         day_start = 10 + day_index * 13
         sheet.cell(day_start, 1, day_name)
-        for column in range(5, 8):
-            sheet.cell(day_start - 1, column, 10 + day_index)
+        for week_index, column in enumerate(range(5, 8)):
+            # Three real Monday-Saturday weeks: 01-06, 08-13 and
+            # 15-20 February 2027. Calendar validation must not rely on
+            # repeated placeholder day numbers.
+            sheet.cell(day_start - 1, column, 1 + week_index * 7 + day_index)
             for pair_index in range(4):
                 pair_row = day_start + pair_index * 3
                 sheet.cell(pair_row, column, "Л/Т.01" if pair_index == 0 else "П/Т.01")
