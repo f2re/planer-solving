@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, FastAPI, Query
 from fastapi.responses import Response
 
 from src.operations_domain import AuthenticatedUser
+from src.revision_bootstrap import ensure_template_revisions
+from src.workspace_domain import WorkspaceNotFound
 from web.backend.app_context import ApplicationContext
 from web.backend.auth import admin_dependency, operator_dependency, viewer_dependency
 from web.backend.schemas import (
@@ -38,6 +40,20 @@ def json_download(payload: Any, filename: str) -> Response:
         media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _find_teacher(repository: Any, workspace_id: str, teacher_id: int) -> Dict[str, Any]:
+    for item in repository.list_teachers(workspace_id):
+        if int(item["id"]) == int(teacher_id):
+            return item
+    raise WorkspaceNotFound("Преподаватель не найден.")
+
+
+def _find_template(repository: Any, workspace_id: str, template_id: str) -> Dict[str, Any]:
+    for item in repository.list_templates(workspace_id):
+        if item["id"] == template_id:
+            return item
+    raise WorkspaceNotFound("Шаблон не найден.")
 
 
 def build_workspace_router(context: ApplicationContext) -> APIRouter:
@@ -109,6 +125,7 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
         user: AuthenticatedUser = Depends(admin),
     ) -> Dict[str, Any]:
         duplicate = repository.duplicate_workspace(workspace_id, payload.name)
+        ensure_template_revisions(context.operations)
         context.operations.record_audit(
             user_id=user.id,
             action="duplicate",
@@ -176,10 +193,7 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
         teacher_id: int,
         user: AuthenticatedUser = Depends(admin),
     ) -> Dict[str, str]:
-        selected = next(
-            item for item in repository.list_teachers(workspace_id)
-            if int(item["id"]) == int(teacher_id)
-        )
+        selected = _find_teacher(repository, workspace_id, teacher_id)
         repository.delete_teacher(workspace_id, teacher_id)
         context.operations.record_audit(
             user_id=user.id,
@@ -268,10 +282,7 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
         template_id: str,
         user: AuthenticatedUser = Depends(operator),
     ) -> Dict[str, str]:
-        selected = next(
-            item for item in repository.list_templates(workspace_id)
-            if item["id"] == template_id
-        )
+        selected = _find_template(repository, workspace_id, template_id)
         repository.delete_template(workspace_id, template_id)
         context.operations.record_audit(
             user_id=user.id,
@@ -302,8 +313,7 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
         payload: TeacherCreate,
         user: AuthenticatedUser = Depends(admin),
     ) -> Dict[str, Any]:
-        workspace_id = repository.default_workspace_id()
-        return create_teacher(workspace_id, payload, user)
+        return create_teacher(repository.default_workspace_id(), payload, user)
 
     @router.put("/api/teachers/{teacher_id}", response_model=Teacher)
     def legacy_update_teacher(
