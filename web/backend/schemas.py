@@ -155,6 +155,26 @@ class AnalyzeResponse(BaseModel):
     files: List[AnalysisFile] = Field(default_factory=list)
 
 
+class AnalysisDraftFileState(BaseModel):
+    file_id: str = Field(min_length=1, max_length=80)
+    enabled: bool = True
+    group_name: str = Field(default="", max_length=240)
+
+
+class AnalysisDraftRequest(BaseModel):
+    """Small operator-owned state persisted next to uploaded source files."""
+
+    version: int = Field(default=1, ge=1, le=10)
+    workspace_id: Optional[str] = Field(default=None, max_length=120)
+    selected_file_id: Optional[str] = Field(default=None, max_length=80)
+    step: int = Field(default=2, ge=1, le=3)
+    files: List[AnalysisDraftFileState] = Field(default_factory=list, max_length=500)
+    layouts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    period_overrides: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    calendar_overrides: Dict[str, Any] = Field(default_factory=dict)
+    result: Optional[Dict[str, Any]] = None
+
+
 class ValidateLayoutRequest(BaseModel):
     file_id: str
     group_name: str
