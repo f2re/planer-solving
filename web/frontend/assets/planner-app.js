@@ -25,8 +25,6 @@ export function mount() {
 
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
-            // Stable refresh aliases for operational modules without exposing
-            // internal implementation details of workspace-state.
             workspace.loadData = workspace.init;
             workspace.loadSpaces = workspace.init;
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
@@ -76,21 +74,6 @@ export function mount() {
             const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
             const importWorkspace = rematchAfter(workspace.importWorkspace);
 
-            const attachCurrentFingerprint = async template => {
-                const fingerprint = schedule.currentFile.value?.analysis?.fingerprint || {};
-                const response = await axios.put(
-                    `/api/workspaces/${workspace.activeWorkspaceId.value}/templates/${template.id}/profile`,
-                    {
-                        layout: schedule.normalizedLayout(schedule.currentLayout.value),
-                        composite: template.composite || [],
-                        fingerprint,
-                        comment: `Подтверждено оператором для «${schedule.currentFile.value?.filename || 'файла'}»`
-                    }
-                );
-                await workspace.init();
-                return response.data;
-            };
-
             const saveCurrentProfile = async () => {
                 const name = workspace.profileName.value.trim();
                 if (!name || !schedule.currentLayout.value) {
@@ -102,18 +85,37 @@ export function mount() {
                         item => item.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru')
                     );
                     const layout = schedule.normalizedLayout(schedule.currentLayout.value);
+                    const fingerprint = schedule.currentFile.value?.analysis?.fingerprint || {};
+                    const comment = `Подтверждено оператором для «${schedule.currentFile.value?.filename || 'файла'}»`;
                     let template;
                     if (existing) {
-                        template = await workspace.updateTemplateLayout(
-                            existing.id,
-                            layout,
-                            name,
-                            existing.description || ''
+                        const { data } = await axios.put(
+                            `/api/workspaces/${workspace.activeWorkspaceId.value}/templates/${existing.id}/profile`,
+                            {
+                                name,
+                                description: existing.description || '',
+                                layout,
+                                composite: existing.composite || [],
+                                fingerprint,
+                                comment
+                            }
                         );
+                        template = data;
                     } else {
-                        template = await workspace.createTemplate(name, '', layout);
+                        const { data } = await axios.post(
+                            `/api/workspaces/${workspace.activeWorkspaceId.value}/templates`,
+                            {
+                                name,
+                                description: '',
+                                layout,
+                                composite: [],
+                                fingerprint,
+                                comment
+                            }
+                        );
+                        template = data;
                     }
-                    template = await attachCurrentFingerprint(template);
+                    await workspace.init();
                     workspace.profileName.value = name;
                     addToast(
                         'Шаблон сохранён',
@@ -154,14 +156,19 @@ export function mount() {
                     const oldTemplates = JSON.parse(localStorage.getItem(key) || '[]');
                     for (const item of Array.isArray(oldTemplates) ? oldTemplates : []) {
                         if (item?.name && item?.layout) {
-                            await workspace.createTemplate(
-                                item.name,
-                                'Перенесён из локального хранилища браузера',
-                                item.layout
+                            await axios.post(
+                                `/api/workspaces/${workspace.activeWorkspaceId.value}/templates`,
+                                {
+                                    name: item.name,
+                                    description: 'Перенесён из локального хранилища браузера',
+                                    layout: item.layout,
+                                    comment: 'Автоматический перенос локального шаблона'
+                                }
                             );
                         }
                     }
                     if (oldTemplates.length) {
+                        await workspace.init();
                         addToast(
                             'Шаблоны перенесены',
                             `На сервер перенесено: ${oldTemplates.length}.`,
@@ -172,6 +179,25 @@ export function mount() {
                 } catch (_) {
                     localStorage.setItem(`${key}-migrated`, '1');
                 }
+            };
+
+            const submitAuth = async () => {
+                const success = await platform.submitAuth();
+                if (success) {
+                    await workspace.init();
+                    await migrateLocalTemplates();
+                }
+                return success;
+            };
+
+            const logout = async () => {
+                if (schedule.sessionId.value) {
+                    await schedule.resetWorkflow();
+                }
+                await platform.logout();
+                workspace.workspaces.value = [];
+                workspace.teachers.value = [];
+                workspace.layoutProfiles.value = [];
             };
 
             onMounted(async () => {
@@ -201,7 +227,9 @@ export function mount() {
                 importWorkspace,
                 saveCurrentProfile,
                 applySelectedProfile,
-                deleteSelectedProfile
+                deleteSelectedProfile,
+                submitAuth,
+                logout
             };
         }
     }).mount('#app');
