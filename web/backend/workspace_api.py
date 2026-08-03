@@ -6,7 +6,7 @@ import io
 import json
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import Response
 
 from web.backend.app_context import ApplicationContext
@@ -38,6 +38,25 @@ def json_download(payload: Any, filename: str) -> Response:
         media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+async def read_json_upload(file: UploadFile) -> Any:
+    payload = await file.read()
+    await file.close()
+    if not payload:
+        raise ApplicationError("Файл пуст.")
+    for encoding in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            decoded = payload.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            decoded = ""
+    if not decoded:
+        raise ApplicationError("Не удалось определить кодировку JSON-файла.")
+    try:
+        return json.loads(decoded)
+    except json.JSONDecodeError as exc:
+        raise ApplicationError(f"Некорректный JSON: {exc}") from exc
 
 
 def build_workspace_router(context: ApplicationContext) -> APIRouter:
@@ -118,6 +137,23 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
     def export_workspace(workspace_id: str) -> Response:
         return json_download(repository.export_workspace(workspace_id), "planner-workspace.json")
 
+    @router.post("/api/workspaces/import", response_model=WorkspaceSummary)
+    async def import_workspace(
+        request: Request,
+        file: UploadFile = File(...),
+    ) -> Dict[str, Any]:
+        actor = actor_from_request(request)
+        result = repository.import_workspace(await read_json_upload(file))
+        repository.audit(
+            actor=actor,
+            action="workspace.import",
+            entity_type="workspace",
+            entity_id=result["id"],
+            workspace_id=result["id"],
+            summary=f"Импортировано пространство «{result['name']}»",
+        )
+        return result
+
     @router.get("/api/workspaces/{workspace_id}/teachers", response_model=List[Teacher])
     def list_teachers(workspace_id: str) -> List[Dict[str, Any]]:
         return repository.list_teachers(workspace_id)
@@ -186,8 +222,13 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
         return {"status": "success"}
 
     @router.get("/api/workspaces/{workspace_id}/teachers/export")
-    def export_teachers(workspace_id: str) -> Response:
+    def export_teachers(
+        workspace_id: str,
+        format: str = Query("csv", pattern="^(csv|json)$"),
+    ) -> Response:
         teachers = repository.list_teachers(workspace_id)
+        if format == "json":
+            return json_download({"teachers": teachers}, "teachers.json")
         buffer = io.StringIO()
         fields = ["short_name", "full_name", "position", "rank", "academic_degree"]
         writer = csv.DictWriter(buffer, fieldnames=fields, delimiter=";")
@@ -197,13 +238,6 @@ def build_workspace_router(context: ApplicationContext) -> APIRouter:
             "\ufeff" + buffer.getvalue(),
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": 'attachment; filename="teachers.csv"'},
-        )
-
-    @router.get("/api/workspaces/{workspace_id}/teachers/export.json")
-    def export_teachers_json(workspace_id: str) -> Response:
-        return json_download(
-            {"teachers": repository.list_teachers(workspace_id)},
-            "teachers.json",
         )
 
     @router.post("/api/workspaces/{workspace_id}/teachers/import")
