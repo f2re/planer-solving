@@ -484,3 +484,5 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             generation_request,
             actor=actor_from_request(http_request),
         )
+
+    return router
