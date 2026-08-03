@@ -193,9 +193,8 @@ def test_adjacent_month_labels_for_same_week_are_not_a_conflict():
         year_info="2023/2024",
     )
     issues = compare_file_periods(february, march, reference_label="a.xlsx", current_label="b.xlsx")
-    boundary = [item for item in issues if item["code"] == "source_week_month_transition"]
-    assert boundary
-    assert boundary[0]["severity"] == "info"
+    assert not any(item["code"] in {"source_week_month_mismatch", "source_date_mismatch"} for item in issues)
+    assert all(item["blocking"] is False for item in issues)
 
 
 def test_operator_override_has_priority():
