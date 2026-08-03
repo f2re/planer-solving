@@ -6,6 +6,14 @@ from .data_loader import Lesson
 from .schedule_period import MONTH_NAMES, ResolvedScheduleCalendar, resolve_schedule_calendar
 
 
+UNASSIGNED_TEACHER = "Не назначен"
+
+
+def _teacher_name(value: Any) -> str:
+    text = str(value or "").strip()
+    return UNASSIGNED_TEACHER if text.casefold() in {"", "unknown", "none"} else text
+
+
 def transform_to_teacher_grid(
     lessons: List[Lesson],
     teachers_config: List[Dict],
@@ -15,7 +23,7 @@ def transform_to_teacher_grid(
     period_reports: Optional[Sequence[Mapping[str, Any]]] = None,
     resolved_calendar: Optional[ResolvedScheduleCalendar] = None,
 ) -> Dict[str, Any]:
-    """Build both summary grids from one verified academic calendar."""
+    """Build both summary grids without discarding recoverable lessons."""
 
     calendar = resolved_calendar or resolve_schedule_calendar(
         lessons,
@@ -31,14 +39,16 @@ def transform_to_teacher_grid(
 
     grid_raw = {}
     grid_vertical = {}
+    unassigned_found = False
     for lesson in lessons:
-        if str(lesson.teacher).strip().casefold() in {'', 'unknown', 'none'}:
-            continue
+        teacher = _teacher_name(lesson.teacher)
+        if teacher == UNASSIGNED_TEACHER:
+            unassigned_found = True
         month_day = week_day_to_full_date.get((lesson.week, lesson.day_of_week))
         if not month_day:
             continue
         month, day = month_day
-        summary_key = (lesson.teacher, lesson.pair_num, month, day)
+        summary_key = (teacher, lesson.pair_num, month, day)
         bucket = grid_raw.setdefault(summary_key, {
             'groups': [], 'subjects': [], 'types': [], 'rooms': []
         })
@@ -51,7 +61,7 @@ def transform_to_teacher_grid(
             if value and value not in bucket[key]:
                 bucket[key].append(value)
 
-        vertical_key = (lesson.teacher, lesson.week, lesson.day_of_week, lesson.pair_num)
+        vertical_key = (teacher, lesson.week, lesson.day_of_week, lesson.pair_num)
         vertical = grid_vertical.setdefault(vertical_key, {
             'groups': [], 'subject': lesson.subject,
             'type': lesson.lesson_type_code, 'room': str(lesson.room)
@@ -70,6 +80,9 @@ def transform_to_teacher_grid(
     }
     semester_info = lessons[0].semester_info if lessons else ''
     year_info = lessons[0].year_info if lessons else ''
+    teacher_names = [teacher['short_name'] for teacher in teachers_config]
+    if unassigned_found and UNASSIGNED_TEACHER not in teacher_names:
+        teacher_names.append(UNASSIGNED_TEACHER)
     return {
         'grid': grid,
         'grid_vertical': grid_vertical,
@@ -77,7 +90,7 @@ def transform_to_teacher_grid(
         'weeks': list(calendar.weeks),
         'week_to_month': calendar.week_to_month,
         'week_day_to_date': week_day_to_full_date,
-        'teachers': [teacher['short_name'] for teacher in teachers_config],
+        'teachers': teacher_names,
         'semester_info': semester_info,
         'year_info': year_info,
         'period_report': calendar.report,
