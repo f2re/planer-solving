@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "web" / "frontend" / "assets"
+INDEX = ROOT / "web" / "frontend" / "index.html"
 
 
 def test_operator_flow_is_loaded_before_vue_mount() -> None:
@@ -24,13 +25,17 @@ def test_operator_flow_keeps_result_editable() -> None:
     assert "текущий сеанс и все ручные правки сохранены" in source
 
 
-def test_operator_flow_states_nonblocking_policy() -> None:
-    source = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
+def test_nonblocking_policy_lives_in_base_template() -> None:
+    base = INDEX.read_text(encoding="utf-8")
+    enhancements = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
 
-    assert "Ничего не блокируется" in source
-    assert "Результат создаётся из пригодных данных" in source
-    assert "остаются доступными для исправления" in source
-    assert "Ручная правка необязательна" in source
+    assert "Результат создаётся из пригодных данных" in base
+    assert "остаются доступными для исправления" in base
+    assert "Ничего не блокируется" in enhancements
+    assert "Ручная правка необязательна" in enhancements
+    assert "function text(" not in enhancements
+    assert "document.title =" not in enhancements
+    assert "upload-header .page-title" not in enhancements
 
 
 def test_operator_flow_has_primary_keyboard_actions() -> None:
