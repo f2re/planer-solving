@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
-from .schedule_analyzer import MONTH_PREFIXES, WorksheetMatrix, normalize_text, value_as_int
+from .schedule_analyzer import WorksheetMatrix, normalize_text
+from .schedule_period import canonical_month, extract_date_parts
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ class TeacherResolver:
         self.subject_counters: Dict[Tuple[str, str], int] = {}
         self.warnings: List[str] = []
         self.last_report: Dict[str, Any] = {}
+        self.loaded_periods: List[Tuple[str, Dict[str, Any]]] = []
         self.teachers_by_surname: Dict[str, List[Dict[str, Any]]] = {}
         self._index_teachers()
 
@@ -95,22 +96,13 @@ class TeacherResolver:
 
     @staticmethod
     def _day_number(value: Any) -> int:
-        if isinstance(value, (date, datetime)):
-            return value.day
-        match = re.search(r"(?<!\d)(\d{1,2})(?:[./-]\d{1,2})?", normalize_text(value))
-        if match and 1 <= int(match.group(1)) <= 31:
-            return int(match.group(1))
-        number = value_as_int(value)
-        return number if number is not None and 1 <= number <= 31 else 0
+        return int(extract_date_parts(value).get("day") or 0)
 
     _parse_day_of_month = _day_number
 
     @staticmethod
     def _month(value: Any, previous: str = "Unknown") -> str:
-        if isinstance(value, (date, datetime)):
-            return ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"][value.month]
-        text = normalize_text(value).lower()
-        return next((name for prefix, name in MONTH_PREFIXES.items() if text.startswith(prefix)), previous)
+        return canonical_month(value) or previous
 
     @staticmethod
     def _lesson_type(code: str) -> str:
