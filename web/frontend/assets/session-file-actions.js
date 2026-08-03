@@ -13,6 +13,11 @@ export function createSessionFileActions(addToast, schedule, activeWorkspaceId) 
     const lastRemovedFile = ref(null);
 
     const copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
+    const originalResetWorkflow = schedule.resetWorkflow;
+    schedule.resetWorkflow = async (...args) => {
+        clearRemovedFileUndo();
+        return originalResetWorkflow(...args);
+    };
 
     function normalizedClientFile(item, previous = null) {
         return {
