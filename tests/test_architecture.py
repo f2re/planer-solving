@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from tests.auth_helpers import bootstrap_admin
 from web.backend.app_factory import create_app
 
 
@@ -16,19 +17,23 @@ def test_app_factory_registers_each_api_once_and_mounts_frontend_last(tmp_path: 
     assert set(schema["paths"]["/api/analyze"]) == {"post"}
     assert set(schema["paths"]["/api/teachers"]) == {"get", "post"}
     assert set(schema["paths"]["/api/health"]) == {"get"}
+    assert set(schema["paths"]["/api/auth/status"]) == {"get"}
+    assert set(schema["paths"]["/api/audit"]) == {"get"}
     assert app.router.routes[-1].__class__.__name__ == "Mount"
 
     client = TestClient(app)
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["storage"] == "sqlite"
+    assert response.json()["setup_required"] is True
     assert client.get("/").status_code == 200
+    assert client.get("/api/workspaces").status_code == 428
 
 
 def test_workspace_validation_is_reported_by_central_error_handler(tmp_path: Path):
     (tmp_path / "web" / "frontend").mkdir(parents=True)
-    app = create_app(tmp_path)
-    client = TestClient(app)
+    client = TestClient(create_app(tmp_path))
+    bootstrap_admin(client)
 
     response = client.post(
         "/api/workspaces",
