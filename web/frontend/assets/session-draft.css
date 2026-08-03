@@ -66,6 +66,21 @@
     color: var(--muted);
     font-size: 11px;
 }
+.result-coverage-section {
+    display: grid;
+    gap: 7px;
+}
+.result-section-caption {
+    display: grid;
+    gap: 2px;
+    padding-inline: 2px;
+}
+.result-section-caption b { font-size: 11px; }
+.result-section-caption span {
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
 .result-problem-list { display: grid; gap: 7px; }
 .result-problem-item {
     display: flex;
@@ -80,6 +95,10 @@
     color: var(--text);
     text-align: left;
     cursor: pointer;
+}
+.result-problem-item.excluded {
+    border-color: color-mix(in srgb, var(--warning) 36%, var(--line));
+    background: color-mix(in srgb, var(--warning) 5%, #fff);
 }
 .result-problem-item:hover {
     border-color: color-mix(in srgb, var(--primary) 45%, var(--line));
