@@ -8,19 +8,12 @@ WORKERS="${PLANNER_WORKERS:-1}"
 MODE="start"
 
 usage() {
-    cat <<'EOF'
+    cat <<'EOF_HELP'
 Стабильный запуск Planner Solving.
 
-  runtime.sh [--check|--print]
-
-Переменные окружения:
-  PLANNER_INSTALL_ROOT  корень установки, по умолчанию /opt/planner-solving
-  PLANNER_HOST          адрес, по умолчанию 0.0.0.0
-  PLANNER_PORT          порт, по умолчанию 8001
-  PLANNER_WORKERS       число процессов, по умолчанию 1
-EOF
+  run-service.sh [--check|--print]
+EOF_HELP
 }
-
 while (($#)); do
     case "$1" in
         --check) MODE="check"; shift ;;
@@ -42,7 +35,13 @@ fail() {
 CURRENT="$(readlink -f "$INSTALL_ROOT/current")"
 [[ -d "$CURRENT" ]] || fail "Активный выпуск отсутствует: $CURRENT"
 PYTHON="$CURRENT/.venv/bin/python"
-[[ -x "$PYTHON" ]] || fail "Виртуальное окружение не создано: $PYTHON"
+[[ -f "$PYTHON" && -x "$PYTHON" ]] || fail "Рабочий venv отсутствует: $PYTHON"
+MANAGED_RUNTIME="$(cat "$CURRENT/.planner-runtime" 2>/dev/null || cat "$CURRENT/.venv/.planner-runtime" 2>/dev/null || true)"
+LEGACY_RUNTIME=0
+if [[ -z "$MANAGED_RUNTIME" || ! -x "$MANAGED_RUNTIME/python" ]]; then
+    MANAGED_RUNTIME=""
+    LEGACY_RUNTIME=1
+fi
 [[ -d "$INSTALL_ROOT/shared" ]] || fail "Каталог данных отсутствует: $INSTALL_ROOT/shared"
 
 export PLANNER_BASE_DIR="$CURRENT"
@@ -58,10 +57,12 @@ unset PYTHONHOME
 mkdir -p "$HOME" "$XDG_CACHE_HOME"
 cd "$CURRENT"
 
-if [[ "$MODE" == "print" ]]; then
-    cat <<EOF
+if [[ "$MODE" == print ]]; then
+    cat <<EOF_PRINT
 INSTALL_ROOT=$INSTALL_ROOT
 CURRENT=$CURRENT
+MANAGED_RUNTIME=${MANAGED_RUNTIME:-legacy/system}
+LEGACY_RUNTIME=$LEGACY_RUNTIME
 PYTHON=$PYTHON
 PYTHONPATH=$PYTHONPATH
 VIRTUAL_ENV=$VIRTUAL_ENV
@@ -69,13 +70,11 @@ HOME=$HOME
 HOST=$HOST
 PORT=$PORT
 WORKERS=$WORKERS
-EOF
+EOF_PRINT
+    "$PYTHON" -c 'import sys; print("PYTHON_VERSION=" + sys.version.split()[0]); print("SYS_EXECUTABLE=" + sys.executable); print("SYS_PREFIX=" + sys.prefix); print("SYS_BASE_PREFIX=" + sys.base_prefix)'
     exit 0
 fi
 
-# Выпуски 2.13+ имеют отдельную быструю проверку зависимостей. При откате
-# на более старый выпуск стабильный запуск остаётся совместимым и использует
-# прежний healthcheck вместо падения на отсутствующем модуле.
 if [[ -f "$CURRENT/tools/service_preflight.py" ]]; then
     "$PYTHON" -m tools.service_preflight \
         --app-root "$CURRENT" \
@@ -83,7 +82,7 @@ if [[ -f "$CURRENT/tools/service_preflight.py" ]]; then
         --full
 fi
 
-if [[ "$MODE" == "check" ]]; then
+if [[ "$MODE" == check ]]; then
     "$PYTHON" -m tools.healthcheck \
         --app-root "$CURRENT" \
         --data-dir "$INSTALL_ROOT/shared/data"
