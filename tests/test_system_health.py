@@ -6,12 +6,14 @@ from fastapi.testclient import TestClient
 import pytest
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION
+from src.operations_domain import OperationsError
+from src.operations_store import OPERATIONS_SCHEMA_VERSION
 from src.sqlite_workspace_store import SQLITE_SCHEMA_VERSION
 from src.workspace_store import WorkspaceError
 from web.backend.app_factory import create_app
 
 
-def test_health_reports_application_and_schema_versions(tmp_path: Path) -> None:
+def test_health_reports_all_schema_versions_and_setup_state(tmp_path: Path) -> None:
     teachers = tmp_path / "teachers.json"
     teachers.write_text(json.dumps([
         {"id": 1, "short_name": "Иванов", "full_name": "Иванов Иван Иванович"}
@@ -26,6 +28,8 @@ def test_health_reports_application_and_schema_versions(tmp_path: Path) -> None:
     assert payload["data_schema_version"] == CURRENT_SCHEMA_VERSION
     assert payload["supported_data_schema_version"] == CURRENT_SCHEMA_VERSION
     assert payload["storage_schema_version"] == SQLITE_SCHEMA_VERSION
+    assert payload["operations_schema_version"] == OPERATIONS_SCHEMA_VERSION
+    assert payload["setup_required"] is True
     assert payload["storage"] == "sqlite"
     assert (tmp_path / "data" / "workspaces.json").exists()
     assert (tmp_path / "data" / "planner-solving.sqlite3").exists()
@@ -71,5 +75,32 @@ def test_future_sqlite_schema_is_blocked_without_downgrade(tmp_path: Path) -> No
     connection = sqlite3.connect(database)
     try:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == future_version
+    finally:
+        connection.close()
+
+
+def test_future_operations_schema_is_blocked_without_rewrite(tmp_path: Path) -> None:
+    create_app(tmp_path)
+    database = tmp_path / "data" / "planner-solving.sqlite3"
+    future_version = OPERATIONS_SCHEMA_VERSION + 1
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE metadata SET value = ? WHERE key = 'operations_schema_version'",
+            (str(future_version),),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(OperationsError, match="Операционная схема имеет версию"):
+        create_app(tmp_path)
+
+    connection = sqlite3.connect(database)
+    try:
+        stored = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'operations_schema_version'"
+        ).fetchone()[0]
+        assert int(stored) == future_version
     finally:
         connection.close()
