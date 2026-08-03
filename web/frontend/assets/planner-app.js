@@ -3,6 +3,7 @@ import { createScheduleState } from './schedule-state.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 import { installPlatformEnhancements } from './platform-enhancements.js';
+import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-layout-editor.js';
 
 const { createApp, ref, onMounted } = Vue;
 
@@ -11,6 +12,7 @@ export function mount() {
     installInteractionMarkup();
     installPlatformMarkup();
     installPlatformEnhancements();
+    installSampleLayoutMarkup();
     createApp({
         setup() {
             const toasts = ref([]);
@@ -35,6 +37,7 @@ export function mount() {
                 schedule,
                 workspace.activeWorkspaceId
             );
+            const sampleLayout = createSampleLayoutState(addToast, schedule);
             const platform = createPlatformState(addToast, workspace, schedule);
 
             const rematchAfter = handler => async (...args) => {
@@ -238,6 +241,7 @@ export function mount() {
                 ...workspace,
                 ...schedule,
                 ...interaction,
+                ...sampleLayout,
                 ...platform,
                 toasts,
                 addToast,
