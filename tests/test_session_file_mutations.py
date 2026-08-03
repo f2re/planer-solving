@@ -125,3 +125,81 @@ def test_removing_placeholder_file_is_reversible(tmp_path: Path) -> None:
     assert restored.status_code == 200
     assert restored.json()["analysis"] is None
     assert restored.json()["status"] == "error"
+
+
+def test_manifest_failure_rolls_back_append_and_remove(tmp_path: Path, monkeypatch) -> None:
+    first = tmp_path / "first.xlsx"
+    second = tmp_path / "second.xlsx"
+    build_layered_schedule(first)
+    build_layered_schedule(second)
+    app = create_app(tmp_path)
+    client = TestClient(app)
+    analyzed = analyze(client, first)
+    session_id = analyzed["session_id"]
+    original = analyzed["files"][0]
+    session_dir = app.state.context.sessions.path(session_id)
+    original_manifest = app.state.context.sessions.load_manifest(session_id)
+    original_stored = app.state.context.sessions.stored_path(
+        session_id,
+        original_manifest["files"][0],
+    )
+    save_manifest = app.state.context.sessions.save_manifest
+
+    def fail_save(*_args, **_kwargs):
+        raise OSError("synthetic manifest failure")
+
+    monkeypatch.setattr(app.state.context.sessions, "save_manifest", fail_save)
+    with second.open("rb") as source:
+        append_response = client.post(
+            f"/api/analysis/{session_id}/files",
+            files={"files": (second.name, source, MIME_XLSX)},
+        )
+    assert append_response.status_code == 500
+    assert "прежний состав сеанса не изменён" in append_response.json()["detail"]
+    assert sorted(path.name for path in session_dir.glob("*.xlsx")) == [original_stored.name]
+
+    remove_response = client.delete(
+        f"/api/analysis/{session_id}/files/{original['file_id']}"
+    )
+    assert remove_response.status_code == 500
+    assert "прежнее состояние восстановлены" in remove_response.json()["detail"]
+    assert original_stored.is_file()
+    assert not any((session_dir / ".trash").glob("*"))
+
+    monkeypatch.setattr(app.state.context.sessions, "save_manifest", save_manifest)
+    manifest = app.state.context.sessions.load_manifest(session_id)
+    assert [item["file_id"] for item in manifest["files"]] == [original["file_id"]]
+
+
+def test_manifest_failure_keeps_removed_file_restorable(tmp_path: Path, monkeypatch) -> None:
+    schedule = tmp_path / "group.xlsx"
+    build_layered_schedule(schedule)
+    app = create_app(tmp_path)
+    client = TestClient(app)
+    analyzed = analyze(client, schedule)
+    session_id = analyzed["session_id"]
+    file_id = analyzed["files"][0]["file_id"]
+
+    assert client.delete(f"/api/analysis/{session_id}/files/{file_id}").status_code == 200
+    manifest = app.state.context.sessions.load_manifest(session_id)
+    removed = manifest["removed_files"][-1]
+    trash_path = app.state.context.sessions.path(session_id) / ".trash" / removed["trash_name"]
+    assert trash_path.is_file()
+
+    save_manifest = app.state.context.sessions.save_manifest
+
+    def fail_save(*_args, **_kwargs):
+        raise OSError("synthetic manifest failure")
+
+    monkeypatch.setattr(app.state.context.sessions, "save_manifest", fail_save)
+    restore_response = client.post(
+        f"/api/analysis/{session_id}/files/{file_id}/restore"
+    )
+    assert restore_response.status_code == 500
+    assert "остаётся в корзине" in restore_response.json()["detail"]
+    assert trash_path.is_file()
+
+    monkeypatch.setattr(app.state.context.sessions, "save_manifest", save_manifest)
+    assert client.post(
+        f"/api/analysis/{session_id}/files/{file_id}/restore"
+    ).status_code == 200
