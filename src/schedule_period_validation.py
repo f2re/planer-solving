@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from .schedule_period_values import (
     DAY_INDEX,
     DAY_NAMES,
-    MONTH_NAMES,
     SEMESTER_LABELS,
     _parse_slot_key,
     _slot_key,
@@ -26,7 +25,9 @@ def _adjacent_month(left: Any, right: Any) -> bool:
     return bool(left_name and right_name and (next_month(left_name) == right_name or next_month(right_name) == left_name))
 
 
-def _ordered_unique(values: Sequence[Any]) -> List[str]:
+def _month_path(values: Sequence[Any]) -> List[str]:
+    """Keep chronological changes while collapsing repeated neighbouring cells."""
+
     result: List[str] = []
     for value in values:
         month = canonical_month(value)
@@ -35,8 +36,19 @@ def _ordered_unique(values: Sequence[Any]) -> List[str]:
     return result
 
 
+def _unique_months(values: Sequence[Any]) -> List[str]:
+    """Return each month once, preserving first appearance for summaries."""
+
+    result: List[str] = []
+    for value in values:
+        month = canonical_month(value)
+        if month and month not in result:
+            result.append(month)
+    return result
+
+
 def _is_sequential_month_path(values: Sequence[Any]) -> bool:
-    ordered = _ordered_unique(values)
+    ordered = _month_path(values)
     return all(current == previous or next_month(previous) == current for previous, current in zip(ordered, ordered[1:]))
 
 
@@ -105,7 +117,7 @@ def build_file_period_report(
         ),
     )
     date_month_path = [item[1]["month"] for item in ordered_slots]
-    ordered_months = _ordered_unique([
+    ordered_months = _unique_months([
         *[normalized_week_months.get(str(week)) for week in weeks],
         *date_month_path,
     ])
@@ -120,14 +132,10 @@ def build_file_period_report(
             if _slot_key(week, day_name) in normalized_dates
         ]
         header = normalized_week_months.get(str(week))
-        month_set: List[str] = []
-        for value in [header, *day_months]:
-            month = canonical_month(value)
-            if month and month not in month_set:
-                month_set.append(month)
+        month_set = _unique_months([header, *day_months])
         week_month_sets[str(week)] = month_set
 
-        distinct_dates = _ordered_unique(day_months)
+        distinct_dates = _month_path(day_months)
         if len(distinct_dates) > 1:
             sequential = _is_sequential_month_path(distinct_dates)
             week_transitions.append({
@@ -175,7 +183,7 @@ def build_file_period_report(
                     "week_month_date_mismatch",
                     (
                         f"Подпись месяца над неделей {week} — «{header}», а даты относятся к: "
-                        f"{', '.join(_ordered_unique(day_months))}. Использованы точные даты."
+                        f"{', '.join(_unique_months(day_months))}. Использованы точные даты."
                     ),
                     resolution="auto",
                     action={
