@@ -32,6 +32,7 @@ export function mount() {
             const removeToast = id => {
                 toasts.value = toasts.value.filter(item => item.id !== id);
             };
+            const copy = value => JSON.parse(JSON.stringify(value || {}));
 
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
@@ -86,15 +87,57 @@ export function mount() {
             };
 
             const switchWorkspace = async id => {
-                await workspace.switchWorkspace(id);
-                await reactiveWorkspace.refreshWorkspace(id, { silent: true });
+                const targetId = String(id || '');
+                const previousId = String(localStorage.getItem('planner-workspace-id') || '');
+                if (!targetId) return false;
+                if (targetId === previousId) {
+                    workspace.activeWorkspaceId.value = targetId;
+                    return true;
+                }
+
+                const activeSession = Boolean(
+                    schedule.sessionId.value && schedule.analyzedFiles.value.length
+                );
+                if (activeSession) {
+                    const previous = workspace.workspaces.value.find(item => item.id === previousId);
+                    const target = workspace.workspaces.value.find(item => item.id === targetId);
+                    const accepted = window.confirm(
+                        `Переключить пространство «${previous?.name || 'текущее'}» на «${target?.name || targetId}»?\n\n`
+                        + 'Исходные файлы, группы, ручная разметка и календарные правки сохранятся. '
+                        + 'Справочник преподавателей и рекомендации шаблонов будут взяты из нового пространства; '
+                        + 'проверки файлов потребуется пересчитать.'
+                    );
+                    if (!accepted) {
+                        workspace.activeWorkspaceId.value = previousId;
+                        return false;
+                    }
+                    await window.__plannerSessionDraft?.flush?.();
+                }
+
+                const layoutSnapshot = Object.fromEntries(
+                    Object.entries(schedule.layouts).map(([fileId, layout]) => [fileId, copy(layout)])
+                );
+                await workspace.switchWorkspace(targetId);
+                await reactiveWorkspace.refreshWorkspace(targetId, { silent: true });
                 if (workspace.managerTab.value === 'spaces') {
                     workspace.editWorkspace(workspace.activeWorkspace.value);
                 }
                 await interaction.rematchTemplates({ quiet: true });
-                if (platform.operationsOpen.value) {
-                    await platform.selectOperationsTab(platform.operationsTab.value);
+
+                if (activeSession) {
+                    for (const [fileId, layout] of Object.entries(layoutSnapshot)) {
+                        schedule.layouts[fileId] = layout;
+                    }
+                    schedule.invalidateAll();
+                    teacherMapping.clearTeacherMappingState();
+                    if (schedule.currentFile.value?.analysis) await schedule.loadPreview();
+                    addToast(
+                        'Пространство изменено',
+                        'Файлы и ручная разметка сохранены. Преподаватели, шаблоны и период взяты из нового пространства; пересчитайте проверки.',
+                        'info'
+                    );
                 }
+                return true;
             };
 
             const deleteTeacher = async value => {
