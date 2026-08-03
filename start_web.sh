@@ -3,13 +3,22 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# ---------------------------------------------------------------------------
+# Определяем базовый Python и создаём .venv при необходимости.
+# ---------------------------------------------------------------------------
 if [[ -n "${PLANNER_PYTHON:-}" ]]; then
-    PYTHON_BIN="$PLANNER_PYTHON"
-elif [[ -x "$ROOT/.venv/bin/python" ]]; then
-    PYTHON_BIN="$ROOT/.venv/bin/python"
+    _BASE_PYTHON="$PLANNER_PYTHON"
 else
-    PYTHON_BIN="${PYTHON_BIN:-python3}"
+    _BASE_PYTHON="${PYTHON_BIN:-python3}"
 fi
+
+if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
+    echo "[planner] .venv не найден — создаю виртуальное окружение..."
+    "$_BASE_PYTHON" -m venv "$ROOT/.venv"
+    "$ROOT/.venv/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
+    "$ROOT/.venv/bin/python" -m pip install -r "$ROOT/requirements-runtime.txt"
+fi
+PYTHON_BIN="$ROOT/.venv/bin/python"
 
 export PYTHONPATH="$ROOT"
 DATA_DIR="$ROOT/data"

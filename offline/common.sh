@@ -10,7 +10,8 @@ require_command() {
 }
 
 atomic_link() {
-    local target="$1" link="$2" temporary="${link}.next.$$"
+    local target="$1" link="$2"
+    local temporary="${link}.next.$$"
     rm -f "$temporary"
     ln -s "$target" "$temporary"
     # GNU mv -T не поддерживается на BSD/macOS, пробуем с -T, при неудаче — без
