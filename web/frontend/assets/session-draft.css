@@ -40,9 +40,6 @@
     background: color-mix(in srgb, var(--warning) 8%, #fff);
     color: color-mix(in srgb, var(--warning) 82%, #4b2d00);
 }
-.file-item:has(.replace-session-file.urgent) {
-    border-color: color-mix(in srgb, var(--warning) 30%, var(--line));
-}
 .result-icon.warning {
     background: color-mix(in srgb, var(--warning) 13%, #fff);
     color: var(--warning);
