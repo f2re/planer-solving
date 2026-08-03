@@ -17,7 +17,8 @@
         '/assets/platform-overrides.css',
         '/assets/sample-layout.css',
         '/assets/workspace-editor.css',
-        '/assets/operator-flow.css'
+        '/assets/operator-flow.css',
+        '/assets/session-file-actions.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
