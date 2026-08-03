@@ -1,0 +1,100 @@
+.operations-workspace-section {
+    display: grid;
+    gap: 14px;
+    min-height: 0;
+}
+
+.operations-workspace-intro {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 14px 16px;
+    border: 1px solid rgba(49, 94, 251, 0.15);
+    border-radius: 16px;
+    background: rgba(240, 244, 255, 0.72);
+}
+
+.operations-workspace-intro b,
+.operations-workspace-intro small {
+    display: block;
+}
+
+.operations-workspace-intro b {
+    margin-bottom: 3px;
+    font-size: 13px;
+}
+
+.operations-workspace-intro small {
+    max-width: 760px;
+    color: #667085;
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.operations-workspace-tabs {
+    position: sticky;
+    top: -1px;
+    z-index: 4;
+    margin: 0;
+    padding: 4px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 13px;
+    background: rgba(248, 250, 252, 0.94);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+    backdrop-filter: blur(18px);
+}
+
+.operations-workspace-content {
+    min-height: 0;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+}
+
+.operations-workspace-content .manager-grid,
+.operations-workspace-content .spaces-layout {
+    min-height: 460px;
+}
+
+.operations-workspace-content .manager-form {
+    align-self: start;
+    position: sticky;
+    top: 58px;
+}
+
+.legacy-workspace-manager {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.workspace-data-button {
+    min-width: 74px;
+}
+
+@media (max-width: 900px) {
+    .operations-workspace-intro {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .operations-workspace-intro .btn {
+        width: 100%;
+    }
+
+    .operations-workspace-content .manager-form {
+        position: static;
+    }
+}
+
+@media (max-width: 620px) {
+    .operations-workspace-tabs {
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    .operations-workspace-content .manager-grid,
+    .operations-workspace-content .spaces-layout {
+        min-height: 0;
+    }
+}

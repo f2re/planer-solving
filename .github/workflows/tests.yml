@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m py_compile \
             src/schedule_layout.py src/worksheet_matrix.py src/schedule_detection.py \
-            src/schedule_analyzer.py src/teacher_resolver.py src/schedule_parser_geometry.py \
+            src/schedule_analyzer.py src/teacher_resolver.py src/operator_issues.py src/schedule_parser_geometry.py \
             src/schedule_period_values.py src/schedule_period_validation.py src/schedule_calendar.py src/schedule_period.py src/data_loader.py \
             src/transformer.py src/weekly_exporter.py src/template_matcher.py \
             src/template_learning.py src/import_wizard.py src/security.py \
@@ -43,7 +43,7 @@ jobs:
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
             web/backend/auth.py web/backend/password_reset_session.py web/backend/frontend_cache.py \
             web/backend/platform_api.py web/backend/errors.py \
-            web/backend/analysis_api.py web/backend/session_api.py web/backend/system_api.py \
+            web/backend/analysis_api.py web/backend/session_api.py web/backend/session_file_api.py web/backend/session_draft_api.py web/backend/system_api.py \
             web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
 
       - name: Assert clean backend architecture
@@ -71,6 +71,14 @@ jobs:
         run: |
           node --check web/frontend/assets/app.js
           node --check web/frontend/assets/planner-app.js
+          node --check web/frontend/assets/operator-flow.js
+          node --check web/frontend/assets/session-file-actions.js
+          node --check web/frontend/assets/session-draft-runtime.js
+          node --check web/frontend/assets/teacher-mapping-state.js
+          node --check web/frontend/assets/editor-history-state.js
+          node --check web/frontend/assets/history-ux.js
+          node --check web/frontend/assets/history-ux-state.js
+          node --check web/frontend/assets/unified-operations.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/reactive-workspace.js
           node --check web/frontend/assets/schedule-layout-utils.js
@@ -86,6 +94,7 @@ jobs:
           node --check web/frontend/assets/platform-ui.js
           node --check web/frontend/assets/platform-enhancements.js
           node tests/frontend_runtime_probe.mjs
+          node tests/editor_history_probe.mjs
 
       - name: Build autonomous runtime bundle
         run: bash offline/build_offline_bundle.sh --output dist --python "$(command -v python)"

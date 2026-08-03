@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from src.operator_issues import attach_operator_issues
 from src.workspace_domain import default_semester_settings
 
 
@@ -140,6 +141,15 @@ class ScheduleUploadResponse(BaseModel):
     reports: List[Dict[str, Any]] = Field(default_factory=list)
     corrections: List[Dict[str, Any]] = Field(default_factory=list)
 
+    def __init__(self, **data: Any) -> None:
+        data["reports"] = [
+            attach_operator_issues(dict(report))
+            if isinstance(report, dict)
+            else report
+            for report in data.get("reports") or []
+        ]
+        super().__init__(**data)
+
 
 class AnalysisFile(BaseModel):
     file_id: str
@@ -166,6 +176,12 @@ class ValidateLayoutRequest(BaseModel):
 class ValidateLayoutResponse(BaseModel):
     status: str
     report: Dict[str, Any]
+
+    def __init__(self, **data: Any) -> None:
+        report = data.get("report")
+        if isinstance(report, dict):
+            data["report"] = attach_operator_issues(dict(report))
+        super().__init__(**data)
 
 
 class GenerateFileSpec(BaseModel):

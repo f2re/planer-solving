@@ -3,9 +3,14 @@ import { createScheduleState } from './schedule-state.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 import { installPlatformEnhancements } from './platform-enhancements.js';
+import { installHistoryUxMarkup } from './history-ux.js';
+import { createHistoryUxState } from './history-ux-state.js';
 import { installSampleLayoutMarkup, createSampleLayoutState } from './sample-layout-editor.js';
 import { createReactiveWorkspaceState } from './reactive-workspace.js';
 import { installEditorWorkspaceMarkup, createEditorWorkspaceState } from './editor-workspace.js';
+import { createEditorHistoryState } from './editor-history-state.js';
+import { createSessionFileActions } from './session-file-actions.js';
+import { createTeacherMappingState } from './teacher-mapping-state.js';
 
 const { createApp, ref, onMounted } = Vue;
 
@@ -13,6 +18,7 @@ export function mount() {
     installWorkspaceMarkup();
     installInteractionMarkup();
     installPlatformMarkup();
+    installHistoryUxMarkup();
     installPlatformEnhancements();
     installSampleLayoutMarkup();
     installEditorWorkspaceMarkup();
@@ -30,6 +36,7 @@ export function mount() {
             const removeToast = id => {
                 toasts.value = toasts.value.filter(item => item.id !== id);
             };
+            const copy = value => JSON.parse(JSON.stringify(value || {}));
 
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
@@ -46,12 +53,28 @@ export function mount() {
             );
             const sampleLayout = createSampleLayoutState(addToast, schedule);
             const platform = createPlatformState(addToast, workspace, schedule);
+            const historyUx = createHistoryUxState();
             const editor = createEditorWorkspaceState(
                 addToast,
                 schedule,
                 interaction,
                 workspace,
                 platform
+            );
+            const editorHistory = createEditorHistoryState(
+                addToast,
+                schedule,
+                editor
+            );
+            const sessionFiles = createSessionFileActions(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId
+            );
+            const teacherMapping = createTeacherMappingState(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId
             );
 
             const rawRefreshSpaces = reactiveWorkspace.refreshSpaces;
@@ -74,15 +97,58 @@ export function mount() {
             };
 
             const switchWorkspace = async id => {
-                await workspace.switchWorkspace(id);
-                await reactiveWorkspace.refreshWorkspace(id, { silent: true });
+                const targetId = String(id || '');
+                const previousId = String(localStorage.getItem('planner-workspace-id') || '');
+                if (!targetId) return false;
+                if (targetId === previousId) {
+                    workspace.activeWorkspaceId.value = targetId;
+                    return true;
+                }
+
+                const activeSession = Boolean(
+                    schedule.sessionId.value && schedule.analyzedFiles.value.length
+                );
+                if (activeSession) {
+                    const previous = workspace.workspaces.value.find(item => item.id === previousId);
+                    const target = workspace.workspaces.value.find(item => item.id === targetId);
+                    const accepted = window.confirm(
+                        `Переключить пространство «${previous?.name || 'текущее'}» на «${target?.name || targetId}»?\n\n`
+                        + 'Исходные файлы, группы, ручная разметка и календарные правки сохранятся. '
+                        + 'Справочник преподавателей и рекомендации шаблонов будут взяты из нового пространства; '
+                        + 'проверки файлов потребуется пересчитать.'
+                    );
+                    if (!accepted) {
+                        workspace.activeWorkspaceId.value = previousId;
+                        return false;
+                    }
+                    await window.__plannerSessionDraft?.flush?.();
+                }
+
+                const layoutSnapshot = Object.fromEntries(
+                    Object.entries(schedule.layouts).map(([fileId, layout]) => [fileId, copy(layout)])
+                );
+                await workspace.switchWorkspace(targetId);
+                await reactiveWorkspace.refreshWorkspace(targetId, { silent: true });
                 if (workspace.managerTab.value === 'spaces') {
                     workspace.editWorkspace(workspace.activeWorkspace.value);
                 }
                 await interaction.rematchTemplates({ quiet: true });
-                if (platform.operationsOpen.value) {
-                    await platform.selectOperationsTab(platform.operationsTab.value);
+
+                if (activeSession) {
+                    for (const [fileId, layout] of Object.entries(layoutSnapshot)) {
+                        schedule.layouts[fileId] = layout;
+                    }
+                    schedule.invalidateAll();
+                    teacherMapping.clearTeacherMappingState();
+                    editorHistory.resetEditorHistory();
+                    if (schedule.currentFile.value?.analysis) await schedule.loadPreview();
+                    addToast(
+                        'Пространство изменено',
+                        'Файлы и ручная разметка сохранены. Преподаватели, шаблоны и период взяты из нового пространства; пересчитайте проверки.',
+                        'info'
+                    );
                 }
+                return true;
             };
 
             const deleteTeacher = async value => {
@@ -106,6 +172,24 @@ export function mount() {
             const duplicateWorkspace = rematchAfter(workspace.duplicateWorkspace);
             const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
             const importWorkspace = rematchAfter(workspace.importWorkspace);
+
+            const leaveSheetWorkspace = () => {
+                if (!editor.layoutDirty.value) {
+                    editor.leaveSheetWorkspace();
+                    return;
+                }
+                editor.templateSaveOpen.value = false;
+                editor.pendingEditorExit.value = false;
+                editor.sheetWorkspaceOpen.value = false;
+                editor.sheetWorkspacePreferred.value = false;
+                document.documentElement.classList.remove('sheet-workspace-open');
+                window.__plannerSessionDraft?.flush?.();
+                addToast(
+                    'Разметка файла сохранена',
+                    'Изменения остались в текущем серверном черновике. Глобальный шаблон не изменён.',
+                    'success'
+                );
+            };
 
             const saveCurrentProfile = async () => {
                 const name = workspace.profileName.value.trim();
@@ -220,6 +304,10 @@ export function mount() {
 
             const logout = async () => {
                 reactiveWorkspace.stopReactiveSync();
+                sessionFiles.clearRemovedFileUndo();
+                teacherMapping.clearTeacherMappingState();
+                editorHistory.resetEditorHistory();
+                historyUx.closeHistoryFileDecisions();
                 if (schedule.sessionId.value) await schedule.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
@@ -239,6 +327,7 @@ export function mount() {
                         data.message,
                         data.status === 'success' ? 'success' : 'warning'
                     );
+                    historyUx.closeHistoryFileDecisions();
                     await platform.selectOperationsTab('history');
                 } catch (error) {
                     addToast(
@@ -264,12 +353,17 @@ export function mount() {
                 ...interaction,
                 ...sampleLayout,
                 ...platform,
+                ...historyUx,
                 ...reactiveWorkspace,
                 ...editor,
+                ...editorHistory,
+                ...sessionFiles,
+                ...teacherMapping,
                 toasts,
                 addToast,
                 removeToast,
                 switchWorkspace,
+                leaveSheetWorkspace,
                 saveTeacher,
                 deleteTeacher,
                 importTeachers,
