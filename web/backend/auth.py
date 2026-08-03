@@ -6,7 +6,7 @@ import os
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, FastAPI, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from web.backend.app_context import ApplicationContext
 from web.backend.errors import ApplicationError
@@ -17,19 +17,19 @@ ROLE_LEVEL = {"viewer": 1, "operator": 2, "admin": 3}
 
 class LoginRequest(BaseModel):
     username: str
-    password: str
+    password: str = ""
 
 
 class BootstrapRequest(BaseModel):
     username: str = "admin"
     display_name: str = "Администратор"
-    password: str = Field(min_length=10)
+    password: str = ""
 
 
 class UserCreateRequest(BaseModel):
     username: str
     display_name: str
-    password: str = Field(min_length=10)
+    password: str = ""
     role: str = "viewer"
 
 
@@ -37,7 +37,11 @@ class UserUpdateRequest(BaseModel):
     display_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = Field(default=None, min_length=10)
+    password: Optional[str] = None
+
+
+class PasswordResetRequest(BaseModel):
+    password: str = ""
 
 
 def _model_dict(model: BaseModel, *, exclude_unset: bool = False) -> Dict[str, Any]:
@@ -80,11 +84,8 @@ def _required_role(method: str, path: str) -> Optional[str]:
     if not path.startswith("/api/"):
         return None
     if path in {
-        "/api/health",
-        "/api/system/version",
-        "/api/auth/status",
-        "/api/auth/login",
-        "/api/auth/bootstrap",
+        "/api/health", "/api/system/version", "/api/auth/status",
+        "/api/auth/login", "/api/auth/bootstrap",
     }:
         return None
     if path == "/api/auth/logout":
@@ -137,7 +138,6 @@ def install_auth(app: FastAPI, context: ApplicationContext) -> None:
                 "Запрос отклонён: источник страницы не совпадает с сервером.",
                 "origin_mismatch",
             )
-
         bootstrap_required = store.user_count() == 0
         actor: Optional[Dict[str, Any]] = None
         if bootstrap_required:
@@ -152,21 +152,11 @@ def install_auth(app: FastAPI, context: ApplicationContext) -> None:
             actor = store.session_user(request.cookies.get(SESSION_COOKIE, ""))
         request.state.actor = actor
         request.state.bootstrap_required = bootstrap_required
-
         required = _required_role(request.method, request.url.path)
         if required and not actor:
-            return _json_response(
-                401,
-                "Требуется вход в систему.",
-                "authentication_required",
-            )
+            return _json_response(401, "Требуется вход в систему.", "authentication_required")
         if required and ROLE_LEVEL.get(str(actor.get("role")), 0) < ROLE_LEVEL[required]:
-            return _json_response(
-                403,
-                "Недостаточно прав для выполнения операции.",
-                "permission_denied",
-            )
-
+            return _json_response(403, "Недостаточно прав для выполнения операции.", "permission_denied")
         response = await call_next(request)
         if (
             request.method not in {"GET", "HEAD", "OPTIONS"}
@@ -202,6 +192,7 @@ def build_auth_router(context: ApplicationContext) -> APIRouter:
             "bootstrap_required": bootstrap_required,
             "setup_access": bool(actor),
             "user": actor,
+            "password_policy": "none",
             "roles": [
                 {"id": "admin", "name": "Администратор"},
                 {"id": "operator", "name": "Оператор"},
@@ -281,13 +272,12 @@ def build_auth_router(context: ApplicationContext) -> APIRouter:
         return user
 
     @router.put("/api/admin/users/{user_id}")
-    def update_user(
-        user_id: str,
-        payload: UserUpdateRequest,
-        request: Request,
-    ) -> Dict[str, Any]:
+    def update_user(user_id: str, payload: UserUpdateRequest, request: Request) -> Dict[str, Any]:
         actor = require_role(request, "admin")
-        user = store.update_user(user_id, _model_dict(payload, exclude_unset=True))
+        values = _model_dict(payload, exclude_unset=True)
+        if values.get("password") is None:
+            values.pop("password", None)
+        user = store.update_user(user_id, values)
         store.audit(
             actor=actor,
             action="user.update",
@@ -295,6 +285,24 @@ def build_auth_router(context: ApplicationContext) -> APIRouter:
             entity_id=user_id,
             summary=f"Изменён пользователь «{user['display_name']}»",
             details={"role": user["role"], "is_active": bool(user["is_active"])},
+        )
+        return user
+
+    @router.post("/api/admin/users/{user_id}/reset-password")
+    def reset_password(
+        user_id: str,
+        payload: PasswordResetRequest,
+        request: Request,
+    ) -> Dict[str, Any]:
+        actor = require_role(request, "admin")
+        user = store.reset_user_password(user_id, payload.password)
+        store.audit(
+            actor=actor,
+            action="user.password_reset",
+            entity_type="user",
+            entity_id=user_id,
+            summary=f"Сброшен пароль пользователя «{user['display_name']}»",
+            details={"empty_password": payload.password == ""},
         )
         return user
 

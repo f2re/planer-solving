@@ -3,7 +3,8 @@ for (const href of [
     'assets/interaction.css',
     'assets/platform.css',
     'assets/platform-overrides.css',
-    'assets/sample-layout.css'
+    'assets/sample-layout.css',
+    'assets/workspace-editor.css'
 ]) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -11,8 +12,15 @@ for (const href of [
     document.head.appendChild(link);
 }
 
-import('/assets/planner-app.js')
-    .then(module => module.mount())
+Promise.all([
+    import('/assets/ui-runtime-fixes.js'),
+    import('/assets/planner-app.js')
+])
+    .then(([runtime, application]) => {
+        runtime.installPasswordInputPolicy();
+        application.mount();
+        runtime.installPasswordInputPolicy();
+    })
     .catch(error => {
         console.error(error);
         document.body.insertAdjacentHTML(

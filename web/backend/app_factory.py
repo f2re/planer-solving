@@ -11,6 +11,7 @@ from web.backend.analysis_api import build_analysis_router
 from web.backend.app_context import ApplicationContext, WorkspaceRepository
 from web.backend.auth import build_auth_router, install_auth
 from web.backend.errors import install_exception_handlers
+from web.backend.password_reset_session import install_password_reset_session
 from web.backend.platform_api import build_platform_router
 from web.backend.session_api import build_session_router
 from web.backend.system_api import build_system_router
@@ -34,8 +35,8 @@ def create_app(
     app.state.context = context
     install_exception_handlers(app)
     install_auth(app, context)
+    install_password_reset_session(app, context)
 
-    # All APIs are registered explicitly before the catch-all static mount.
     app.include_router(build_auth_router(context))
     app.include_router(build_analysis_router(context))
     app.include_router(build_session_router(context))

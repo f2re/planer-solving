@@ -1,0 +1,119 @@
+export function installEditorWorkspaceMarkup() {
+    const grid = document.querySelector('.workflow-grid');
+    if (!grid || document.querySelector('.sheet-command-bar')) return;
+
+    const filesPanel = grid.querySelector('aside.panel:not(.settings-panel)');
+    const canvasPanel = grid.querySelector('section.panel');
+    const settingsPanel = grid.querySelector('aside.settings-panel');
+    filesPanel?.classList.add('editor-files-panel');
+    canvasPanel?.classList.add('editor-canvas-panel');
+    settingsPanel?.classList.add('editor-settings-panel');
+
+    if (filesPanel) {
+        filesPanel.setAttribute('v-show', 'filesPanelVisible || !sheetWorkspaceOpen');
+        filesPanel.setAttribute('v-bind:style', 'dockPanelStyle("files")');
+        filesPanel.querySelector('.panel-header')?.insertAdjacentHTML(
+            'afterbegin',
+            '<button v-if="sheetWorkspaceOpen" class="dock-handle" type="button" title="Перетащить панель" @pointerdown="beginDockDrag(\'files\',$event)">⠿</button>'
+        );
+    }
+    if (settingsPanel) {
+        settingsPanel.setAttribute('v-show', 'settingsPanelVisible || !sheetWorkspaceOpen');
+        settingsPanel.setAttribute('v-bind:style', 'dockPanelStyle("settings")');
+        settingsPanel.querySelector('.panel-header')?.insertAdjacentHTML(
+            'afterbegin',
+            '<button v-if="sheetWorkspaceOpen" class="dock-handle" type="button" title="Перетащить панель" @pointerdown="beginDockDrag(\'settings\',$event)">⠿</button>'
+        );
+    }
+
+    const previewToolbar = canvasPanel?.querySelector('.preview-toolbar');
+    previewToolbar?.insertAdjacentHTML('afterend', `
+      <div class="sheet-command-bar" :class="{fullscreen:sheetWorkspaceOpen}">
+        <button v-if="!sheetWorkspaceOpen" type="button" class="btn btn-primary btn-small" @click="enterSheetWorkspace">Развернуть рабочий лист</button>
+        <template v-else>
+          <button type="button" class="sheet-tool" :class="{active:filesPanelVisible}" @click="filesPanelVisible=!filesPanelVisible" title="Файлы">☰ <span>Файлы</span></button>
+          <button type="button" class="sheet-tool" :class="{active:settingsPanelVisible}" @click="settingsPanelVisible=!settingsPanelVisible" title="Параметры">⚙ <span>Параметры</span></button>
+          <button type="button" class="sheet-tool" :class="{active:editorControlsVisible}" @click="editorControlsVisible=!editorControlsVisible" title="Инструменты выделения">⌗ <span>Разметка</span></button>
+          <span class="sheet-toolbar-separator"></span>
+          <button type="button" class="sheet-tool icon-only" @click="zoomOutSheet" title="Уменьшить">−</button>
+          <button type="button" class="sheet-zoom-value" @click="fitSheetToScreen" title="Подогнать под экран">{{ Math.round(sheetZoom*100) }}%</button>
+          <button type="button" class="sheet-tool icon-only" @click="zoomInSheet" title="Увеличить">+</button>
+          <button type="button" class="sheet-tool" @click="fitSheetToScreen" title="Подогнать лист">⤢ <span>По экрану</span></button>
+          <span class="sheet-toolbar-separator"></span>
+          <button type="button" class="sheet-tool" :class="{active:liveRecalc}" @click="liveRecalc=!liveRecalc" title="Автоматический пересчёт">↻ <span>Авто</span></button>
+          <button type="button" class="sheet-tool" @click="recalculateNow" :disabled="recalcState==='working'">✓ <span>Пересчитать</span></button>
+          <button type="button" class="sheet-tool save" :class="{dirty:layoutDirty}" @click="requestTemplateSave">◆ <span>{{ layoutDirty ? 'Сохранить изменения' : 'Шаблон сохранён' }}</span></button>
+          <span class="sheet-recalc-status" :class="recalcState">{{ recalcLabel }}</span>
+          <button type="button" class="sheet-tool exit" @click="leaveSheetWorkspace">× <span>Выйти</span></button>
+        </template>
+      </div>`);
+
+    const previewWrap = canvasPanel?.querySelector('.preview-wrap');
+    if (previewWrap) {
+        previewWrap.setAttribute('v-bind:class', '{ "sheet-workspace-canvas": sheetWorkspaceOpen }');
+        previewWrap.setAttribute('v-on:wheel.ctrl.prevent', 'zoomSheetWheel');
+    }
+    const table = previewWrap?.querySelector('.preview-table');
+    if (table) table.setAttribute('v-bind:style', '{ zoom: sheetZoom }');
+
+    const corner = table?.querySelector('thead th.row-number');
+    if (corner) {
+        corner.setAttribute('v-on:click.stop', 'selectWholeSheet');
+        corner.setAttribute('title', 'Выбрать видимую область листа');
+        corner.classList.add('sheet-select-corner');
+    }
+    const columnHeader = table?.querySelector('thead th[v-for]');
+    if (columnHeader) {
+        columnHeader.setAttribute('v-on:click.stop', 'selectSheetColumn(column.index,$event)');
+        columnHeader.setAttribute('v-bind:class', '{ "sheet-header-selected": isSheetColumnSelected(column.index) }');
+        columnHeader.setAttribute('title', 'Щелчок — выбрать столбец; Shift — диапазон столбцов');
+        columnHeader.setAttribute('tabindex', '0');
+    }
+    const rowHeader = table?.querySelector('tbody th.row-number');
+    if (rowHeader) {
+        rowHeader.setAttribute('v-on:click.stop', 'selectSheetRow(row.index,$event)');
+        rowHeader.setAttribute('v-bind:class', '{ "sheet-header-selected": isSheetRowSelected(row.index) }');
+        rowHeader.setAttribute('title', 'Щелчок — выбрать строку; Shift — диапазон строк');
+        rowHeader.setAttribute('tabindex', '0');
+    }
+
+    const rangeEditor = document.querySelector('.range-editor');
+    const exactEditor = document.querySelector('.exact-layout-editor');
+    rangeEditor?.setAttribute('v-show', 'editorControlsVisible || !sheetWorkspaceOpen');
+    exactEditor?.setAttribute('v-show', 'editorControlsVisible || !sheetWorkspaceOpen');
+
+    const app = document.querySelector('#app');
+    app?.insertAdjacentHTML('beforeend', `
+      <div v-if="templateSaveOpen" class="template-save-backdrop" @click.self="cancelTemplateSave">
+        <section class="template-save-dialog card" role="dialog" aria-modal="true" aria-label="Сохранение разметки">
+          <div class="template-save-icon">◆</div>
+          <div>
+            <h3>Сохранить рабочую разметку?</h3>
+            <p>Проверенная структура будет автоматически предложена для следующих похожих файлов.</p>
+          </div>
+          <label>Название шаблона<input class="control" v-model.trim="smartTemplateName" @keydown.enter.prevent="saveEditorTemplate"></label>
+          <label v-if="selectedEditorTemplate">Действие<select class="control" v-model="templateSaveMode"><option value="update">Обновить «{{ selectedEditorTemplate.name }}»</option><option value="new">Сохранить новым шаблоном</option></select></label>
+          <div class="template-save-actions">
+            <button type="button" class="btn btn-primary" @click="saveEditorTemplate" :disabled="templateSaving || !smartTemplateName">{{ templateSaving ? 'Сохраняем…' : 'Сохранить' }}</button>
+            <button type="button" class="btn btn-secondary" @click="cancelTemplateSave">Продолжить работу</button>
+            <button v-if="pendingEditorExit" type="button" class="btn btn-secondary" @click="leaveWithoutTemplateSave">Выйти без сохранения</button>
+          </div>
+        </section>
+      </div>`);
+
+    document.querySelectorAll('.auth-form input[type="password"], .user-form input[type="password"]').forEach(input => {
+        input.removeAttribute('required');
+        input.removeAttribute('minlength');
+        input.setAttribute('placeholder', 'Можно оставить пустым');
+    });
+    const userPasswordLabel = [...document.querySelectorAll('.user-form label')]
+        .find(label => label.querySelector('input[type="password"]'));
+    if (userPasswordLabel?.firstChild) {
+        userPasswordLabel.firstChild.nodeValue = 'Пароль — любая длина, можно пустой';
+    }
+    const userActions = document.querySelector('.user-form .button-row');
+    userActions?.insertAdjacentHTML(
+        'beforeend',
+        '<button v-if="userForm.id" type="button" class="btn btn-secondary" @click="clearUserPassword">Сбросить пароль</button>'
+    );
+}

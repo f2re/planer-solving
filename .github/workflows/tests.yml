@@ -34,14 +34,14 @@ jobs:
             src/schedule_layout.py src/worksheet_matrix.py src/schedule_detection.py \
             src/schedule_analyzer.py src/teacher_resolver.py src/schedule_parser_geometry.py src/data_loader.py \
             src/transformer.py src/weekly_exporter.py src/template_matcher.py \
-            src/template_learning.py \
-            src/import_wizard.py src/security.py \
+            src/template_learning.py src/import_wizard.py src/security.py \
             src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \
             src/platform_store.py src/transactional_platform_store.py src/data_migrations.py \
-            tools/migrate.py tools/healthcheck.py \
+            tools/migrate.py tools/healthcheck.py tools/user_admin.py \
             offline/build_bundle.py offline/verify_bundle.py \
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
-            web/backend/auth.py web/backend/platform_api.py web/backend/errors.py \
+            web/backend/auth.py web/backend/password_reset_session.py \
+            web/backend/platform_api.py web/backend/errors.py \
             web/backend/analysis_api.py web/backend/session_api.py web/backend/system_api.py \
             web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
 
@@ -57,6 +57,7 @@ jobs:
         run: |
           bash -n start_web.sh
           bash -n offline/build_offline_bundle.sh
+          bash -n offline/install_from_archive.sh
           bash -n offline/common.sh
           bash -n offline/install_or_update.sh
           bash -n offline/rollback.sh
@@ -66,6 +67,7 @@ jobs:
           node --check web/frontend/assets/app.js
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/workspace-state.js
+          node --check web/frontend/assets/reactive-workspace.js
           node --check web/frontend/assets/schedule-layout-utils.js
           node --check web/frontend/assets/schedule-state.js
           node --check web/frontend/assets/interaction-ui.js
@@ -73,11 +75,20 @@ jobs:
           node --check web/frontend/assets/interaction-state.js
           node --check web/frontend/assets/sample-layout-markup.js
           node --check web/frontend/assets/sample-layout-editor.js
+          node --check web/frontend/assets/editor-workspace-markup.js
+          node --check web/frontend/assets/editor-workspace.js
+          node --check web/frontend/assets/ui-runtime-fixes.js
           node --check web/frontend/assets/platform-ui.js
           node --check web/frontend/assets/platform-enhancements.js
 
       - name: Build real offline bundle
         run: bash offline/build_offline_bundle.sh --output dist
+
+      - name: Verify package entrypoint
+        run: |
+          test -x dist/install-planner-solving.sh
+          bash -n dist/install-planner-solving.sh
+          test "$(find dist -maxdepth 1 -name 'planner-solving-offline-*.tar.gz' | wc -l)" -ge 1
 
       - name: Verify offline archive checksum
         run: cd dist && sha256sum -c *.tar.gz.sha256
