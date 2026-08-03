@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 from .data_loader import DataLoader
 from .schedule_analyzer import ScheduleLayout
+from .template_definition import component_candidates, normalize_definition
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +30,6 @@ def _lesson_signature(lesson: Any) -> tuple[Any, ...]:
 
 
 def score_candidate(report: Mapping[str, Any], lessons: Sequence[Any]) -> Dict[str, Any]:
-    """Return a stable, explainable score for one parser layout.
-
-    The score rewards information that is both unique and usable. It deliberately
-    penalizes parser errors, duplicate lessons, unresolved teachers and noisy
-    layouts so that a very large but incorrect range does not win merely because
-    it produced more rows.
-    """
-
     errors = [str(item) for item in report.get("errors", []) if str(item).strip()]
     warnings = [str(item) for item in report.get("warnings", []) if str(item).strip()]
     lesson_count = len(lessons)
@@ -58,7 +51,8 @@ def score_candidate(report: Mapping[str, Any], lessons: Sequence[Any]) -> Dict[s
     weeks = {
         int(_value(item, "week", 0))
         for item in lessons
-        if str(_value(item, "week", "")).strip().isdigit() and int(_value(item, "week", 0)) > 0
+        if str(_value(item, "week", "")).strip().isdigit()
+        and int(_value(item, "week", 0)) > 0
     }
     legend_entries = max(0, int(report.get("legend_entries", 0) or 0))
     empty_week_columns = len(report.get("empty_week_columns", []) or [])
@@ -67,7 +61,6 @@ def score_candidate(report: Mapping[str, Any], lessons: Sequence[Any]) -> Dict[s
     mapping_ratio = mapped_lessons / lesson_count if lesson_count else 0.0
     week_coverage = min(1.0, len(weeks) / 4.0)
     subject_coverage = min(1.0, len(subjects) / 4.0)
-
     quality = (
         mapping_ratio * 0.45
         + uniqueness_ratio * 0.25
@@ -132,6 +125,52 @@ def score_candidate(report: Mapping[str, Any], lessons: Sequence[Any]) -> Dict[s
     }
 
 
+def _evaluate_single(
+    *,
+    file_path: str | Path,
+    teachers_path: str | Path,
+    group_name: str,
+    layout: Mapping[str, Any],
+    component_id: str | None,
+    component_label: str,
+    fingerprint_similarity: float,
+) -> Dict[str, Any]:
+    candidate_layout = deepcopy(dict(layout))
+    loader = DataLoader(str(teachers_path))
+    try:
+        normalized = ScheduleLayout.from_dict(candidate_layout)
+        lessons = loader.load_group_schedule(
+            str(file_path),
+            group_name=group_name,
+            layout=normalized,
+        )
+        report = dict(loader.last_report)
+    except Exception:
+        logger.exception("Cannot evaluate layout component %s for %s", component_label, file_path)
+        lessons = []
+        report = {
+            "errors": ["Шаблон не удалось проверить."],
+            "warnings": [],
+            "legend_entries": 0,
+            "empty_week_columns": [],
+        }
+    result = score_candidate(report, lessons)
+    result["parser_score"] = result["score"]
+    result["fingerprint_similarity"] = round(float(fingerprint_similarity), 2)
+    if result["usable"]:
+        result["score"] = round(float(result["score"]) + float(fingerprint_similarity) * 0.25, 3)
+        if fingerprint_similarity:
+            result["reasons"].append(
+                f"Структурное сходство формата: {round(float(fingerprint_similarity))}%"
+            )
+    result.update({
+        "layout": candidate_layout,
+        "component_id": component_id,
+        "component_label": component_label,
+    })
+    return result
+
+
 def evaluate_layout(
     *,
     file_path: str | Path,
@@ -143,49 +182,57 @@ def evaluate_layout(
     template_id: str | None = None,
     available_sheets: Iterable[str] = (),
     fallback_sheet: str = "",
+    workbook_fingerprint: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    """Run the real parser with a candidate layout and return its score."""
+    """Run the real parser for every component and return the best one."""
 
-    candidate_layout = deepcopy(dict(layout))
-    sheet_names = set(available_sheets)
-    if sheet_names and candidate_layout.get("sheet_name") not in sheet_names:
-        candidate_layout["sheet_name"] = fallback_sheet or next(iter(sheet_names))
-
-    loader = DataLoader(str(teachers_path))
-    try:
-        normalized = ScheduleLayout.from_dict(candidate_layout)
-        lessons = loader.load_group_schedule(
-            str(file_path),
-            group_name=group_name,
-            layout=normalized,
-        )
-        report = dict(loader.last_report)
-    except Exception:  # The matcher must isolate a broken template.
-        logger.exception("Cannot evaluate layout %s for %s", name, file_path)
-        lessons = []
-        report = {
-            "errors": ["Шаблон не удалось проверить."],
-            "warnings": [],
-            "legend_entries": 0,
-            "empty_week_columns": [],
-        }
-
-    result = score_candidate(report, lessons)
-    result.update(
-        {
-            "source": source,
-            "name": name,
-            "template_id": template_id,
-            "candidate_key": f"{source}:{template_id or 'automatic'}",
-            "layout": candidate_layout,
-        }
+    definition = normalize_definition(layout)
+    candidates = component_candidates(
+        definition,
+        workbook_fingerprint,
+        available_sheets,
+        fallback_sheet,
     )
-    return result
+    evaluated = [
+        _evaluate_single(
+            file_path=file_path,
+            teachers_path=teachers_path,
+            group_name=group_name,
+            layout=item["layout"],
+            component_id=item["component_id"],
+            component_label=item["component_label"],
+            fingerprint_similarity=item["fingerprint_similarity"],
+        )
+        for item in candidates
+    ]
+    selected = sorted(
+        evaluated,
+        key=lambda item: (
+            float(item.get("score", -100_000)),
+            int(item.get("quality_percent", 0)),
+            float(item.get("fingerprint_similarity", 0)),
+        ),
+        reverse=True,
+    )[0]
+    selected.update({
+        "source": source,
+        "name": name,
+        "template_id": template_id,
+        "candidate_key": f"{source}:{template_id or 'automatic'}",
+        "definition": definition,
+        "component_results": [{
+            "component_id": item.get("component_id"),
+            "component_label": item.get("component_label"),
+            "score": item.get("score"),
+            "quality_percent": item.get("quality_percent"),
+            "fingerprint_similarity": item.get("fingerprint_similarity"),
+            "usable": item.get("usable"),
+        } for item in evaluated],
+    })
+    return selected
 
 
 def rank_candidates(candidates: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    """Sort candidates, keeping automatic analysis ahead only on an exact tie."""
-
     return sorted(
         (dict(item) for item in candidates),
         key=lambda item: (
@@ -193,6 +240,7 @@ def rank_candidates(candidates: Sequence[Mapping[str, Any]]) -> List[Dict[str, A
             int(item.get("quality_percent", 0)),
             int(item.get("metrics", {}).get("mapped_lessons", 0)),
             int(item.get("metrics", {}).get("unique_lessons", 0)),
+            float(item.get("fingerprint_similarity", 0)),
             1 if item.get("source") == "automatic" else 0,
         ),
         reverse=True,
