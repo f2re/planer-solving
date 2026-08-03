@@ -81,6 +81,15 @@ class LayoutTemplate(BaseModel):
     name: str
     description: str = ""
     layout: Dict[str, Any]
+    composite: List[Dict[str, Any]] = Field(default_factory=list)
+    fingerprint: Dict[str, Any] = Field(default_factory=dict)
+    current_revision: int = 1
+    success_count: int = 0
+    warning_count: int = 0
+    failure_count: int = 0
+    total_lessons: int = 0
+    avg_quality: float = 0
+    last_used_at: Optional[str] = None
     created_at: str = ""
     updated_at: str = ""
 
@@ -89,12 +98,18 @@ class TemplateCreate(BaseModel):
     name: str
     description: str = ""
     layout: Dict[str, Any]
+    composite: List[Dict[str, Any]] = Field(default_factory=list)
+    fingerprint: Dict[str, Any] = Field(default_factory=dict)
+    comment: str = "Создан шаблон"
 
 
 class TemplateUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     layout: Optional[Dict[str, Any]] = None
+    composite: Optional[List[Dict[str, Any]]] = None
+    fingerprint: Optional[Dict[str, Any]] = None
+    comment: Optional[str] = None
 
 
 class ImportResult(BaseModel):
@@ -114,6 +129,7 @@ class FileUploadDetail(BaseModel):
 class ScheduleUploadResponse(BaseModel):
     filename: Optional[str] = None
     weekly_filename: Optional[str] = None
+    run_id: Optional[str] = None
     status: str
     message: str
     details: List[FileUploadDetail] = Field(default_factory=list)
