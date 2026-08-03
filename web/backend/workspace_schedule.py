@@ -28,6 +28,12 @@ from web.backend.schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _model_dict(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 def build_schedule_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["schedule"])
     repository = context.workspace_repository
@@ -270,7 +276,7 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             warning_count=len(warnings) + sum(1 for item in details if item.status == "warning"),
             error_count=sum(1 for item in details if item.status == "error"),
             selected_templates=selected_templates,
-            report={"reports": reports, "details": [item.model_dump() for item in details]},
+            report={"reports": reports, "details": [_model_dict(item) for item in details]},
             artifacts=artifacts,
             actor=actor,
         )
