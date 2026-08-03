@@ -37,3 +37,9 @@ def test_manual_cell_date_is_literal_even_when_many_source_dates_support_other_b
     assert calendar.source == "operator_dates"
     assert calendar.report["operator_override_count"] == 1
     assert any(item["type"] == "operator_date" for item in calendar.report["corrections"])
+    assert not any(
+        item.get("code") == "calendar_source_conflict"
+        and (item.get("action") or {}).get("slot") == "1:Пн"
+        for item in calendar.report["issues"]
+    )
+    assert not any("заменена" in warning and "1, Пн" in warning for warning in calendar.warnings)
