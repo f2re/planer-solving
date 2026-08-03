@@ -18,7 +18,8 @@
         '/assets/sample-layout.css',
         '/assets/workspace-editor.css',
         '/assets/operator-flow.css',
-        '/assets/session-file-actions.css'
+        '/assets/session-file-actions.css',
+        '/assets/session-draft.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
@@ -78,11 +79,13 @@
 
     Promise.allSettled([
         import('/assets/operator-flow.js'),
-        import('/assets/planner-app.js')
+        import('/assets/planner-app.js'),
+        import('/assets/session-draft-runtime.js')
     ])
         .then(results => {
             const operatorFlowResult = results[0];
             const applicationResult = results[1];
+            const draftRuntimeResult = results[2];
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
 
             const operatorFlow = operatorFlowResult.status === 'fulfilled'
@@ -92,6 +95,13 @@
                 console.warn('[planner] operator flow enhancements were not loaded', operatorFlowResult.reason);
             }
 
+            const draftRuntime = draftRuntimeResult.status === 'fulfilled'
+                ? draftRuntimeResult.value
+                : {};
+            if (draftRuntimeResult.status !== 'fulfilled') {
+                console.warn('[planner] server draft runtime was not loaded', draftRuntimeResult.reason);
+            }
+
             operatorFlow.installOperatorFlowMarkup?.();
             const application = applicationResult.value;
             if (typeof application.mount !== 'function') {
@@ -99,6 +109,7 @@
             }
             application.mount();
             operatorFlow.installOperatorFlowRuntime?.();
+            draftRuntime.installSessionDraftRuntime?.();
 
             boot.mounted = true;
             boot.mountedAt = Date.now();
