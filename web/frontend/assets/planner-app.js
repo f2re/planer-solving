@@ -2,6 +2,7 @@ import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.
 import { createScheduleState } from './schedule-state.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
+import { installPlatformEnhancements } from './platform-enhancements.js';
 
 const { createApp, ref, onMounted } = Vue;
 
@@ -9,6 +10,7 @@ export function mount() {
     installWorkspaceMarkup();
     installInteractionMarkup();
     installPlatformMarkup();
+    installPlatformEnhancements();
     createApp({
         setup() {
             const toasts = ref([]);
@@ -200,6 +202,30 @@ export function mount() {
                 workspace.layoutProfiles.value = [];
             };
 
+            const repeatRun = async run => {
+                if (!run || !workspace.activeWorkspaceId.value) return;
+                if (!confirm('Повторить обработку с архивными исходниками и прежней разметкой?')) {
+                    return;
+                }
+                try {
+                    const { data } = await axios.post(
+                        `/api/workspaces/${workspace.activeWorkspaceId.value}/runs/${run.id}/repeat`
+                    );
+                    addToast(
+                        'Обработка повторена',
+                        data.message,
+                        data.status === 'success' ? 'success' : 'warning'
+                    );
+                    await platform.selectOperationsTab('history');
+                } catch (error) {
+                    addToast(
+                        'Повтор не выполнен',
+                        error.response?.data?.detail || 'Архивный запуск не удалось повторить.',
+                        'error'
+                    );
+                }
+            };
+
             onMounted(async () => {
                 const access = await platform.initAuth();
                 if (access?.setup_access || access?.authenticated) {
@@ -229,7 +255,8 @@ export function mount() {
                 applySelectedProfile,
                 deleteSelectedProfile,
                 submitAuth,
-                logout
+                logout,
+                repeatRun
             };
         }
     }).mount('#app');
