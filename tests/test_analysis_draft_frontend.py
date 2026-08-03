@@ -43,10 +43,19 @@ def test_draft_wraps_streaming_interaction_instead_of_shadowing_it():
 
 def test_all_unreadable_files_still_open_a_recoverable_session():
     draft = read("schedule-draft.js")
+    generation = read("schedule-diagnostic-generation.js")
+    planner = read("planner-app.js")
     assert "exposeUnparsedSession" in draft
     assert "if (schedule.step.value === 1) schedule.step.value = 2" in draft
     assert "Восстановлен сеанс с неразобранными файлами" in draft
     assert "Замените нужный файл кнопкой «Выбрать другой»" in draft
+    assert "!file.analysis || file.enabled" in generation
+    assert "const canGenerate = computed(() => recoverableFiles.value.length > 0)" in generation
+    assert "enabled: file.analysis ? Boolean(file.enabled) : true" in generation
+    assert "Диагностический результат готов" in generation
+    assert "createScheduleDiagnosticGenerationState" in planner
+    assert "...scheduleDiagnosticGeneration" in planner
+    assert planner.index("...scheduleDraft") < planner.index("...scheduleDiagnosticGeneration")
 
 
 def test_result_can_return_to_the_problem_file_without_deleting_session():
@@ -107,11 +116,12 @@ def test_teacher_mapping_action_opens_the_relevant_sheet_area():
     assert "Проверьте столбцы лектора" in draft
 
 
-def test_generation_flushes_the_completed_result_to_the_draft():
-    draft = read("schedule-draft.js")
-    assert "const originalGenerate = schedule.generate" in draft
-    assert "await originalGenerate();" in draft
-    assert "await flushDraft({ quiet: false })" in draft
+def test_diagnostic_generation_flushes_completed_result_to_the_draft():
+    generation = read("schedule-diagnostic-generation.js")
+    assert "await schedule.validateAll();" in generation
+    assert "await scheduleDraft.flushDraft({ quiet: false })" in generation
+    assert "allow_partial: true" in generation
+    assert "layout: file.analysis" in generation
 
 
 def test_bootstrap_loads_new_draft_styles_and_markup_before_mount():
