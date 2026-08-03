@@ -118,6 +118,13 @@ jobs:
             PLANNER_INSTALL_ROOT="$install_root" \
             PLANNER_PORT=18081 \
             "$install_root/state/run-service.sh" --check
+          (
+            cd "$RUNNER_TEMP"
+            "$install_root/state/admin.sh" list >/dev/null
+            "$install_root/current/.venv/bin/python" -m tools.healthcheck \
+              --app-root "$install_root/current" \
+              --data-dir "$install_root/shared/data" >/dev/null
+          )
           test "$(cat "$install_root/current/VERSION")" = "$(cat VERSION)"
           test -x "$install_root/current/.venv/bin/python"
           test -x "$install_root/state/doctor.sh"
