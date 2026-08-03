@@ -1,4 +1,134 @@
-const { ref } = Vue;
+const { ref, computed } = Vue;
+
+function inferredScope(message) {
+    const text = String(message || '').toLocaleLowerCase('ru');
+    if (text.includes('преподавател') || text.includes('не назначен')) return 'teacher';
+    if (text.includes('месяц') || text.includes('дат') || text.includes('семестр') || text.includes('год')) return 'calendar';
+    if (text.includes('лист')) return 'sheet';
+    if (text.includes('недел') || text.includes('столбц') || text.includes('сетк') || text.includes('размет')) return 'range';
+    return 'file';
+}
+
+function defaultResolution(message, scope) {
+    const text = String(message || '').toLocaleLowerCase('ru');
+    if (scope === 'teacher') {
+        return {
+            decision: 'Занятие сохраняется в разделе «Не назначен».',
+            impact: 'Занятие не теряется и может быть назначено преподавателю позже.'
+        };
+    }
+    if (text.includes('занятия не найдены') || text.includes('недели пока не распознаны')) {
+        return {
+            decision: 'Файл остаётся в диагностическом результате без блокировки остальных книг.',
+            impact: 'Из этого файла занятия пока не добавляются; исходник доступен для правки.'
+        };
+    }
+    if (scope === 'calendar') {
+        return {
+            decision: 'Используется последовательность точных дат, соседних месяцев или период пространства.',
+            impact: 'Календарь восстанавливается автоматически и записывается в отчёт.'
+        };
+    }
+    if (scope === 'range' || scope === 'sheet') {
+        return {
+            decision: 'Используется безопасная нормализованная разметка.',
+            impact: 'Пригодные занятия включаются, сомнительную область можно уточнить.'
+        };
+    }
+    return {
+        decision: 'Система продолжает обработку пригодных данных.',
+        impact: 'Замечание сохраняется в отчёте и не блокирует другие файлы.'
+    };
+}
+
+function normalizedReportIssues(file, validation) {
+    const report = validation?.report || {};
+    if (Array.isArray(report.issues) && report.issues.length) {
+        return report.issues.map(issue => ({
+            ...issue,
+            file_id: file.file_id,
+            filename: file.filename,
+            group_name: file.group_name,
+            action: issue.action || issue.actions?.[0] || null
+        }));
+    }
+
+    const result = [];
+    const seen = new Set();
+    const actions = Array.isArray(report.actions) ? report.actions.filter(Boolean) : [];
+    const add = issue => {
+        const key = `${issue.code}:${issue.message}`;
+        if (!issue.message || seen.has(key)) return;
+        seen.add(key);
+        result.push({
+            blocking: false,
+            resolved: true,
+            ...issue,
+            file_id: file.file_id,
+            filename: file.filename,
+            group_name: file.group_name
+        });
+    };
+
+    for (const raw of report.period?.issues || []) {
+        const automatic = raw.resolution === 'auto';
+        add({
+            code: raw.code || 'calendar_attention',
+            scope: 'calendar',
+            severity: raw.severity === 'info' ? 'info' : 'attention',
+            message: raw.message,
+            default_decision: automatic
+                ? 'Календарное решение уже принято автоматически по фактическим датам.'
+                : 'До уточнения используется безопасная календарная последовательность.',
+            impact: 'Формирование не блокируется; решение будет записано в отчёт.',
+            resolution: automatic ? 'auto' : 'default_with_override',
+            action: raw.action || null,
+            actions: raw.action ? [raw.action] : []
+        });
+    }
+
+    for (const messageValue of report.errors || []) {
+        const message = String(messageValue || '').trim();
+        add({
+            code: 'technical_file_issue',
+            scope: 'file',
+            severity: 'technical',
+            message,
+            default_decision: 'Этот файл или фрагмент исключается; остальные исходники продолжают обрабатываться.',
+            impact: 'Доступные данные попадут в результат, а отказ сохранится в диагностике.',
+            resolution: 'skipped_with_override',
+            action: actions.find(action => ['replace_file', 'edit_layout', 'retry'].includes(action.type)) || actions[0] || null,
+            actions
+        });
+    }
+
+    for (const messageValue of report.warnings || []) {
+        const message = String(messageValue || '').trim();
+        const scope = inferredScope(message);
+        const defaults = defaultResolution(message, scope);
+        const acceptedTypes = {
+            teacher: ['open_teacher_mapping'],
+            calendar: ['edit_period', 'calendar_policy'],
+            range: ['edit_layout', 'layout_patch'],
+            sheet: ['edit_layout', 'layout_patch', 'replace_file'],
+            file: []
+        }[scope];
+        const matchingActions = actions.filter(action => !acceptedTypes.length || acceptedTypes.includes(action.type));
+        add({
+            code: scope === 'teacher' ? 'unknown_teacher_mapping' : `${scope}_attention`,
+            scope,
+            severity: 'attention',
+            message,
+            default_decision: defaults.decision,
+            impact: defaults.impact,
+            resolution: 'default_with_override',
+            action: matchingActions[0] || null,
+            actions: matchingActions
+        });
+    }
+
+    return result;
+}
 
 /**
  * Управление отдельными исходниками активного сеанса.
@@ -19,6 +149,16 @@ export function createSessionFileActions(addToast, schedule, activeWorkspaceId) 
         return originalResetWorkflow(...args);
     };
 
+    const operatorIssues = computed(() => schedule.analyzedFiles.value.flatMap(file =>
+        normalizedReportIssues(file, schedule.validations[file.file_id])
+    ));
+    const attentionIssues = computed(() => operatorIssues.value.filter(issue =>
+        issue.severity === 'attention' || issue.severity === 'technical'
+    ));
+    const automaticDecisions = computed(() => operatorIssues.value.filter(issue =>
+        issue.severity === 'info' || issue.resolution === 'auto'
+    ));
+
     function normalizedClientFile(item, previous = null) {
         return {
             ...item,
@@ -33,6 +173,21 @@ export function createSessionFileActions(addToast, schedule, activeWorkspaceId) 
         delete schedule.validations[fileId];
         delete schedule.periodOverrides[fileId];
         schedule.periodOverrides[fileId] = { week_day_dates: {}, week_months: {} };
+    }
+
+    async function openAttentionIssue(issue) {
+        if (!issue?.file_id) return;
+        schedule.step.value = 2;
+        await schedule.selectFile(issue.file_id);
+        if (issue.action) {
+            await schedule.applyParserAction(issue.action);
+        } else {
+            addToast(
+                'Решение уже применено',
+                issue.default_decision || 'Формирование продолжится по безопасному варианту.',
+                'info'
+            );
+        }
     }
 
     async function matchOneFile(file, { applyLayout = true } = {}) {
@@ -261,6 +416,10 @@ export function createSessionFileActions(addToast, schedule, activeWorkspaceId) 
         fileMutationBusy,
         mutatingFileId,
         lastRemovedFile,
+        operatorIssues,
+        attentionIssues,
+        automaticDecisions,
+        openAttentionIssue,
         appendSessionFiles,
         replaceSessionFile,
         removeSessionFile,
