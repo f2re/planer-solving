@@ -43,7 +43,10 @@ def test_pyenv_with_missing_libpython_is_recovered_and_directory_hints_work(tmp_
     wrapper = bin_dir / f"python{major}.{minor}"
     wrapper.write_text(
         "#!/bin/sh\n"
-        f"case :${{LD_LIBRARY_PATH:-}}: in *:{lib_dir}:*) exec {sys.executable} \"$@\" ;; "
+        # Имитируем ровно ошибку из Astra. После того как установщик добавил
+        # нужный каталог, убираем тестовый LD_LIBRARY_PATH перед запуском
+        # настоящего Python: пустой файл-маркер не должен попадать его loader.
+        f"case :${{LD_LIBRARY_PATH:-}}: in *:{lib_dir}:*) exec env -u LD_LIBRARY_PATH {sys.executable} \"$@\" ;; "
         f"*) echo 'error while loading shared libraries: libpython{major}.{minor}.so.1.0: cannot open shared object file' >&2; exit 127 ;; esac\n",
         encoding="utf-8",
     )
