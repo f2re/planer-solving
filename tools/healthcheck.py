@@ -1,4 +1,4 @@
-"""Offline-safe installation and data health checks."""
+"""Offline-safe installation and operations-platform health checks."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,22 @@ from src.data_migrations import (
     detect_schema_version,
     validate_document,
 )
-from src.sqlite_workspace_store import SQLITE_SCHEMA_VERSION
+from src.platform_store import PLATFORM_SCHEMA_VERSION
+
+REQUIRED_PLATFORM_TABLES = {
+    "workspaces",
+    "teachers",
+    "templates",
+    "users",
+    "auth_sessions",
+    "audit_log",
+    "import_jobs",
+    "template_profiles",
+    "template_revisions",
+    "processing_runs",
+    "processing_files",
+    "processing_artifacts",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,8 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         "document_schema_version": None,
         "storage_schema_version": None,
         "supported_document_schema_version": CURRENT_SCHEMA_VERSION,
-        "supported_storage_schema_version": SQLITE_SCHEMA_VERSION,
-        "storage": "sqlite",
+        "supported_storage_schema_version": PLATFORM_SCHEMA_VERSION,
+        "storage": "sqlite-platform",
     }
 
     required = [
@@ -43,8 +58,12 @@ def main(argv: list[str] | None = None) -> int:
         root / "web" / "backend" / "main.py",
         root / "web" / "backend" / "app_factory.py",
         root / "web" / "backend" / "app_context.py",
+        root / "web" / "backend" / "auth.py",
+        root / "web" / "backend" / "platform_api.py",
         root / "web" / "frontend" / "index.html",
-        root / "src" / "sqlite_workspace_store.py",
+        root / "src" / "platform_store.py",
+        root / "src" / "import_wizard.py",
+        root / "src" / "template_learning.py",
     ]
     for path in required:
         if not path.exists():
@@ -83,20 +102,42 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
                 storage_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-                workspace_count = int(connection.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0])
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                workspace_count = int(
+                    connection.execute("SELECT COUNT(*) FROM workspaces").fetchone()[0]
+                )
                 default_count = int(connection.execute(
                     "SELECT COUNT(*) FROM metadata WHERE key = 'default_workspace_id'"
+                ).fetchone()[0])
+                user_count = int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+                open_runs = int(connection.execute(
+                    "SELECT COUNT(*) FROM processing_runs WHERE status = 'running'"
                 ).fetchone()[0])
             finally:
                 connection.close()
             details["storage_schema_version"] = storage_version
             details["workspace_count"] = workspace_count
+            details["user_count"] = user_count
+            details["bootstrap_required"] = user_count == 0
+            details["running_processing_count"] = open_runs
             details["sqlite_quick_check"] = quick_check
+            details["platform_tables"] = sorted(REQUIRED_PLATFORM_TABLES & tables)
             if quick_check != "ok":
                 errors.append(f"SQLite quick_check: {quick_check}")
-            if storage_version != SQLITE_SCHEMA_VERSION:
+            if storage_version != PLATFORM_SCHEMA_VERSION:
                 errors.append(
-                    f"Версия SQLite {storage_version}, поддерживается {SQLITE_SCHEMA_VERSION}."
+                    f"Версия SQLite {storage_version}, поддерживается {PLATFORM_SCHEMA_VERSION}."
+                )
+            missing_tables = REQUIRED_PLATFORM_TABLES - tables
+            if missing_tables:
+                errors.append(
+                    "Отсутствуют таблицы операционной платформы: "
+                    + ", ".join(sorted(missing_tables))
                 )
             if workspace_count < 1:
                 errors.append("База SQLite не содержит рабочих пространств.")
@@ -117,7 +158,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Проверка пройдена. "
             f"Документ: {details['document_schema_version']}/{CURRENT_SCHEMA_VERSION}; "
-            f"SQLite: {details['storage_schema_version']}/{SQLITE_SCHEMA_VERSION}."
+            f"SQLite: {details['storage_schema_version']}/{PLATFORM_SCHEMA_VERSION}; "
+            f"пользователей: {details['user_count']}."
         )
     return 0 if not errors else 2
 
