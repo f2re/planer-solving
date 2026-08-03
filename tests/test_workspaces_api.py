@@ -55,29 +55,47 @@ def test_workspace_teacher_and_template_api(tmp_path: Path) -> None:
     template_id = template.json()["id"]
     updated = client.put(
         f"/api/workspaces/{workspace_id}/templates/{template_id}",
-        json={"description": "Исправленная форма"},
+        json={"description": "Исправленная форма", "comment": "Уточнено описание"},
     )
     assert updated.status_code == 200
     assert updated.json()["description"] == "Исправленная форма"
+    assert updated.json()["current_revision"] == 2
 
     exported = client.get(f"/api/workspaces/{workspace_id}/export")
     assert exported.status_code == 200
     assert exported.json()["workspace"]["name"] == "Метеорология"
 
 
-def test_teacher_csv_import(tmp_path: Path) -> None:
+def test_direct_import_is_replaced_by_preview_and_commit(tmp_path: Path) -> None:
     client = configure_storage(tmp_path)
     workspace_id = client.get("/api/workspaces").json()[0]["id"]
     csv_payload = (
         "Краткое имя;Полное ФИО;Должность;Звание;Степень\n"
         "Сидоров С.С.;Сидоров Сидор Сидорович;Доцент;;к.г.н.\n"
     ).encode("utf-8")
-    response = client.post(
+
+    direct = client.post(
         f"/api/workspaces/{workspace_id}/teachers/import?mode=append",
         files={"file": ("teachers.csv", csv_payload, "text/csv")},
     )
-    assert response.status_code == 200
-    assert response.json()["added"] == 1
+    assert direct.status_code == 409
+    assert direct.json()["code"] == "import_preview_required"
+
+    preview = client.post(
+        f"/api/workspaces/{workspace_id}/imports/preview?kind=teachers",
+        files={"file": ("teachers.csv", csv_payload, "text/csv")},
+    )
+    assert preview.status_code == 200
+    job = preview.json()
+    assert job["preview"]["counts"]["add"] == 1
+
+    committed = client.post(
+        f"/api/workspaces/{workspace_id}/imports/{job['id']}/commit",
+        json={"decisions": {"1": "add"}},
+    )
+    assert committed.status_code == 200
+    assert committed.json()["added"] == 1
+
     exported = client.get(f"/api/workspaces/{workspace_id}/teachers/export?format=csv")
     assert exported.status_code == 200
     assert "Сидоров" in exported.content.decode("utf-8-sig")

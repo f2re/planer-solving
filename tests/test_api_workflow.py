@@ -8,7 +8,7 @@ from web.backend.app_factory import create_app
 from web.backend import workspace_schedule
 
 
-def test_operator_api_workflow(tmp_path: Path, monkeypatch) -> None:
+def test_operator_api_workflow_and_repeat_from_history(tmp_path: Path, monkeypatch) -> None:
     teachers = tmp_path / "teachers.json"
     teachers.write_text(
         json.dumps([{
@@ -32,6 +32,7 @@ def test_operator_api_workflow(tmp_path: Path, monkeypatch) -> None:
     schedule = tmp_path / "522.xlsx"
     build_layered_schedule(schedule)
     client = TestClient(create_app(tmp_path))
+    workspace_id = client.get("/api/workspaces").json()[0]["id"]
 
     with schedule.open("rb") as file:
         response = client.post(
@@ -53,6 +54,7 @@ def test_operator_api_workflow(tmp_path: Path, monkeypatch) -> None:
             "file_id": item["file_id"],
             "group_name": "522",
             "layout": item["analysis"]["layout"],
+            "workspace_id": workspace_id,
         },
     )
     assert validation.status_code == 200
@@ -62,14 +64,30 @@ def test_operator_api_workflow(tmp_path: Path, monkeypatch) -> None:
 
     generated = client.post(
         f"/api/analysis/{analyzed['session_id']}/generate",
-        json={"files": [{
-            "file_id": item["file_id"],
-            "group_name": "522",
-            "layout": item["analysis"]["layout"],
-            "enabled": True,
-        }]},
+        json={
+            "workspace_id": workspace_id,
+            "files": [{
+                "file_id": item["file_id"],
+                "group_name": "522",
+                "layout": item["analysis"]["layout"],
+                "enabled": True,
+            }],
+        },
     )
     assert generated.status_code == 200
     payload = generated.json()
     assert payload["filename"]
+    assert payload["run_id"]
     assert (tmp_path / "output" / payload["filename"]).exists()
+
+    repeated = client.post(
+        f"/api/workspaces/{workspace_id}/runs/{payload['run_id']}/repeat"
+    )
+    assert repeated.status_code == 200
+    repeated_payload = repeated.json()
+    assert repeated_payload["run_id"] != payload["run_id"]
+    assert (tmp_path / "output" / repeated_payload["filename"]).exists()
+
+    runs = client.get(f"/api/workspaces/{workspace_id}/runs").json()["items"]
+    assert len(runs) == 2
+    assert all(run["lesson_count"] == 72 for run in runs)

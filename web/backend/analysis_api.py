@@ -11,6 +11,12 @@ from fastapi import APIRouter, FastAPI, Request, UploadFile
 from pydantic import BaseModel
 
 from src.schedule_analyzer import ScheduleAnalyzer
+from src.template_learning import (
+    best_template_layout,
+    fingerprint_from_analysis,
+    fingerprint_similarity,
+    layout_candidates,
+)
 from src.template_matcher import evaluate_layout, rank_candidates
 from web.backend.app_context import ApplicationContext
 from web.backend.errors import ApplicationError
@@ -117,6 +123,7 @@ async def analyze_files(context: ApplicationContext, files: List[UploadFile]) ->
 
         try:
             analysis = analyzer.analyze(str(stored_path)).to_dict()
+            analysis["fingerprint"] = fingerprint_from_analysis(analysis)
             item["analysis"] = analysis
             item["status"] = "success" if analysis["confidence"] >= 0.55 else "warning"
             item["message"] = (
@@ -146,6 +153,7 @@ async def analyze_files(context: ApplicationContext, files: List[UploadFile]) ->
 
 def build_analysis_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["analysis"])
+    repository = context.workspace_repository
 
     @router.post("/api/analyze", response_model=AnalyzeResponse)
     async def analyze_schedules(request: Request) -> AnalyzeResponse:
@@ -163,7 +171,7 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         if not isinstance(analysis, dict):
             raise ApplicationError("Для файла нет результатов автоматического анализа.")
 
-        workspace = context.workspace_repository.get_workspace(request.workspace_id)
+        workspace = repository.get_workspace(request.workspace_id)
         teachers_path = context.sessions.write_snapshot(
             session_id,
             f"teachers-match-{workspace['id']}.json",
@@ -177,41 +185,72 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
             "available_sheets": analysis.get("sheet_names", []),
             "fallback_sheet": analysis.get("selected_sheet", ""),
         }
+        workbook_fingerprint = analysis.get("fingerprint") or fingerprint_from_analysis(analysis)
 
-        candidates = [
-            evaluate_layout(
-                **common,
-                layout=analysis["layout"],
-                source="automatic",
-                name="Автоматическая разметка",
-            )
-        ]
+        automatic = evaluate_layout(
+            **common,
+            layout=analysis["layout"],
+            source="automatic",
+            name="Автоматическая разметка",
+        )
+        automatic.update({
+            "rule_id": "automatic",
+            "rule_name": "Автоматическая разметка",
+            "revision_no": None,
+            "fingerprint_similarity": 1.0,
+        })
+        candidates = [automatic]
+
         for template in workspace.get("templates", []):
-            candidates.append(
-                evaluate_layout(
+            similarity = fingerprint_similarity(template.get("fingerprint"), workbook_fingerprint)
+            evaluated_rules = []
+            for rule in layout_candidates(template, analysis.get("sheet_names", [])):
+                candidate = evaluate_layout(
                     **common,
-                    layout=template.get("layout", {}),
+                    layout=rule["layout"],
                     source="template",
                     name=template.get("name") or "Шаблон без названия",
                     template_id=template.get("id"),
                 )
-            )
+                candidate.update({
+                    "rule_id": rule["rule_id"],
+                    "rule_name": rule["rule_name"],
+                    "revision_no": template.get("current_revision"),
+                })
+                evaluated_rules.append(candidate)
+            if evaluated_rules:
+                candidates.append(best_template_layout(evaluated_rules, similarity))
 
         ranked = rank_candidates(candidates)
         selected = ranked[0]
-        automatic = next(candidate for candidate in ranked if candidate["source"] == "automatic")
         selected["improvement_over_automatic"] = round(
             float(selected["score"]) - float(automatic["score"]), 3
         )
+        if selected.get("template_id"):
+            metrics = selected.get("metrics") or {}
+            status = (
+                "error" if metrics.get("error_count")
+                else "warning" if metrics.get("warning_count")
+                else "success"
+            )
+            repository.record_template_evaluation(
+                workspace["id"],
+                selected["template_id"],
+                status=status,
+                quality=float(selected.get("quality_percent") or 0),
+                lesson_count=int(metrics.get("unique_lessons") or 0),
+            )
 
         item["template_match"] = {
             "workspace_id": workspace["id"],
             "evaluated_at": time.time(),
+            "fingerprint": workbook_fingerprint,
             "selected": {
-                key: selected[key]
+                key: selected.get(key)
                 for key in (
-                    "candidate_key", "source", "name", "template_id", "score",
-                    "quality_percent", "metrics", "reasons", "improvement_over_automatic",
+                    "candidate_key", "source", "name", "template_id", "revision_no",
+                    "rule_id", "rule_name", "score", "quality_percent", "metrics",
+                    "reasons", "improvement_over_automatic", "fingerprint_similarity",
                 )
             },
         }
@@ -219,6 +258,7 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
         return {
             "file_id": file_id,
             "workspace_id": workspace["id"],
+            "fingerprint": workbook_fingerprint,
             "selected": selected,
             "automatic": automatic,
             "candidates": ranked,
@@ -229,7 +269,5 @@ def build_analysis_router(context: ApplicationContext) -> APIRouter:
 
 
 def install_analysis_api(app: FastAPI, context: ApplicationContext) -> FastAPI:
-    """Compatibility wrapper for extensions written before the app factory."""
-
     app.include_router(build_analysis_router(context))
     return app

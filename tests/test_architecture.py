@@ -16,12 +16,16 @@ def test_app_factory_registers_each_api_once_and_mounts_frontend_last(tmp_path: 
     assert set(schema["paths"]["/api/analyze"]) == {"post"}
     assert set(schema["paths"]["/api/teachers"]) == {"get", "post"}
     assert set(schema["paths"]["/api/health"]) == {"get"}
+    assert set(schema["paths"]["/api/auth/status"]) == {"get"}
     assert app.router.routes[-1].__class__.__name__ == "Mount"
 
     client = TestClient(app)
     response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json()["storage"] == "sqlite"
+    payload = response.json()
+    assert payload["storage"] == "sqlite-platform"
+    assert payload["features"]["import_wizard"] is True
+    assert payload["features"]["roles"] is True
     assert client.get("/").status_code == 200
 
 
