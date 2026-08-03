@@ -71,7 +71,12 @@ class ScheduleParserGeometry:
             if 1 <= int(value) <= matrix.worksheet.max_column
         ]
         data_cols = layout.week_data_columns or [col + layout.week_data_col_offset for col in header_cols]
-        numbers = layout.week_numbers or [value_as_int(matrix.value(layout.weeks_row, col)) for col in header_cols]
+        generated_numbers = any(
+            item.get("field") == "week_numbers" and not item.get("before")
+            for item in report.get("auto_repairs", [])
+        )
+        explicit_numbers = [] if generated_numbers else list(layout.week_numbers or [])
+        numbers = explicit_numbers or [value_as_int(matrix.value(layout.weeks_row, col)) for col in header_cols]
         result: List[Tuple[int, int, int]] = []
 
         def append_week(week: Any, header_col: int, data_col: int) -> None:
