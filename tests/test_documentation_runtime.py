@@ -26,10 +26,11 @@ def test_parser_documentation_promises_recovery_and_in_place_corrections():
     recovery = (docs / "PARSER_RECOVERY.md").read_text(encoding="utf-8")
     audit = (docs / "PARSER_AUDIT_2_15.md").read_text(encoding="utf-8")
     for source in (guide, recovery, audit):
-        assert "повторной загруз" in source.lower() or "повторно загруж" in source.lower()
-        assert "не блок" in source.lower()
+        lower = source.lower()
+        assert "повторн" in lower and "загруз" in lower
+        assert "не блок" in lower
     assert "переход месяца" in guide.lower()
     assert "Не назначен" in guide
     assert "Сбросить вид" in guide
     assert "диагностический Excel" in recovery
-    assert "week" not in audit or "недел" in audit.lower()
+    assert "недел" in audit.lower()
