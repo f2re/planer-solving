@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi.testclient import TestClient
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from src.schedule_analyzer import ScheduleAnalyzer
 from web.backend.app_factory import create_app
@@ -101,7 +101,10 @@ def test_replace_damaged_file_preserves_other_layouts_and_dates(tmp_path):
     assert item["file_id"] == bad_id
     assert item["analysis"]
     assert item["status"] in {"success", "warning"}
-    assert not old_bad_path.exists()
+    # The stable internal path is reused so a process interruption cannot leave
+    # the manifest pointing at a missing file.
+    assert old_bad_path.exists()
+    assert load_workbook(old_bad_path, data_only=True).active["D9"].value == "Синоптическая метеорология"
 
     restored = client.get(f"/api/analysis/{session_id}").json()
     assert len(restored["files"]) == 2
@@ -135,6 +138,36 @@ def test_unreadable_replacement_keeps_previous_file_and_draft(tmp_path):
     assert response.json()["code"] == "replacement_unreadable"
     assert old_bad_path.read_bytes() == before
     restored = client.get(f"/api/analysis/{session_id}").json()
+    assert restored["draft"]["result"]["filename"] == "old.xlsx"
+    assert restored["draft"]["layouts"][good_id]
+
+
+def test_manifest_write_failure_restores_previous_file_and_metadata(tmp_path, monkeypatch):
+    app = create_app(tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    session_id, good_id, bad_id, old_bad_path = _session(app, tmp_path)
+    before = old_bad_path.read_bytes()
+    original_save = app.state.context.sessions.save_manifest
+
+    def fail_commit(*_args, **_kwargs):
+        raise OSError("synthetic manifest failure")
+
+    monkeypatch.setattr(app.state.context.sessions, "save_manifest", fail_commit)
+    replacement = tmp_path / "replacement.xlsx"
+    _workbook(replacement, subject="Новый предмет")
+    with replacement.open("rb") as stream:
+        response = client.post(
+            f"/api/analysis/{session_id}/files/{bad_id}/replace",
+            files={"files": (replacement.name, stream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+    assert response.status_code == 500
+    assert old_bad_path.read_bytes() == before
+
+    monkeypatch.setattr(app.state.context.sessions, "save_manifest", original_save)
+    restored = client.get(f"/api/analysis/{session_id}").json()
+    bad = next(item for item in restored["files"] if item["file_id"] == bad_id)
+    assert bad["filename"] == "bad.xlsx"
+    assert bad["analysis"] is None
     assert restored["draft"]["result"]["filename"] == "old.xlsx"
     assert restored["draft"]["layouts"][good_id]
 
