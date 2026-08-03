@@ -33,6 +33,16 @@ def test_operator_api_workflow_and_repeat_from_history(tmp_path: Path, monkeypat
     build_layered_schedule(schedule)
     client = TestClient(create_app(tmp_path))
     workspace_id = client.get("/api/workspaces").json()[0]["id"]
+    workspace_update = client.put(
+        f"/api/workspaces/{workspace_id}",
+        json={
+            "settings": {
+                "schedule_start_date": "2027-02-01",
+                "schedule_end_date": "2027-06-30",
+            }
+        },
+    )
+    assert workspace_update.status_code == 200
 
     with schedule.open("rb") as file:
         response = client.post(
