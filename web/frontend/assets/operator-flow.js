@@ -1,42 +1,18 @@
 const FLOW_READY = 'operatorFlowReady';
 
-function text(selector, value) {
-    const node = document.querySelector(selector);
-    if (node) node.textContent = value;
-    return node;
-}
-
 function insertOnce(target, position, marker, html) {
     if (!target || document.querySelector(marker)) return;
     target.insertAdjacentHTML(position, html);
 }
 
 /**
- * Нормализует исходный статический шаблон до монтирования Vue.
- *
- * Прежний интерфейс последовательно наращивался несколькими DOM-модулями и
- * сохранил формулировки старой блокирующей модели. Этот слой не меняет
- * предметную логику: он собирает действия оператора в один понятный маршрут и
- * использует уже существующие методы состояния приложения.
+ * Добавляет переходные операторские компоненты, которые ещё не перенесены в
+ * декларативный Vue-шаблон. Базовые тексты и основная структура уже находятся
+ * в index.html и здесь повторно не переписываются.
  */
 export function installOperatorFlowMarkup() {
     if (document.documentElement.dataset[FLOW_READY] === '1') return;
     document.documentElement.dataset[FLOW_READY] = '1';
-    document.title = 'Planner Solving — рабочее место оператора';
-
-    text('.topbar .version', 'Рабочее место оператора');
-    text('.upload-header .page-title', 'Сформировать расписание');
-    text(
-        '.upload-header .page-lead',
-        'Загрузите книги расписаний. Система сама выберет безопасную разметку, сформирует результат из пригодных данных и покажет всё, что стоит уточнить. Любой файл можно исправить на месте без повторной загрузки остальных.'
-    );
-    text('.dropzone h2', 'Добавить файлы расписаний');
-    text('.dropzone p', 'Можно выбрать несколько книг с разной структурой и оформлением.');
-
-    const chips = document.querySelectorAll('.steps .step-chip');
-    if (chips[0]) chips[0].textContent = '1  Исходные файлы';
-    if (chips[1]) chips[1].textContent = '2  Проверка и исправление';
-    if (chips[2]) chips[2].textContent = '3  Готовый результат';
 
     const uploadCard = document.querySelector('.upload-card');
     insertOnce(uploadCard, 'beforeend', '.operator-principles', `
@@ -127,23 +103,9 @@ export function installOperatorFlowMarkup() {
         <button type="button" class="file-action remove" :disabled="fileMutationBusy" @click.stop="removeSessionFile(file)">Убрать</button>
       </div>`);
 
-    const validateButton = document.querySelector('.settings-section .button-stack .btn-primary');
-    if (validateButton) validateButton.textContent = 'Пересчитать этот файл';
-    const previewButton = document.querySelector('.settings-section .button-stack .btn-secondary');
-    if (previewButton) previewButton.textContent = 'Обновить рабочий лист';
-
-    const bottomNote = document.querySelector('.bottom-note');
-    if (bottomNote) {
-        bottomNote.textContent = 'Результат создаётся из пригодных данных. Спорные решения сохраняются в отчёте и остаются доступными для исправления.';
-    }
     const bottomPrimary = document.querySelector('.bottom-actions .btn-primary');
-    if (bottomPrimary) {
-        bottomPrimary.innerHTML = "{{ generateBusy ? 'Формируем…' : 'Сформировать результат' }}";
-        bottomPrimary.setAttribute(':disabled', 'generateBusy || fileMutationBusy || !enabledFiles.length');
-    }
+    bottomPrimary?.setAttribute(':disabled', 'generateBusy || fileMutationBusy || !enabledFiles.length');
 
-    const resultTitle = document.querySelector('.result-card .page-title');
-    if (resultTitle) resultTitle.textContent = 'Результат сформирован';
     const resultLead = document.querySelector('.result-card .page-lead');
     insertOnce(resultLead, 'afterend', '.result-next-step', `
       <p class="result-next-step">Скачайте готовые файлы или вернитесь к любому исходнику: текущий сеанс и все ручные правки сохранены.</p>`);
@@ -160,9 +122,6 @@ export function installOperatorFlowMarkup() {
     const resultActions = document.querySelector('.result-card > .button-row');
     insertOnce(resultActions, 'afterbegin', '.return-to-editor', `
       <button type="button" class="btn btn-secondary return-to-editor" @click="step=2">Вернуться к проверке</button>`);
-
-    const warningTitle = document.querySelector('.warning-box > strong');
-    if (warningTitle) warningTitle.textContent = 'Что система решила автоматически';
 
     const appRoot = document.querySelector('#app');
     insertOnce(appRoot, 'beforeend', '.teacher-mapping-backdrop', `
