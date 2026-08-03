@@ -16,7 +16,8 @@
         '/assets/platform.css',
         '/assets/platform-overrides.css',
         '/assets/sample-layout.css',
-        '/assets/workspace-editor.css'
+        '/assets/workspace-editor.css',
+        '/assets/operator-flow.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
@@ -74,12 +75,30 @@
         }
     }, 10000);
 
-    import('/assets/planner-app.js')
-        .then(application => {
+    Promise.allSettled([
+        import('/assets/operator-flow.js'),
+        import('/assets/planner-app.js')
+    ])
+        .then(results => {
+            const operatorFlowResult = results[0];
+            const applicationResult = results[1];
+            if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
+
+            const operatorFlow = operatorFlowResult.status === 'fulfilled'
+                ? operatorFlowResult.value
+                : {};
+            if (operatorFlowResult.status !== 'fulfilled') {
+                console.warn('[planner] operator flow enhancements were not loaded', operatorFlowResult.reason);
+            }
+
+            operatorFlow.installOperatorFlowMarkup?.();
+            const application = applicationResult.value;
             if (typeof application.mount !== 'function') {
                 throw new TypeError('Модуль planner-app.js не экспортирует функцию mount().');
             }
             application.mount();
+            operatorFlow.installOperatorFlowRuntime?.();
+
             boot.mounted = true;
             boot.mountedAt = Date.now();
             window.clearTimeout(watchdog);
