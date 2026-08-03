@@ -19,8 +19,34 @@ def test_schedule_draft_is_saved_server_side_and_restored_after_reload():
     assert "layouts" in draft
     assert "keepalive: true" in draft
     assert "beforeunload" in draft
+    assert "rememberSession(schedule.sessionId.value" in draft
     assert "restoreDraft" in planner
     assert "reactiveWorkspace.refreshWorkspace(restored.workspace_id" in planner
+
+
+def test_draft_wraps_streaming_interaction_instead_of_shadowing_it():
+    draft = read("schedule-draft.js")
+    planner = read("planner-app.js")
+    interaction_create = planner.index("const interaction = createInteractionState")
+    draft_create = planner.index("const scheduleDraft = createScheduleDraftState")
+    interaction_spread = planner.index("...interaction")
+    draft_spread = planner.index("...scheduleDraft")
+    assert interaction_create < draft_create
+    assert interaction_spread < draft_spread
+    assert "interaction\n            );" in planner or "interaction\r\n            );" in planner
+    assert "interaction?.handleFileInput || schedule.handleFileInput" in draft
+    assert "interaction?.handleDrop || schedule.handleDrop" in draft
+    assert "interaction?.resetWorkflow || schedule.resetWorkflow" in draft
+    assert "interaction?.rematchTemplates" in draft
+    assert "interaction?.clearRangeSelection" in draft
+
+
+def test_all_unreadable_files_still_open_a_recoverable_session():
+    draft = read("schedule-draft.js")
+    assert "exposeUnparsedSession" in draft
+    assert "if (schedule.step.value === 1) schedule.step.value = 2" in draft
+    assert "Восстановлен сеанс с неразобранными файлами" in draft
+    assert "Замените нужный файл кнопкой «Выбрать другой»" in draft
 
 
 def test_result_can_return_to_the_problem_file_without_deleting_session():
@@ -30,6 +56,7 @@ def test_result_can_return_to_the_problem_file_without_deleting_session():
     assert "returnToCorrections" in draft
     assert "openResultFile" in draft
     assert "schedule.step.value = 2" in draft
+    assert "await schedule.validateCurrent()" in draft
     assert "Вернуться к файлам и правкам" in markup
     assert "Открыть и исправить" in markup
     assert "resultCorrections" in markup
@@ -55,6 +82,7 @@ def test_one_file_can_be_replaced_without_resetting_the_session():
 def test_teacher_mapping_action_opens_the_relevant_sheet_area():
     draft = read("schedule-draft.js")
     assert "action?.type === 'open_teacher_mapping'" in draft
+    assert "interaction?.setSelectionMode?.('legend')" in draft
     assert "schedule.previewRegion.value = 'legend'" in draft
     assert "Проверьте столбцы лектора" in draft
 
