@@ -4,16 +4,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 
+from src.operations_domain import AuthenticatedUser
 from src.schedule_analyzer import ScheduleAnalyzer
 from web.backend.app_context import ApplicationContext
+from web.backend.auth import operator_dependency, viewer_dependency
 from web.backend.errors import ApplicationError, UploadedFileNotFound
 
 
 def build_session_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["analysis"])
+    viewer = viewer_dependency(context)
+    operator = operator_dependency(context)
 
     @router.get("/api/analysis/{session_id}/files/{file_id}/preview")
     def preview_schedule(
@@ -25,6 +29,7 @@ def build_session_router(context: ApplicationContext) -> APIRouter:
         col_start: Optional[int] = Query(None, ge=1),
         col_end: Optional[int] = Query(None, ge=1),
         sheet_name: Optional[str] = Query(None),
+        _: AuthenticatedUser = Depends(viewer),
     ) -> Dict[str, Any]:
         if region not in {"schedule", "legend", "custom"}:
             raise ApplicationError("Неизвестная область предпросмотра.")
@@ -53,12 +58,18 @@ def build_session_router(context: ApplicationContext) -> APIRouter:
             raise ApplicationError(str(exc)) from exc
 
     @router.delete("/api/analysis/{session_id}")
-    def delete_analysis_session(session_id: str) -> Dict[str, str]:
+    def delete_analysis_session(
+        session_id: str,
+        _: AuthenticatedUser = Depends(operator),
+    ) -> Dict[str, str]:
         context.sessions.delete(session_id)
         return {"status": "success"}
 
     @router.get("/api/download/{filename}")
-    def download_file(filename: str) -> FileResponse:
+    def download_file(
+        filename: str,
+        _: AuthenticatedUser = Depends(viewer),
+    ) -> FileResponse:
         safe_name = Path(filename).name
         file_path = (context.paths.output_dir / safe_name).resolve()
         if (
