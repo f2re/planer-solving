@@ -61,8 +61,11 @@ def test_result_can_return_to_the_problem_file_without_deleting_session():
     assert "Открыть и исправить" in markup
     assert "resultCorrections" in markup
     assert "resultProblemFiles" in markup
+    assert "result.warnings?.length" in markup
+    assert "Предупреждения результата" in markup
     assert ".result-corrections-panel" in css
     assert ".analysis-draft-status" in css
+    assert ".result-warning-list" in css
 
 
 def test_one_file_can_be_replaced_without_resetting_the_session():
