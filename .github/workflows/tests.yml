@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
             src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \
             src/platform_store.py src/transactional_platform_store.py src/data_migrations.py \
             tools/migrate.py tools/healthcheck.py tools/service_preflight.py tools/user_admin.py \
-            offline/build_bundle.py offline/verify_bundle.py \
+            offline/build_bundle.py offline/python_runtime.py offline/verify_bundle.py \
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
             web/backend/auth.py web/backend/password_reset_session.py web/backend/frontend_cache.py \
             web/backend/platform_api.py web/backend/errors.py \
@@ -61,6 +61,8 @@ jobs:
           bash -n offline/install_from_archive.sh
           bash -n offline/common.sh
           bash -n offline/install_or_update.sh
+          bash -n offline/python_discovery.sh
+          bash -n offline/verify_bundle.sh
           bash -n offline/runtime.sh
           bash -n offline/doctor.sh
           bash -n offline/rollback.sh
@@ -85,38 +87,74 @@ jobs:
           node --check web/frontend/assets/platform-enhancements.js
           node tests/frontend_runtime_probe.mjs
 
-      - name: Build real offline bundle
-        run: bash offline/build_offline_bundle.sh --output dist
+      - name: Build autonomous runtime bundle
+        run: bash offline/build_offline_bundle.sh --output dist --python "$(command -v python)"
 
       - name: Verify package entrypoint
         run: |
           test -x dist/install-planner-solving.sh
           bash -n dist/install-planner-solving.sh
           test -s dist/README-INSTALL.txt
-          test "$(find dist -maxdepth 1 -name 'planner-solving-offline-*.tar.gz' | wc -l)" -ge 1
+          test "$(find dist -maxdepth 1 -name 'planner-solving-offline-*-runtime.tar.gz' | wc -l)" -eq 1
 
-      - name: Verify offline archive checksum
+      - name: Verify archive checksum
         run: cd dist && sha256sum -c *.tar.gz.sha256
 
-      - name: Test complete offline installation
+      - name: Test Python discovery, installation, repair and update preservation
         run: |
           set -Eeuo pipefail
           install_root="$RUNNER_TEMP/planner-solving-install"
           extract_root="$RUNNER_TEMP/planner-solving-bundle"
-          archive="$(find dist -maxdepth 1 -name 'planner-solving-offline-*.tar.gz' | head -n 1)"
+          archive="$(find dist -maxdepth 1 -name 'planner-solving-offline-*-runtime.tar.gz' | head -n 1)"
           mkdir -p "$extract_root"
           tar -xzf "$archive" -C "$extract_root"
           bundle="$(find "$extract_root" -mindepth 1 -maxdepth 1 -type d -name 'planner-solving-offline-*' | head -n 1)"
-          bash "$bundle/install_or_update.sh" \
-            --install-dir "$install_root" \
-            --service-user "$(id -un)" \
-            --python "$(command -v python)" \
-            --port 18081 \
-            --no-systemd \
-            --yes
-          env \
-            PLANNER_INSTALL_ROOT="$install_root" \
-            PLANNER_PORT=18081 \
+          test -x "$bundle/python-runtime/python"
+
+          env PLANNER_INVOKING_USER="$(id -un)" PLANNER_INVOKING_HOME="$HOME" \
+            bash "$bundle/install_or_update.sh" \
+              --install-dir "$install_root" \
+              --service-user "$(id -un)" \
+              --python bundled \
+              --strict-python \
+              --list-python \
+              --no-systemd
+
+          env PLANNER_INVOKING_USER="$(id -un)" PLANNER_INVOKING_HOME="$HOME" \
+            bash "$bundle/install_or_update.sh" \
+              --install-dir "$install_root" \
+              --service-user "$(id -un)" \
+              --python bundled \
+              --strict-python \
+              --port 18081 \
+              --no-systemd \
+              --yes
+
+          env PLANNER_INSTALL_ROOT="$install_root" PLANNER_PORT=18081 \
+            "$install_root/state/run-service.sh" --check
+          env PLANNER_INSTALL_ROOT="$install_root" \
+            "$install_root/state/python-info.sh" > "$RUNNER_TEMP/python-info.txt"
+          grep -F "Рабочий venv:" "$RUNNER_TEMP/python-info.txt"
+          grep -F "Управляемый runtime:" "$RUNNER_TEMP/python-info.txt"
+
+          printf 'preserve-me\n' > "$install_root/shared/data/installer-preservation-marker"
+          first_release="$(readlink -f "$install_root/current")"
+
+          env PLANNER_INVOKING_USER="$(id -un)" PLANNER_INVOKING_HOME="$HOME" \
+            bash "$bundle/install_or_update.sh" \
+              --install-dir "$install_root" \
+              --service-user "$(id -un)" \
+              --python "$bundle/python-runtime" \
+              --strict-python \
+              --repair \
+              --port 18081 \
+              --no-systemd \
+              --yes
+
+          second_release="$(readlink -f "$install_root/current")"
+          test "$first_release" != "$second_release"
+          test "$(cat "$install_root/shared/data/installer-preservation-marker")" = "preserve-me"
+          env PLANNER_INSTALL_ROOT="$install_root" PLANNER_PORT=18081 \
             "$install_root/state/run-service.sh" --check
           (
             cd "$RUNNER_TEMP"
@@ -128,6 +166,7 @@ jobs:
           test "$(cat "$install_root/current/VERSION")" = "$(cat VERSION)"
           test -x "$install_root/current/.venv/bin/python"
           test -x "$install_root/state/doctor.sh"
+          test -x "$install_root/state/python-info.sh"
 
       - name: Upload installable bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
