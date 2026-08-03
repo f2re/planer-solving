@@ -64,7 +64,7 @@ def schedule_file(tmp_path: Path, name: str, *, semester: str, year: str, months
     )
 
 
-def test_parser_preserves_month_transition_and_detects_second_semester(tmp_path: Path):
+def test_parser_preserves_month_transition_and_keeps_second_semester(tmp_path: Path):
     teachers = teachers_file(tmp_path)
     spring, spring_layout = schedule_file(
         tmp_path,
@@ -90,12 +90,14 @@ def test_parser_preserves_month_transition_and_detects_second_semester(tmp_path:
     assert next(item for item in lessons if item.week == 2 and item.day_of_week == "Пн").month == "Март"
     assert loader.last_report["period"]["months"] == ["Февраль", "Март"]
 
-    wrong = loader.load_group_schedule(str(autumn), "102", autumn_layout)
-    assert wrong == []
-    assert any("разным семестрам" in item for item in loader.last_report["errors"])
+    second = loader.load_group_schedule(str(autumn), "102", autumn_layout)
+    assert second
+    assert loader.last_report["errors"] == []
+    assert any("разные семестры" in item or "разным семестрам" in item for item in loader.last_report["warnings"])
+    assert loader.last_report["blocking"] is False
 
 
-def test_parser_rejects_header_and_month_row_conflict(tmp_path: Path):
+def test_parser_keeps_header_and_month_row_conflict_as_warning(tmp_path: Path):
     teachers = teachers_file(tmp_path)
     path, layout = schedule_file(
         tmp_path,
@@ -106,8 +108,11 @@ def test_parser_rejects_header_and_month_row_conflict(tmp_path: Path):
         dates=[[7, 8, 9, 10, 11, 12]],
     )
     loader = DataLoader(str(teachers))
-    assert loader.load_group_schedule(str(path), "101", layout) == []
-    assert any("Заголовок" in item for item in loader.last_report["errors"])
+    lessons = loader.load_group_schedule(str(path), "101", layout)
+    assert lessons
+    assert loader.last_report["errors"] == []
+    assert any("Заголовок" in item for item in loader.last_report["warnings"])
+    assert loader.last_report["period"]["operator_actions"]
 
 
 def test_summary_and_weekly_export_share_the_exact_source_calendar(tmp_path: Path):
@@ -156,7 +161,7 @@ def test_summary_and_weekly_export_share_the_exact_source_calendar(tmp_path: Pat
     assert "02.03" in str(result["Неделя 2"].cell(11, 5).value)
 
 
-def test_parser_rolls_month_inside_one_week(tmp_path: Path):
+def test_parser_rolls_month_inside_one_week_without_warning_conflict(tmp_path: Path):
     teachers = teachers_file(tmp_path)
     path, layout = schedule_file(
         tmp_path,
@@ -166,7 +171,6 @@ def test_parser_rolls_month_inside_one_week(tmp_path: Path):
         months=["Февраль"],
         dates=[[23, 24, 25, 26, 27, 28]],
     )
-    # Replace the dates with the real leap-year week 26 February–2 March.
     wb = load_workbook(path)
     ws = wb.active
     ws["A2"] = "2023/2024 учебный год"
@@ -180,3 +184,55 @@ def test_parser_rolls_month_inside_one_week(tmp_path: Path):
     assert next(item for item in lessons if item.day_of_week == "Чт").month == "Февраль"
     assert next(item for item in lessons if item.day_of_week == "Пт").month == "Март"
     assert loader.last_report["period"]["months"] == ["Февраль", "Март"]
+    transition = next(item for item in loader.last_report["period"]["issues"] if item["code"] == "week_month_transition")
+    assert transition["severity"] == "info"
+    assert not any("строка месяцев" in warning for warning in loader.last_report["warnings"])
+
+
+def test_bad_layout_is_repaired_and_returned_to_operator(tmp_path: Path):
+    teachers = teachers_file(tmp_path)
+    path, layout = schedule_file(
+        tmp_path,
+        "repair.xlsx",
+        semester="Весенний семестр",
+        year="2025/2026",
+        months=["Февраль"],
+        dates=[[9, 10, 11, 12, 13, 14]],
+    )
+    layout.first_week_col = 20
+    layout.last_week_col = 4
+    layout.week_columns = [20, 4]
+    layout.week_data_columns = [20]
+    layout.week_numbers = []
+    layout.grid_end_row = 2
+
+    loader = DataLoader(str(teachers))
+    lessons = loader.load_group_schedule(str(path), "101", layout)
+    assert lessons
+    report = loader.last_report
+    assert report["errors"] == []
+    assert report["auto_repairs"]
+    assert report["layout_used"]["first_week_col"] <= report["layout_used"]["last_week_col"]
+    assert report["blocking"] is False
+
+
+def test_period_override_is_applied_without_reupload(tmp_path: Path):
+    teachers = teachers_file(tmp_path)
+    path, layout = schedule_file(
+        tmp_path,
+        "override.xlsx",
+        semester="Весенний семестр",
+        year="2025/2026",
+        months=["Февраль"],
+        dates=[[9, 10, 11, 12, 13, 14]],
+    )
+    loader = DataLoader(str(teachers))
+    lessons = loader.load_group_schedule(
+        str(path),
+        "101",
+        layout,
+        period_overrides={"week_day_dates": {"1:Пн": "2026-02-16"}},
+    )
+    monday = next(item for item in lessons if item.day_of_week == "Пн")
+    assert (monday.date_day, monday.month, monday.date_year) == (16, "Февраль", 2026)
+    assert any(item["type"] == "period_override" for item in loader.last_report["auto_repairs"])
