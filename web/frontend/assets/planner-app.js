@@ -1,5 +1,6 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
+import { createScheduleDraftState } from './schedule-draft.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
 import { installPlatformMarkup, createPlatformState } from './platform-ui.js';
 import { installPlatformEnhancements } from './platform-enhancements.js';
@@ -34,6 +35,11 @@ export function mount() {
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
+            const scheduleDraft = createScheduleDraftState(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId
+            );
             const reactiveWorkspace = createReactiveWorkspaceState(addToast, workspace, schedule);
             workspace.loadData = reactiveWorkspace.refreshData;
             workspace.loadSpaces = reactiveWorkspace.refreshSpaces;
@@ -141,9 +147,8 @@ export function mount() {
                                 name,
                                 description: '',
                                 layout,
-                                composite: [],
-                                fingerprint,
-                                comment
+                                comment,
+                                fingerprint
                             }
                         );
                         template = data;
@@ -212,6 +217,10 @@ export function mount() {
                 const success = await platform.submitAuth();
                 if (success) {
                     await reactiveWorkspace.refreshWorkspace(null, { silent: true });
+                    const restored = await scheduleDraft.restoreDraft();
+                    if (restored.restored && restored.workspace_id) {
+                        await reactiveWorkspace.refreshWorkspace(restored.workspace_id, { silent: true });
+                    }
                     reactiveWorkspace.startReactiveSync();
                     await migrateLocalTemplates();
                 }
@@ -220,7 +229,7 @@ export function mount() {
 
             const logout = async () => {
                 reactiveWorkspace.stopReactiveSync();
-                if (schedule.sessionId.value) await schedule.resetWorkflow();
+                if (schedule.sessionId.value) await scheduleDraft.resetWorkflow();
                 await platform.logout();
                 workspace.workspaces.value = [];
                 workspace.teachers.value = [];
@@ -253,6 +262,10 @@ export function mount() {
                 const access = await platform.initAuth();
                 if (access?.setup_access || access?.authenticated) {
                     await reactiveWorkspace.refreshWorkspace(null, { silent: true });
+                    const restored = await scheduleDraft.restoreDraft();
+                    if (restored.restored && restored.workspace_id) {
+                        await reactiveWorkspace.refreshWorkspace(restored.workspace_id, { silent: true });
+                    }
                     reactiveWorkspace.startReactiveSync();
                     await migrateLocalTemplates();
                 }
@@ -261,6 +274,7 @@ export function mount() {
             return {
                 ...workspace,
                 ...schedule,
+                ...scheduleDraft,
                 ...interaction,
                 ...sampleLayout,
                 ...platform,
