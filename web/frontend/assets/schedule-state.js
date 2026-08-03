@@ -44,9 +44,6 @@ export function createScheduleState(addToast, activeWorkspaceId) {
     const checkedFilesCount = computed(() =>
         enabledFiles.value.filter(item => validations[item.file_id]).length
     );
-    // Validation is advisory. A selected readable file may always be sent to
-    // the recovery pipeline; the server will use valid fragments and return a
-    // diagnostic workbook when no lesson can be extracted yet.
     const canGenerate = computed(() => enabledFiles.value.length > 0);
 
     const currentIssues = computed(() => {
@@ -123,6 +120,12 @@ export function createScheduleState(addToast, activeWorkspaceId) {
         if (id) delete validations[id];
     };
     const markDirty = () => markFileDirty(currentFile.value?.file_id);
+    const markPeriodDirty = () => {
+        const validation = currentValidation.value;
+        if (!validation?.report) return;
+        validation.status = 'warning';
+        validation.report.period_overrides_pending = true;
+    };
     const invalidateAll = () => Object.keys(validations).forEach(key => delete validations[key]);
 
     const analyzeFiles = async files => {
@@ -290,19 +293,19 @@ export function createScheduleState(addToast, activeWorkspaceId) {
         const state = ensurePeriodOverrides(currentFile.value?.file_id);
         if (value) state.week_day_dates[slot] = value;
         else delete state.week_day_dates[slot];
-        markDirty();
+        markPeriodDirty();
     };
     const updateWeekMonth = (week, value) => {
         const state = ensurePeriodOverrides(currentFile.value?.file_id);
         if (value) state.week_months[String(week)] = value;
         else delete state.week_months[String(week)];
-        markDirty();
+        markPeriodDirty();
     };
     const clearCurrentPeriodOverrides = () => {
         const state = ensurePeriodOverrides(currentFile.value?.file_id);
         Object.keys(state.week_day_dates).forEach(key => delete state.week_day_dates[key]);
         Object.keys(state.week_months).forEach(key => delete state.week_months[key]);
-        markDirty();
+        markPeriodDirty();
         addToast('Правки дат очищены', 'При следующей проверке снова применится автоматическое восстановление.', 'info');
     };
     const setCalendarPolicy = value => {
@@ -312,17 +315,13 @@ export function createScheduleState(addToast, activeWorkspaceId) {
     const openLayoutCorrection = async action => {
         periodEditorOpen.value = false;
         const field = action?.field;
-        const mode = action?.selection_mode;
         await nextTick();
-        const target = field
-            ? document.querySelector(`[v-model\.number="currentLayout.${field}"], [v-model="currentLayout.${field}"]`)
-            : document.querySelector('.range-editor');
+        const fieldTarget = field
+            ? document.querySelector(`[v-model\\.number="currentLayout.${field}"], [v-model="currentLayout.${field}"]`)
+            : null;
+        const target = fieldTarget || document.querySelector('.range-editor') || document.querySelector('.exact-layout-editor');
         target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         target?.focus?.();
-        if (mode) {
-            const buttons = [...document.querySelectorAll('.range-mode')];
-            buttons.find(button => button.getAttribute('@click')?.includes(`'${mode}'`))?.click();
-        }
         addToast('Правка на месте', action?.label || 'Уточните выделение или координату и пересчитайте файл.', 'info');
     };
 
