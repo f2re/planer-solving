@@ -109,6 +109,46 @@ def _week_dates(base_monday: date, week: int) -> List[date]:
     return [monday + timedelta(days=index) for index in range(len(DAY_NAMES))]
 
 
+def _configured_week_numbers(start: date, end: date) -> List[int]:
+    """Return legacy-compatible sequential weeks for a configured date range."""
+
+    current_monday = start - timedelta(days=start.weekday())
+    weeks: List[int] = []
+    week = 1
+    while current_monday <= end:
+        weeks.append(week)
+        current_monday += timedelta(weeks=1)
+        week += 1
+    return weeks
+
+
+def _period_has_calendar_evidence(period: Mapping[str, Any]) -> bool:
+    """Whether a parser report contains a usable month or exact date scale."""
+
+    return bool((period.get("week_months") or {}) or (period.get("week_day_dates") or {}))
+
+
+def _period_week_numbers(period: Mapping[str, Any]) -> set[int]:
+    """Collect week numbers even from partially populated parser reports."""
+
+    result: set[int] = set()
+    for raw_week in period.get("week_numbers") or []:
+        try:
+            result.add(int(raw_week))
+        except (TypeError, ValueError):
+            continue
+    for raw_week in (period.get("week_months") or {}).keys():
+        try:
+            result.add(int(raw_week))
+        except (TypeError, ValueError):
+            continue
+    for raw_key in (period.get("week_day_dates") or {}).keys():
+        parsed = _parse_slot_key(raw_key)
+        if parsed:
+            result.add(parsed[0])
+    return result
+
+
 def resolve_schedule_calendar(
     lessons: Sequence[Any],
     *,
@@ -195,13 +235,30 @@ def resolve_schedule_calendar(
                 else:
                     add_warning(item["code"], item["message"])
 
-    weeks = sorted({
-        int(week)
+    has_source_evidence = any(
+        _period_has_calendar_evidence(period)
         for _, period in usable_reports
-        for week in (period.get("week_numbers") or [])
-    } | {int(getattr(item, "week")) for item in lessons})
-    if not weeks:
-        add_error("weeks_missing", "В разобранных данных нет учебных недель.")
+    )
+    if has_source_evidence:
+        source_weeks: set[int] = set()
+        for _, period in usable_reports:
+            source_weeks.update(_period_week_numbers(period))
+        # Lessons with a recognizable source month/date may supplement an
+        # older report that did not expose its complete week list.
+        source_weeks.update(
+            int(getattr(item, "week"))
+            for item in lessons
+            if canonical_month(getattr(item, "month", ""))
+            or int(getattr(item, "date_day", 0) or 0)
+        )
+        weeks = sorted(source_weeks)
+        if not weeks:
+            add_error("weeks_missing", "В разобранных данных нет учебных недель.")
+    else:
+        # Backward-compatible fallback: without a reliable Excel calendar,
+        # the workspace range defines both the available weeks and their
+        # dates. This also keeps out-of-range lesson week numbers excluded.
+        weeks = _configured_week_numbers(configured_start, configured_end)
 
     semester_values = {
         str(period.get("semester_kind"))
