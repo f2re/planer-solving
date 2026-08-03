@@ -139,7 +139,18 @@ def build_session_file_router(context: ApplicationContext) -> APIRouter:
             items.append(await _analyze_upload(context, session_id, upload))
         manifest.setdefault("files", []).extend(items)
         manifest["updated_at"] = time.time()
-        context.sessions.save_manifest(session_id, manifest)
+        try:
+            context.sessions.save_manifest(session_id, manifest)
+        except Exception as exc:
+            logger.exception("Cannot append files to session %s", session_id)
+            for item in items:
+                _remove_stored_file(context, session_id, item)
+            raise ApplicationError(
+                "Новые файлы проверены, но сеанс не удалось сохранить. "
+                "Они не добавлены, прежний состав сеанса не изменён.",
+                status_code=500,
+                code="append_commit_failed",
+            ) from exc
         return AnalyzeResponse(
             session_id=session_id,
             files=[_response_file(item) for item in items],
@@ -230,23 +241,35 @@ def build_session_file_router(context: ApplicationContext) -> APIRouter:
         trash_dir.mkdir(parents=True, exist_ok=True)
 
         stored_name = str(item.get("stored_name") or "")
-        trash_name = ""
-        if stored_name:
-            source = (session_dir / stored_name).resolve()
-            if source.parent == session_dir and source.is_file():
-                trash_name = f"{file_id}-{Path(stored_name).name}"
-                os.replace(source, trash_dir / trash_name)
+        source = (session_dir / stored_name).resolve() if stored_name else None
+        trash_name = f"{file_id}-{Path(stored_name).name}" if stored_name else ""
+        trash_path = (trash_dir / trash_name).resolve() if trash_name else None
+        moved = False
+        try:
+            if source and source.parent == session_dir and source.is_file() and trash_path:
+                os.replace(source, trash_path)
+                moved = True
 
-        manifest["files"] = [
-            candidate for candidate in files
-            if not (isinstance(candidate, dict) and candidate.get("file_id") == file_id)
-        ]
-        removed = dict(item)
-        removed["trash_name"] = trash_name
-        removed["removed_at"] = time.time()
-        manifest.setdefault("removed_files", []).append(removed)
-        manifest["updated_at"] = time.time()
-        context.sessions.save_manifest(session_id, manifest)
+            manifest["files"] = [
+                candidate for candidate in files
+                if not (isinstance(candidate, dict) and candidate.get("file_id") == file_id)
+            ]
+            removed = dict(item)
+            removed["trash_name"] = trash_name if moved else ""
+            removed["removed_at"] = time.time()
+            manifest.setdefault("removed_files", []).append(removed)
+            manifest["updated_at"] = time.time()
+            context.sessions.save_manifest(session_id, manifest)
+        except Exception as exc:
+            logger.exception("Cannot remove file %s from session %s", file_id, session_id)
+            if moved and trash_path and trash_path.is_file() and source:
+                os.replace(trash_path, source)
+            raise ApplicationError(
+                "Файл не убран: сеанс не удалось сохранить. Исходник и прежнее состояние восстановлены.",
+                status_code=500,
+                code="remove_commit_failed",
+            ) from exc
+
         next_file_id = next(
             (
                 candidate.get("file_id")
@@ -284,29 +307,48 @@ def build_session_file_router(context: ApplicationContext) -> APIRouter:
         trash_name = str(restored.pop("trash_name", "") or "")
         restored.pop("removed_at", None)
         stored_name = str(restored.get("stored_name") or "")
-        if trash_name and stored_name:
-            session_dir = context.sessions.path(session_id)
-            source = (session_dir / ".trash" / Path(trash_name).name).resolve()
-            target = (session_dir / Path(stored_name).name).resolve()
-            if source.is_file():
-                os.replace(source, target)
-            elif not target.is_file():
+        session_dir = context.sessions.path(session_id)
+        trash_path = (
+            (session_dir / ".trash" / Path(trash_name).name).resolve()
+            if trash_name
+            else None
+        )
+        target_path = (
+            (session_dir / Path(stored_name).name).resolve()
+            if stored_name
+            else None
+        )
+        moved = False
+        try:
+            if trash_path and target_path and trash_path.is_file():
+                os.replace(trash_path, target_path)
+                moved = True
+            elif target_path and not target_path.is_file():
                 restored["stored_name"] = ""
                 restored["analysis"] = None
                 restored["status"] = "error"
                 restored["message"] = "Исходный файл уже недоступен. Замените только эту запись."
 
-        manifest.setdefault("files", []).append(restored)
-        removed_once = False
-        retained: List[Dict[str, Any]] = []
-        for item in reversed(removed_files):
-            if not removed_once and item is removed:
-                removed_once = True
-                continue
-            retained.append(item)
-        manifest["removed_files"] = list(reversed(retained))
-        manifest["updated_at"] = time.time()
-        context.sessions.save_manifest(session_id, manifest)
+            manifest.setdefault("files", []).append(restored)
+            removed_once = False
+            retained: List[Dict[str, Any]] = []
+            for item in reversed(removed_files):
+                if not removed_once and item is removed:
+                    removed_once = True
+                    continue
+                retained.append(item)
+            manifest["removed_files"] = list(reversed(retained))
+            manifest["updated_at"] = time.time()
+            context.sessions.save_manifest(session_id, manifest)
+        except Exception as exc:
+            logger.exception("Cannot restore file %s in session %s", file_id, session_id)
+            if moved and target_path and target_path.is_file() and trash_path:
+                os.replace(target_path, trash_path)
+            raise ApplicationError(
+                "Файл не восстановлен: сеанс не удалось сохранить. Он остаётся в корзине и доступен для повторной попытки.",
+                status_code=500,
+                code="restore_commit_failed",
+            ) from exc
         return _response_file(restored)
 
     return router
