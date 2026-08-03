@@ -21,7 +21,7 @@ def test_managed_install_defaults_to_opt_and_stable_service_launcher():
     assert 'PYTHONNOUSERSITE=1' in installer
     assert 'ReadWritePaths=$SHARED' in installer
     assert 'systemd-analyze verify' in installer
-    assert 'wait_for_health "$PYTHON_BIN" "$PORT" 60' in installer
+    assert 'wait_for_health "$RELEASE/.venv/bin/python" "$PORT" 60' in installer
 
     assert 'CURRENT="$(readlink -f "$INSTALL_ROOT/current")"' in runtime
     assert 'PYTHON="$CURRENT/.venv/bin/python"' in runtime
@@ -56,6 +56,9 @@ def test_service_user_checks_exact_venv_before_switching_release():
     assert 'run_as_user "$SERVICE_USER"' in installer
     assert '--no-index' in installer
     assert '--find-links "$BUNDLE_ROOT/wheelhouse"' in installer
+    assert 'planner-solving-app.pth' in installer
+    assert 'cd "\\$CURRENT"' in installer
+    assert 'export PYTHONPATH="\\$CURRENT"' in installer
     assert 'REQUIRED_MODULES' in preflight
     assert '"uvicorn"' in preflight
     assert '"openpyxl"' in preflight
