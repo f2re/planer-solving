@@ -2,7 +2,7 @@ from src.data_loader import Lesson
 from src.transformer import transform_to_teacher_grid
 
 
-def test_transform_to_teacher_grid_uses_configured_calendar() -> None:
+def test_transform_to_teacher_grid_uses_configured_calendar_and_keeps_unassigned() -> None:
     teachers = [{"short_name": "Иванов И.И.", "full_name": "Иванов Иван Иванович"}]
     lessons = [
         Lesson("522", "MET", "Л/Т.01", "101", 1, "Пн", 1, "Иванов И.И.", 0, "Unknown"),
@@ -28,10 +28,12 @@ def test_transform_to_teacher_grid_uses_configured_calendar() -> None:
     key = ("Иванов И.И.", 1, "Февраль", 9)
     assert result["grid"][key]["groups"] == ["522", "523"]
     assert result["grid"][key]["subject"] == "MET"
-    assert not any(key[0] == "Unknown" for key in result["grid"])
+    unknown_key = ("Не назначен", 2, "Февраль", 10)
+    assert result["grid"][unknown_key]["subject"] == "PHYS"
+    assert "Не назначен" in result["teachers"]
 
 
-def test_lesson_outside_configured_week_range_is_ignored() -> None:
+def test_lesson_outside_configured_week_range_is_retained() -> None:
     lesson = Lesson("522", "MET", "Л", "101", 5, "Пн", 1, "Иванов", 0, "Unknown")
     result = transform_to_teacher_grid(
         [lesson],
@@ -39,4 +41,6 @@ def test_lesson_outside_configured_week_range_is_ignored() -> None:
         start_date_str="2026-02-10",
         end_date_str="2026-02-14",
     )
-    assert result["grid"] == {}
+    assert result["grid"]
+    assert result["weeks"] == [5]
+    assert any(key[0] == "Иванов" for key in result["grid"])

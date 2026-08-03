@@ -1,4 +1,4 @@
-"""Workspace-aware validation, generation and durable processing history."""
+"""Workspace-aware validation, recovery, generation and processing history."""
 from __future__ import annotations
 
 import logging
@@ -9,11 +9,13 @@ from typing import Any, Dict, List, Mapping, Optional
 import uuid
 
 from fastapi import APIRouter, Request
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
 
 from src.data_loader import DataLoader
 from src.exporter import export_to_excel
-from src.schedule_analyzer import ScheduleAnalyzer, ScheduleLayout
-from src.schedule_period import SchedulePeriodError, resolve_schedule_calendar
+from src.schedule_analyzer import ScheduleLayout
+from src.schedule_period import resolve_schedule_calendar
 from src.transformer import transform_to_teacher_grid
 from src.weekly_exporter import generate_weekly_semester_schedule
 from src.workspace_domain import default_semester_settings
@@ -31,6 +33,7 @@ from web.backend.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+UNASSIGNED_TEACHER = "Не назначен"
 
 
 def _model_dict(model: Any) -> Dict[str, Any]:
@@ -71,6 +74,103 @@ def _resolve_archive(context: ApplicationContext, relative: str) -> Path:
     return path
 
 
+def _all_report_messages(report: Mapping[str, Any]) -> List[str]:
+    result: List[str] = []
+    for key in ("errors", "warnings"):
+        for value in report.get(key) or []:
+            text = str(value).strip()
+            if text and text not in result:
+                result.append(text)
+    for item in (report.get("period") or {}).get("issues") or []:
+        text = str(item.get("message") or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _collect_corrections(reports: List[Dict[str, Any]], calendar_report: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    result: List[Dict[str, Any]] = []
+    for report in reports:
+        for item in report.get("auto_repairs") or []:
+            result.append({"file": report.get("file"), **dict(item)})
+    for item in calendar_report.get("corrections") or []:
+        result.append(dict(item))
+    return result
+
+
+def _export_recovery_workbook(
+    output_path: Path,
+    *,
+    workspace_name: str,
+    reports: List[Dict[str, Any]],
+    calendar_report: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Create a useful result even when no lesson rows were recovered."""
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Результат разбора"
+    sheet.append(["Planner Solving", "Результат восстановления расписания"])
+    sheet.append(["Рабочее пространство", workspace_name])
+    sheet.append(["Статус", "Расписание пока не заполнено, но исходники сохранены и доступны для правки без повторной загрузки."])
+    sheet.append([])
+    sheet.append(["Файл", "Группа", "Найдено занятий", "Состояние", "Что можно сделать"])
+    for report in reports:
+        actions = "; ".join(
+            str(item.get("label") or item.get("type") or "Уточнить")
+            for item in report.get("actions") or []
+        )
+        sheet.append([
+            report.get("file", ""),
+            report.get("group", ""),
+            int(report.get("lesson_count") or 0),
+            report.get("status", "требует проверки"),
+            actions or "Открыть файл в редакторе разметки",
+        ])
+    sheet.freeze_panes = "A6"
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["B"].width = 20
+    sheet.column_dimensions["C"].width = 18
+    sheet.column_dimensions["D"].width = 24
+    sheet.column_dimensions["E"].width = 65
+    for cell in sheet[5]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    issues = workbook.create_sheet("Замечания и решения")
+    issues.append(["Файл", "Уровень", "Код", "Сообщение", "Решение"])
+    for report in reports:
+        for message in report.get("errors") or []:
+            issues.append([report.get("file"), "пропущено", "technical", message, "Открыть или заменить только этот файл"])
+        for message in report.get("warnings") or []:
+            issues.append([report.get("file"), "предупреждение", "parser", message, "Исправить на экране разметки или оставить автоисправление"])
+        for item in (report.get("period") or {}).get("issues") or []:
+            issues.append([
+                report.get("file"),
+                item.get("severity", "предупреждение"),
+                item.get("code", "period"),
+                item.get("message", ""),
+                (item.get("action") or {}).get("label") or "Принято автоматически",
+            ])
+    for item in (calendar_report or {}).get("issues") or []:
+        issues.append([
+            "Все файлы",
+            item.get("severity", "предупреждение"),
+            item.get("code", "calendar"),
+            item.get("message", ""),
+            (item.get("action") or {}).get("label") or "Принято автоматически",
+        ])
+    issues.freeze_panes = "A2"
+    for column, width in zip("ABCDE", (28, 18, 30, 90, 55)):
+        issues.column_dimensions[column].width = width
+    for cell in issues[1]:
+        cell.font = Font(bold=True)
+    for row in issues.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+    workbook.save(output_path)
+
+
 def build_schedule_router(context: ApplicationContext) -> APIRouter:
     router = APIRouter(tags=["schedule"])
     repository = context.workspace_repository
@@ -94,45 +194,17 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
         item = context.sessions.manifest_file(manifest, payload.file_id)
         selected_workspace = workspace(payload.workspace_id)
         loader = DataLoader(str(teacher_file(session_id, selected_workspace)))
-        loader.load_group_schedule(
+        lessons = loader.load_group_schedule(
             str(context.sessions.stored_path(session_id, item)),
             group_name=payload.group_name,
             layout=ScheduleLayout.from_dict(payload.layout),
+            period_overrides=payload.period_overrides,
         )
         report = loader.last_report
-        status = "error" if report.get("errors") else (
-            "warning" if report.get("warnings") else "success"
-        )
+        report["generation_allowed"] = True
+        report["used_lesson_count"] = len(lessons)
+        status = "success" if lessons and not report.get("warnings") and not report.get("errors") else "warning"
         return ValidateLayoutResponse(status=status, report=report)
-
-    def finish_failed(
-        run_id: str,
-        *,
-        message: str,
-        details: List[FileUploadDetail],
-        reports: List[Dict[str, Any]],
-        warnings: List[str],
-        actor: Mapping[str, Any],
-    ) -> ScheduleUploadResponse:
-        repository.finish_processing_run(
-            run_id,
-            status="error",
-            lesson_count=0,
-            warning_count=len(warnings),
-            error_count=max(1, sum(1 for item in details if item.status == "error")),
-            selected_templates=[],
-            report={"message": message, "reports": reports},
-            artifacts=[],
-            actor=actor,
-        )
-        return ScheduleUploadResponse(
-            run_id=run_id,
-            status="error",
-            message=message,
-            details=details,
-            reports=reports,
-            warnings=warnings,
-        )
 
     def generate_from_session(
         session_id: str,
@@ -144,8 +216,8 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
         specs = [spec for spec in payload.files if spec.enabled]
         if not specs:
             return ScheduleUploadResponse(
-                status="error",
-                message="Не выбран ни один файл для обработки.",
+                status="warning",
+                message="Не выбран ни один файл. Выберите файл или вернитесь к загрузке.",
             )
 
         selected_workspace = workspace(payload.workspace_id)
@@ -155,7 +227,7 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             actor=actor,
             source_count=len(specs),
         )
-        teachers = selected_workspace.get("teachers", [])
+        teachers = list(selected_workspace.get("teachers", []))
         loader = DataLoader(str(teacher_file(session_id, selected_workspace)))
         lessons_all = []
         details: List[FileUploadDetail] = []
@@ -173,8 +245,10 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     str(stored_path),
                     group_name=spec.group_name,
                     layout=ScheduleLayout.from_dict(spec.layout),
+                    period_overrides=spec.period_overrides,
                 )
                 report = dict(loader.last_report)
+                report["period_overrides"] = dict(spec.period_overrides)
                 report["source_archive"] = _archive_source(
                     context,
                     run_id,
@@ -182,27 +256,23 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     stored_path,
                 )
                 reports.append(report)
-                if report.get("errors"):
-                    status = "error"
-                    message = "; ".join(report["errors"])
-                elif report.get("warnings"):
-                    status = "warning"
-                    message = (
-                        f"Найдено занятий: {len(lessons)}. "
-                        "Требуется проверить предупреждения."
-                    )
-                    lessons_all.extend(lessons)
-                else:
-                    status = "success"
-                    message = f"Найдено занятий: {len(lessons)}."
-                    lessons_all.extend(lessons)
+                lessons_all.extend(lessons)
+                warning_count = len(_all_report_messages(report))
+                status = "success" if lessons and not warning_count else "warning"
+                message = (
+                    f"Использовано занятий: {len(lessons)}."
+                    if lessons
+                    else "Занятия пока не извлечены; файл сохранён для правки на текущем экране."
+                )
+                if warning_count:
+                    message += f" Замечаний: {warning_count}."
                 repository.record_processing_file(
                     run_id,
                     file_id=spec.file_id,
                     filename=item["filename"],
                     file_path=stored_path,
                     group_name=spec.group_name,
-                    layout=spec.layout,
+                    layout=report.get("layout_used") or spec.layout,
                     report=report,
                     template_match=selected_match,
                 )
@@ -212,8 +282,11 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     status=status,
                     message=message,
                     lesson_count=len(lessons),
+                    used=bool(lessons),
+                    warning_count=warning_count,
+                    action_count=len(report.get("actions") or []),
                 ))
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Cannot parse %s in analysis session %s",
                     item.get("filename", spec.file_id),
@@ -222,8 +295,12 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                 error_report = {
                     "file": item.get("filename", spec.file_id),
                     "group": spec.group_name,
-                    "errors": ["Внутренняя ошибка парсинга."],
+                    "errors": [f"Файл пропущен из-за технической ошибки: {exc}"],
                     "warnings": [],
+                    "actions": [{"type": "edit_layout", "label": "Повторить разбор этого файла", "blocking": False}],
+                    "status": "skipped",
+                    "blocking": False,
+                    "period_overrides": dict(spec.period_overrides),
                 }
                 try:
                     error_report["source_archive"] = _archive_source(
@@ -248,132 +325,121 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                 details.append(FileUploadDetail(
                     file_id=spec.file_id,
                     filename=item["filename"],
-                    status="error",
-                    message="Файл не обработан из-за внутренней ошибки парсинга.",
+                    status="warning",
+                    message="Этот файл пропущен, остальные файлы продолжают обрабатываться.",
                     lesson_count=0,
+                    used=False,
+                    warning_count=1,
+                    action_count=1,
                 ))
 
-        accumulated_warnings = list(loader.warnings)
         settings = selected_workspace.get("settings") or {}
         defaults = default_semester_settings()
         start_date = str(settings.get("schedule_start_date") or defaults["schedule_start_date"])
         end_date = str(settings.get("schedule_end_date") or defaults["schedule_end_date"])
-
-        try:
-            calendar = resolve_schedule_calendar(
-                lessons_all,
-                start_date_str=start_date,
-                end_date_str=end_date,
-                period_reports=reports,
-            )
-        except SchedulePeriodError as exc:
-            period_report = dict(exc.report)
-            period_report.setdefault("file", "Проверка периода")
-            period_report.setdefault("group", "Все загруженные расписания")
-            reports.append(period_report)
-            for warning in exc.warnings:
-                if warning not in accumulated_warnings:
-                    accumulated_warnings.append(warning)
-            reason = "; ".join(exc.errors[:3])
-            if len(exc.errors) > 3:
-                reason += f"; ещё ошибок: {len(exc.errors) - 3}."
-            return finish_failed(
-                run_id,
-                message=f"Формирование остановлено: период расписаний не согласован. {reason}",
-                details=details,
-                reports=reports,
-                warnings=accumulated_warnings,
-                actor=actor,
-            )
-
-        for warning in calendar.warnings:
-            if warning not in accumulated_warnings:
-                accumulated_warnings.append(warning)
-
-        if not lessons_all:
-            return finish_failed(
-                run_id,
-                message="После проверки разметки не найдено ни одного занятия без критических ошибок.",
-                details=details,
-                reports=reports,
-                warnings=accumulated_warnings,
-                actor=actor,
-            )
-        filtered = [
-            lesson for lesson in lessons_all
-            if str(lesson.teacher).strip().casefold() not in {"", "unknown", "none"}
-        ]
-        if not filtered:
-            return finish_failed(
-                run_id,
-                message=(
-                    "Занятия найдены, но преподаватели не определены. "
-                    "Проверьте активное пространство, блок дисциплин и список сотрудников."
-                ),
-                details=details,
-                reports=reports,
-                warnings=accumulated_warnings,
-                actor=actor,
-            )
-
-        transformed = transform_to_teacher_grid(
-            filtered,
-            teachers,
+        calendar = resolve_schedule_calendar(
+            lessons_all,
             start_date_str=start_date,
             end_date_str=end_date,
             period_reports=reports,
-            resolved_calendar=calendar,
+            overrides=payload.calendar_overrides,
         )
+
+        warnings: List[str] = []
+        for warning in [*loader.warnings, *calendar.warnings]:
+            if warning not in warnings:
+                warnings.append(warning)
+        for report in reports:
+            for message in _all_report_messages(report):
+                text = f"{report.get('file', 'Файл')}: {message}"
+                if text not in warnings:
+                    warnings.append(text)
+
         output_id = str(uuid.uuid4())
         filename = f"schedule_{output_id}.xlsx"
         output_path = context.paths.output_dir / filename
-        export_to_excel(transformed, teachers, str(output_path))
-
-        warnings = list(accumulated_warnings)
-        artifacts: List[Dict[str, Any]] = [{"kind": "schedule", "path": output_path}]
         weekly_filename: Optional[str] = None
-        if context.paths.weekly_template.exists():
-            weekly_filename = f"weekly_schedule_{output_id}.xlsx"
-            weekly_path = context.paths.output_dir / weekly_filename
-            try:
-                generate_weekly_semester_schedule(
-                    teachers_config=teachers,
-                    lessons=filtered,
-                    template_path=str(context.paths.weekly_template),
-                    output_path=str(weekly_path),
-                    start_date_str=start_date,
-                    end_date_str=end_date,
-                    period_reports=reports,
-                    resolved_calendar=calendar,
-                )
-                artifacts.append({"kind": "weekly", "path": weekly_path})
-            except Exception:
-                logger.exception(
-                    "Cannot generate weekly schedule for workspace %s",
-                    selected_workspace.get("id"),
-                )
-                weekly_filename = None
-                warnings.append(
-                    "Недельный файл не сформирован из-за внутренней ошибки экспорта."
-                )
+        artifacts: List[Dict[str, Any]] = []
+
+        if lessons_all:
+            export_teachers = list(teachers)
+            unknown_found = False
+            for lesson in lessons_all:
+                if str(lesson.teacher).strip().casefold() in {"", "unknown", "none"}:
+                    lesson.teacher = UNASSIGNED_TEACHER
+                    unknown_found = True
+            if unknown_found and not any(item.get("short_name") == UNASSIGNED_TEACHER for item in export_teachers):
+                export_teachers.append({
+                    "id": -1,
+                    "short_name": UNASSIGNED_TEACHER,
+                    "full_name": UNASSIGNED_TEACHER,
+                    "position": "Требует уточнения оператором",
+                    "rank": "—",
+                    "academic_degree": "",
+                })
+
+            transformed = transform_to_teacher_grid(
+                lessons_all,
+                export_teachers,
+                start_date_str=start_date,
+                end_date_str=end_date,
+                period_reports=reports,
+                resolved_calendar=calendar,
+            )
+            export_to_excel(transformed, export_teachers, str(output_path))
+            artifacts.append({"kind": "schedule", "path": output_path})
+
+            if context.paths.weekly_template.exists():
+                weekly_filename = f"weekly_schedule_{output_id}.xlsx"
+                weekly_path = context.paths.output_dir / weekly_filename
+                try:
+                    generate_weekly_semester_schedule(
+                        teachers_config=export_teachers,
+                        lessons=lessons_all,
+                        template_path=str(context.paths.weekly_template),
+                        output_path=str(weekly_path),
+                        start_date_str=start_date,
+                        end_date_str=end_date,
+                        period_reports=reports,
+                        resolved_calendar=calendar,
+                    )
+                    artifacts.append({"kind": "weekly", "path": weekly_path})
+                except Exception as exc:
+                    logger.exception("Cannot generate weekly schedule")
+                    weekly_filename = None
+                    warnings.append(f"Недельный файл не сформирован: {exc}")
+            else:
+                warnings.append("Недельный файл не сформирован: отсутствует шаблон obrazec/Недельное.xlsx.")
         else:
+            filename = f"schedule_recovery_{output_id}.xlsx"
+            output_path = context.paths.output_dir / filename
+            _export_recovery_workbook(
+                output_path,
+                workspace_name=selected_workspace["name"],
+                reports=reports,
+                calendar_report=calendar.report,
+            )
+            artifacts.append({"kind": "recovery", "path": output_path})
             warnings.append(
-                "Недельный файл не сформирован: отсутствует шаблон obrazec/Недельное.xlsx."
+                "Занятия не извлечены; сформирован диагностический файл. Исходники остаются в текущем сеансе для ручной коррекции."
             )
 
-        has_attention = any(item.status != "success" for item in details) or bool(warnings)
+        corrections = _collect_corrections(reports, calendar.report)
+        has_attention = bool(warnings or corrections or any(not item.used for item in details))
         status = "warning" if has_attention else "success"
         repository.finish_processing_run(
             run_id,
             status=status,
-            lesson_count=len(filtered),
-            warning_count=len(warnings) + sum(1 for item in details if item.status == "warning"),
-            error_count=sum(1 for item in details if item.status == "error"),
+            lesson_count=len(lessons_all),
+            warning_count=len(warnings),
+            error_count=0,
             selected_templates=selected_templates,
             report={
                 "reports": reports,
                 "details": [_model_dict(item) for item in details],
-                "period": transformed["period_report"],
+                "period": calendar.report,
+                "calendar_overrides": dict(payload.calendar_overrides),
+                "corrections": corrections,
             },
             artifacts=artifacts,
             actor=actor,
@@ -384,14 +450,18 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             weekly_filename=weekly_filename,
             status=status,
             message=(
-                f"Расписание пространства «{selected_workspace['name']}» сформировано, "
-                "но часть данных требует внимания."
-                if has_attention
-                else f"Расписание пространства «{selected_workspace['name']}» сформировано."
+                f"Расписание пространства «{selected_workspace['name']}» сформировано. "
+                f"Использовано занятий: {len(lessons_all)}."
+                if lessons_all
+                else (
+                    f"Разбор пространства «{selected_workspace['name']}» завершён. "
+                    "Создан файл с результатами диагностики и действиями оператора."
+                )
             ),
             details=details,
             warnings=warnings,
             reports=reports,
+            corrections=corrections,
         )
 
     @router.post("/api/analysis/{session_id}/generate", response_model=ScheduleUploadResponse)
@@ -442,11 +512,13 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     }
                 },
             })
+            source_report = source.get("report") or {}
             specs.append(GenerateFileSpec(
                 file_id=file_id,
                 group_name=source.get("group_name") or Path(source["filename"]).stem,
-                layout=source.get("layout") or {},
+                layout=source.get("layout") or source_report.get("layout_used") or {},
                 enabled=True,
+                period_overrides=source_report.get("period_overrides") or {},
             ))
         context.sessions.save_manifest(
             session_id,
@@ -458,11 +530,17 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             entity_type="processing_run",
             entity_id=run_id,
             workspace_id=workspace_id,
-            summary="Повтор обработки с прежними исходниками и разметкой",
+            summary="Повтор обработки с прежними исходниками, правками и разметкой",
         )
+        previous_report = previous.get("report") or {}
         return generate_from_session(
             session_id,
-            GenerateScheduleRequest(files=specs, workspace_id=workspace_id),
+            GenerateScheduleRequest(
+                files=specs,
+                workspace_id=workspace_id,
+                calendar_overrides=previous_report.get("calendar_overrides") or {},
+                allow_partial=True,
+            ),
             actor=actor,
         )
 
@@ -474,10 +552,12 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             "group_name": item.group_name,
             "layout": item.analysis["layout"],
             "enabled": True,
-        } for item in analysis.files if item.analysis and item.status != "error"]
+            "period_overrides": {},
+        } for item in analysis.files if item.analysis]
         generation_request = GenerateScheduleRequest(
             files=specs,
             workspace_id=repository.default_workspace_id(),
+            allow_partial=True,
         )
         return generate_from_session(
             analysis.session_id,

@@ -16,6 +16,7 @@ def test_editor_is_fullscreen_reactive_and_supports_shift_selection():
     assert "fitSheetToScreen" in markup
     assert "recalculateNow" in markup
     assert "requestTemplateSave" in markup
+    assert "resetWorkspaceView" in markup
     assert "event.shiftKey" in state
     assert "full_sheet: true" in state
     assert "synchronizeDerivedLayout" in state
@@ -24,6 +25,43 @@ def test_editor_is_fullscreen_reactive_and_supports_shift_selection():
     assert ".sheet-workspace-open .workflow-grid" in css
     assert "position:fixed" in css
     assert "th.row-number.sheet-header-selected" in css
+
+
+def test_editor_view_and_window_positions_are_saved_per_workspace():
+    state = read("editor-workspace.js")
+    assert "planner-editor-view-v" in state
+    assert "workspace.activeWorkspaceId.value" in state
+    assert "localStorage.setItem(viewStorageKey()" in state
+    assert "localStorage.getItem(viewStorageKey())" in state
+    assert "dock.files.x" in state
+    assert "dock.settings.x" in state
+    assert "filesPanelVisible" in state
+    assert "settingsPanelVisible" in state
+    assert "editorControlsVisible" in state
+    assert "sheetZoom" in state
+    assert "liveRecalc" in state
+    assert "beforeunload" in state
+    assert "resetWorkspaceView" in state
+
+
+def test_parser_recovery_is_editable_and_does_not_block_generation():
+    schedule = read("schedule-state.js")
+    markup = read("interaction-markup.js")
+    css = read("parser-recovery.css")
+    assert "const canGenerate = computed(() => enabledFiles.value.length > 0)" in schedule
+    assert "allow_partial: true" in schedule
+    assert "period_overrides" in schedule
+    assert "calendar_overrides" in schedule
+    assert "await validateAll();" in schedule
+    assert "Исправьте разметку файлов с ошибками" not in schedule
+    assert "period-recovery-section" in markup
+    assert "Замечания не блокируют результат" in markup
+    assert "updatePeriodDate" in markup
+    assert "updateWeekMonth" in markup
+    assert "applyRecoveredLayout" in markup
+    assert "Предупреждения не блокируют формирование" in markup
+    assert ".period-recovery-section" in css
+    assert ".period-table" in css
 
 
 def test_workspace_refresh_is_explicit_and_background_synchronized():
@@ -57,3 +95,4 @@ def test_frontend_bootstrap_has_watchdog_and_visible_failure_path():
     assert "Превышено время запуска интерфейса" in source
     assert "window.clearTimeout(watchdog)" in source
     assert "if (window[bootKey]?.started) return" in source
+    assert "/assets/parser-recovery.css" in source

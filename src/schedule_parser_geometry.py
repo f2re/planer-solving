@@ -64,26 +64,78 @@ class ScheduleParserGeometry:
         return mapping
 
     def _weeks(self, matrix: WorksheetMatrix, layout: ScheduleLayout, report: Dict[str, Any]) -> List[Tuple[int, int, int]]:
-        header_cols = layout.resolved_week_columns()
+        """Resolve week columns, scanning and repairing when hints are incomplete."""
+
+        header_cols = [
+            value for value in layout.resolved_week_columns()
+            if 1 <= int(value) <= matrix.worksheet.max_column
+        ]
         data_cols = layout.week_data_columns or [col + layout.week_data_col_offset for col in header_cols]
-        numbers = layout.week_numbers or [value_as_int(matrix.value(layout.weeks_row, col)) for col in header_cols]
-        result = []
+        generated_numbers = any(
+            item.get("field") == "week_numbers" and not item.get("before")
+            for item in report.get("auto_repairs", [])
+        )
+        explicit_numbers = [] if generated_numbers else list(layout.week_numbers or [])
+        numbers = explicit_numbers or [value_as_int(matrix.value(layout.weeks_row, col)) for col in header_cols]
+        result: List[Tuple[int, int, int]] = []
+
+        def append_week(week: Any, header_col: int, data_col: int) -> None:
+            parsed = value_as_int(week)
+            if parsed is None:
+                return
+            minimum = 0 if layout.allow_week_zero else 1
+            if not minimum <= parsed <= 60:
+                return
+            if not 1 <= data_col <= matrix.worksheet.max_column:
+                return
+            item = (int(parsed), int(header_col), int(data_col))
+            if item not in result:
+                result.append(item)
+
         for index, header_col in enumerate(header_cols):
             week = numbers[index] if index < len(numbers) else value_as_int(matrix.value(layout.weeks_row, header_col))
+            data_col = data_cols[index] if index < len(data_cols) else header_col + layout.week_data_col_offset
             if week is None:
                 report["empty_week_columns"].append(header_col)
                 continue
+            append_week(week, header_col, data_col)
+
+        if not result and 1 <= layout.weeks_row <= matrix.worksheet.max_row:
+            for header_col in range(1, matrix.worksheet.max_column + 1):
+                week = value_as_int(matrix.value(layout.weeks_row, header_col))
+                append_week(week, header_col, header_col + layout.week_data_col_offset)
+            if result:
+                report["warnings"].append(
+                    "Столбцы недель найдены сканированием всей указанной строки и применены автоматически."
+                )
+                report.setdefault("auto_repairs", []).append({
+                    "type": "layout_patch",
+                    "field": "week_columns",
+                    "after": [item[1] for item in result],
+                    "reason": "Номера недель обнаружены в строке автоматически.",
+                    "blocking": False,
+                })
+
+        if not result and header_cols:
             minimum = 0 if layout.allow_week_zero else 1
-            if not minimum <= week <= 60:
-                report["warnings"].append(f"В столбце {header_col} найден недопустимый номер недели: {week}.")
-                continue
-            data_col = data_cols[index] if index < len(data_cols) else header_col + layout.week_data_col_offset
-            if not 1 <= data_col <= matrix.worksheet.max_column:
-                report["warnings"].append(f"Столбец данных недели {week} выходит за пределы листа.")
-                continue
-            result.append((int(week), header_col, int(data_col)))
+            for index, header_col in enumerate(header_cols):
+                data_col = data_cols[index] if index < len(data_cols) else header_col + layout.week_data_col_offset
+                append_week(minimum + index, header_col, data_col)
+            if result:
+                report["warnings"].append(
+                    "Номера недель не прочитались из ячеек; временно использована последовательность по порядку столбцов."
+                )
+                report.setdefault("actions", []).append({
+                    "type": "edit_layout",
+                    "field": "week_numbers",
+                    "selection_mode": "weeks",
+                    "label": "Уточнить номера недель",
+                    "blocking": False,
+                })
+
+        result.sort(key=lambda item: (item[0], item[1]))
         if not result:
-            report["errors"].append("В заданном диапазоне не найдено номеров учебных недель.")
+            report["warnings"].append("Не удалось определить ни одного пригодного столбца недели.")
         return result
 
     def _combined(self, value: Any) -> Tuple[str, str, str, List[str]]:

@@ -1,7 +1,7 @@
 export function installInteractionMarkup() {
     const formatNote = document.querySelector('.format-note');
     if (formatNote) {
-        formatNote.textContent = 'Количество и размер расписаний приложением не ограничиваются. Файлы передаются на сервер потоково.';
+        formatNote.textContent = 'Количество и размер расписаний приложением не ограничиваются. Файлы передаются на сервер потоково и остаются в текущем сеансе для правки.';
     }
 
     const uploadBusyBox = document.querySelector('.dropzone [v-else]');
@@ -73,7 +73,7 @@ export function installInteractionMarkup() {
             <div class="template-match-heading">
               <div>
                 <h3>Автоподбор разметки</h3>
-                <p class="section-note">Каждый шаблон запускается на текущем файле. Побеждает вариант, который извлекает больше достоверных занятий и преподавателей при меньшем числе ошибок.</p>
+                <p class="section-note">Каждый шаблон запускается на текущем файле. Побеждает вариант, который извлекает больше достоверных занятий и преподавателей.</p>
               </div>
               <button type="button" class="btn btn-secondary btn-small" @click="rematchTemplates" :disabled="templateMatchBusy">Проверить снова</button>
             </div>
@@ -109,6 +109,94 @@ export function installInteractionMarkup() {
               Проверено файлов: {{ templateMatchProgress.done }} из {{ templateMatchProgress.total }}
             </div>
           </section>`);
+    }
+
+    const validationSection = document.querySelector('.validation-summary')?.closest('.settings-section');
+    if (validationSection && !document.querySelector('.period-recovery-section')) {
+        validationSection.insertAdjacentHTML('beforebegin', `
+          <section v-if="currentValidation?.report" class="settings-section period-recovery-section">
+            <div class="recovery-heading">
+              <div>
+                <h3>Восстановление и правки</h3>
+                <p class="section-note">Замечания не блокируют результат. Автоматика уже использует безопасный вариант; любое решение можно изменить здесь без повторной загрузки.</p>
+              </div>
+              <span class="recovery-ready">Формирование разрешено</span>
+            </div>
+
+            <div v-if="currentAutoRepairs.length" class="repair-card">
+              <div><b>Автоматически исправлено: {{ currentAutoRepairs.length }}</b><small>Результат проверки рассчитан по исправленной разметке.</small></div>
+              <button type="button" class="btn btn-secondary btn-small" @click="applyRecoveredLayout">Показать исправленную разметку</button>
+            </div>
+
+            <div v-if="currentIssues.length" class="recovery-issue-list">
+              <article v-for="(issue,index) in currentIssues" :key="issue.code + '-' + index" class="recovery-issue" :class="issue.severity">
+                <span class="recovery-issue-symbol">{{ issue.severity === 'info' ? '✓' : '!' }}</span>
+                <div><b>{{ issue.message }}</b><small>{{ issue.resolution === 'auto' ? 'Решено автоматически' : 'Можно уточнить вручную' }}</small></div>
+                <button v-if="issue.action && Object.keys(issue.action).length" type="button" class="btn btn-secondary btn-small" @click="applyParserAction(issue.action)">{{ issue.action.label || 'Изменить' }}</button>
+              </article>
+            </div>
+
+            <div v-if="currentActions.length" class="button-row recovery-actions">
+              <button v-for="(action,index) in currentActions" :key="action.type + '-' + index" type="button" class="btn btn-secondary btn-small" @click="applyParserAction(action)">{{ action.label || 'Уточнить' }}</button>
+            </div>
+
+            <button type="button" class="period-editor-toggle" @click="periodEditorOpen=!periodEditorOpen">
+              <span><b>Календарь и переходы месяцев</b><small>Проверить или изменить отдельную неделю и дату</small></span>
+              <span>{{ periodEditorOpen ? 'Свернуть' : 'Открыть' }}</span>
+            </button>
+
+            <div v-if="periodEditorOpen" class="period-editor">
+              <label class="period-policy">
+                <span>Как выбирать календарь всего результата</span>
+                <select class="control" :value="calendarOverrides.policy" @change="setCalendarPolicy($event.target.value)">
+                  <option value="auto">Автоматически: точные даты → подписи месяцев → период пространства</option>
+                  <option value="source">Приоритет фактических дат Excel</option>
+                  <option value="workspace">Приоритет периода рабочего пространства</option>
+                </select>
+              </label>
+
+              <div v-if="currentWeekMonthRows.length" class="period-table-wrap">
+                <table class="period-table">
+                  <thead><tr><th>Неделя</th><th>Распознано</th><th>Ручная подпись</th></tr></thead>
+                  <tbody><tr v-for="row in currentWeekMonthRows" :key="'m-' + row.week">
+                    <td><b>{{ row.week }}</b></td>
+                    <td>{{ row.detected || '—' }}</td>
+                    <td><select class="control" :value="row.value" @change="updateWeekMonth(row.week,$event.target.value)"><option value="">Автоматически</option><option v-for="month in monthOptions" :key="month" :value="month">{{ month }}</option></select></td>
+                  </tr></tbody>
+                </table>
+              </div>
+
+              <div v-if="currentPeriodRows.length" class="period-table-wrap date-table-wrap">
+                <table class="period-table">
+                  <thead><tr><th>Неделя</th><th>День</th><th>Распознано</th><th>Ручная дата</th></tr></thead>
+                  <tbody><tr v-for="row in currentPeriodRows" :key="row.slot">
+                    <td><b>{{ row.week }}</b></td>
+                    <td>{{ row.dayName }}</td>
+                    <td>{{ row.detectedLabel }}</td>
+                    <td><input class="control" type="date" :value="row.value" @change="updatePeriodDate(row.slot,$event.target.value)"></td>
+                  </tr></tbody>
+                </table>
+              </div>
+              <div v-if="!currentPeriodRows.length" class="period-empty">Точные даты не распознаны. Укажите строку дат в разметке либо оставьте восстановление по месяцу и периоду пространства.</div>
+              <div class="button-row">
+                <button type="button" class="btn btn-primary btn-small" @click="validateCurrent">Применить и пересчитать</button>
+                <button type="button" class="btn btn-secondary btn-small" @click="clearCurrentPeriodOverrides">Очистить ручные даты</button>
+              </div>
+            </div>
+          </section>`);
+    }
+
+    const validationTitle = document.querySelector('.validation-summary > strong');
+    if (validationTitle) {
+        validationTitle.textContent = "{{ currentValidation.report.lesson_count ? (currentValidation.status === 'success' ? 'Разметка готова' : 'Разметка готова с подсказками') : 'Нужно указать область занятий' }}";
+    }
+    document.querySelectorAll('.validation-summary .diagnostic.error').forEach(item => {
+        item.classList.remove('error');
+        item.classList.add('warning');
+    });
+    const bottomNote = document.querySelector('.bottom-note');
+    if (bottomNote) {
+        bottomNote.textContent = 'Выбрано файлов: {{ enabledFiles.length }}. Предупреждения не блокируют формирование: пригодные фрагменты используются, остальные остаются доступными для правки.';
     }
 
     const groupInput = document.querySelector('.file-item .group-input');

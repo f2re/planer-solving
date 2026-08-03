@@ -12,6 +12,7 @@
     for (const href of [
         '/assets/workspaces.css',
         '/assets/interaction.css',
+        '/assets/parser-recovery.css',
         '/assets/platform.css',
         '/assets/platform-overrides.css',
         '/assets/sample-layout.css',

@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 
-import pytest
-
 from src.schedule_period import (
-    SchedulePeriodError,
     build_file_period_report,
     compare_file_periods,
     resolve_schedule_calendar,
@@ -22,7 +19,7 @@ class Lesson:
     date_year: int = 0
 
 
-def test_file_report_rejects_semester_header_month_conflict():
+def test_file_report_warns_but_keeps_header_month_conflict():
     period, warnings, errors = build_file_period_report(
         week_numbers=[1, 2],
         week_months={1: "Сентябрь", 2: "Сентябрь"},
@@ -32,11 +29,12 @@ def test_file_report_rejects_semester_header_month_conflict():
     )
     assert period["semester_declared"] == "spring"
     assert period["semester_by_months"] == "autumn"
-    assert any("Заголовок" in item for item in errors)
-    assert not warnings
+    assert any("Заголовок" in item for item in warnings)
+    assert errors == []
+    assert period["blocking"] is False
 
 
-def test_cross_file_comparison_detects_different_months_and_semesters():
+def test_cross_file_comparison_returns_editable_warnings():
     spring, _, _ = build_file_period_report(
         week_numbers=[1],
         week_months={1: "Февраль"},
@@ -56,21 +54,24 @@ def test_cross_file_comparison_detects_different_months_and_semesters():
     assert "source_semester_mismatch" in codes
     assert "source_academic_year_mismatch" in codes
     assert "source_week_month_mismatch" in codes
+    assert all(item["blocking"] is False for item in issues)
+    assert all(item["severity"] != "error" for item in issues)
 
 
-def test_february_source_cannot_silently_generate_august():
+def test_february_source_generates_february_even_when_workspace_says_august():
     lessons = [
         Lesson("101", 1, "Пн", 9, "Февраль", "Весенний семестр", "2025/2026", 2026),
         Lesson("101", 2, "Пн", 16, "Февраль", "Весенний семестр", "2025/2026", 2026),
     ]
-    with pytest.raises(SchedulePeriodError) as caught:
-        resolve_schedule_calendar(
-            lessons,
-            start_date_str="2026-08-03",
-            end_date_str="2026-12-31",
-        )
-    assert any("Формирование остановлено" in item for item in caught.value.errors)
-    assert caught.value.report["source_semester"] == "spring"
+    calendar = resolve_schedule_calendar(
+        lessons,
+        start_date_str="2026-08-03",
+        end_date_str="2026-12-31",
+    )
+    assert calendar.date_for(1, "Пн").isoformat() == "2026-02-09"
+    assert calendar.source == "source_dates"
+    assert any(item["code"] == "workspace_semester_mismatch" for item in calendar.report["issues"])
+    assert calendar.report["errors"] == []
 
 
 def test_source_dates_define_one_calendar_for_all_exports():
@@ -105,31 +106,35 @@ def test_january_is_part_of_autumn_semester():
     assert not warnings
 
 
-def test_week_month_row_is_checked_against_explicit_dates():
-    _, _, errors = build_file_period_report(
+def test_week_month_row_is_advisory_when_explicit_dates_exist():
+    period, warnings, errors = build_file_period_report(
         week_numbers=[1],
         week_months={1: "Август"},
         week_day_dates={(1, "Пн"): {"month": "Февраль", "day": 9, "year": 2026}},
         semester_info="Весенний семестр",
         year_info="2025/2026",
     )
-    assert any("строка месяцев" in item for item in errors)
+    assert errors == []
+    assert warnings
+    assert period["week_day_dates"]["1:Пн"]["month"] == "Февраль"
+    assert any(item.get("action") for item in period["issues"])
 
 
-def test_same_semester_but_wrong_academic_year_is_blocked():
+def test_same_semester_but_wrong_workspace_year_is_not_blocked():
     lessons = [
         Lesson("101", 1, "Пн", 9, "Февраль", "Весенний семестр", "2025/2026", 2026),
     ]
-    with pytest.raises(SchedulePeriodError) as caught:
-        resolve_schedule_calendar(
-            lessons,
-            start_date_str="2027-02-01",
-            end_date_str="2027-06-30",
-        )
-    assert any("учебный год" in item for item in caught.value.errors)
+    calendar = resolve_schedule_calendar(
+        lessons,
+        start_date_str="2027-02-01",
+        end_date_str="2027-06-30",
+    )
+    assert calendar.date_for(1, "Пн").isoformat() == "2026-02-09"
+    assert calendar.report["blocking"] is False
+    assert calendar.report["errors"] == []
 
 
-def test_period_errors_from_file_reports_block_batch_generation():
+def test_period_warnings_from_file_reports_do_not_block_batch_generation():
     period, _, _ = build_file_period_report(
         week_numbers=[1],
         week_months={1: "Сентябрь"},
@@ -137,12 +142,67 @@ def test_period_errors_from_file_reports_block_batch_generation():
         semester_info="Весенний семестр",
         year_info="2025/2026",
     )
-    report = {"file": "wrong.xlsx", "errors": ["period"], "period": period}
-    with pytest.raises(SchedulePeriodError) as caught:
-        resolve_schedule_calendar(
-            [],
-            start_date_str="2026-02-01",
-            end_date_str="2026-06-30",
-            period_reports=[report],
-        )
-    assert any("Заголовок" in item for item in caught.value.errors)
+    report = {"file": "wrong.xlsx", "warnings": ["period"], "period": period}
+    calendar = resolve_schedule_calendar(
+        [],
+        start_date_str="2026-02-01",
+        end_date_str="2026-06-30",
+        period_reports=[report],
+    )
+    assert calendar.report["blocking"] is False
+    assert calendar.report["errors"] == []
+    assert calendar.weeks == [1]
+
+
+def test_month_change_inside_week_is_normal_calendar_transition():
+    period, warnings, errors = build_file_period_report(
+        week_numbers=[1],
+        week_months={1: "Февраль"},
+        week_day_dates={
+            (1, "Пн"): {"month": "Февраль", "day": 26, "year": 2024},
+            (1, "Вт"): {"month": "Февраль", "day": 27, "year": 2024},
+            (1, "Ср"): {"month": "Февраль", "day": 28, "year": 2024},
+            (1, "Чт"): {"month": "Февраль", "day": 29, "year": 2024},
+            (1, "Пт"): {"month": "Март", "day": 1, "year": 2024},
+            (1, "Сб"): {"month": "Март", "day": 2, "year": 2024},
+        },
+        semester_info="Весенний семестр",
+        year_info="2023/2024",
+    )
+    assert errors == []
+    assert not any("не совпадает" in warning for warning in warnings)
+    transition = next(item for item in period["issues"] if item["code"] == "week_month_transition")
+    assert transition["severity"] == "info"
+    assert transition["resolution"] == "auto"
+    assert period["week_transitions"] == [{"week": 1, "months": ["Февраль", "Март"], "sequential": True}]
+
+
+def test_adjacent_month_labels_for_same_week_are_not_a_conflict():
+    february, _, _ = build_file_period_report(
+        week_numbers=[1],
+        week_months={1: "Февраль"},
+        week_day_dates={(1, "Пт"): {"month": "Март", "day": 1, "year": 2024}},
+        semester_info="Весенний семестр",
+        year_info="2023/2024",
+    )
+    march, _, _ = build_file_period_report(
+        week_numbers=[1],
+        week_months={1: "Март"},
+        week_day_dates={(1, "Пт"): {"month": "Март", "day": 1, "year": 2024}},
+        semester_info="Весенний семестр",
+        year_info="2023/2024",
+    )
+    issues = compare_file_periods(february, march, reference_label="a.xlsx", current_label="b.xlsx")
+    assert not any(item["code"] in {"source_week_month_mismatch", "source_date_mismatch"} for item in issues)
+    assert all(item["blocking"] is False for item in issues)
+
+
+def test_operator_override_has_priority():
+    lessons = [Lesson("101", 1, "Пн", 9, "Февраль", "Весенний семестр", "2025/2026", 2026)]
+    calendar = resolve_schedule_calendar(
+        lessons,
+        start_date_str="2026-02-01",
+        end_date_str="2026-06-30",
+        overrides={"week_day_dates": {"1:Пн": "2026-02-16"}},
+    )
+    assert calendar.date_for(1, "Пн").isoformat() == "2026-02-16"

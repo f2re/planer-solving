@@ -1,11 +1,11 @@
-"""Excel schedule parser driven by an operator-confirmed exact layout."""
+"""Excel schedule parser driven by an operator-editable exact layout."""
 from __future__ import annotations
 
 from collections import defaultdict
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 from openpyxl import load_workbook
 
@@ -52,6 +52,25 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
             )
         )
 
+    @staticmethod
+    def _parse_override_slot(value: Any) -> Optional[Tuple[int, str]]:
+        try:
+            raw_week, day_name = str(value).split(":", 1)
+            week = int(raw_week)
+        except (TypeError, ValueError):
+            return None
+        return week, day_name
+
+    @staticmethod
+    def _override_date_parts(value: Any) -> Dict[str, Any]:
+        if isinstance(value, Mapping):
+            return {
+                "day": int(value.get("day") or 0),
+                "month": canonical_month(value.get("month")),
+                "year": int(value.get("year") or 0),
+            }
+        return extract_date_parts(value)
+
     def _source_period(
         self,
         matrix: WorksheetMatrix,
@@ -60,9 +79,11 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
         semester: str,
         year: str,
         report: Dict[str, Any],
+        period_overrides: Optional[Mapping[str, Any]] = None,
     ) -> Dict[Tuple[int, str], Dict[str, Any]]:
-        """Read the source month/date scale before parsing individual lessons."""
+        """Read and gently reconcile the source month/date scale."""
 
+        period_overrides = dict(period_overrides or {})
         header_months: Dict[int, str] = {}
         current_header_month: Optional[str] = None
         for week, header_col, _ in weeks:
@@ -117,8 +138,6 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
                     and header_month == next_month(previous_month)
                     and day <= 15
                 ):
-                    # A missing day near the month boundary can hide the
-                    # numerical rollover. The source month row is the anchor.
                     inferred_month = header_month
 
             if not inferred_month:
@@ -130,6 +149,24 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
             }
             previous_day = day
             previous_month = inferred_month
+
+        for raw_slot, raw_value in (period_overrides.get("week_day_dates") or {}).items():
+            slot = self._parse_override_slot(raw_slot)
+            parts = self._override_date_parts(raw_value)
+            if not slot or not parts.get("month") or not 1 <= int(parts.get("day") or 0) <= 31:
+                continue
+            week_day_dates[slot] = {
+                "day": int(parts["day"]),
+                "month": str(parts["month"]),
+                "year": int(parts.get("year") or 0),
+            }
+            report["auto_repairs"].append({
+                "type": "period_override",
+                "slot": f"{slot[0]}:{slot[1]}",
+                "after": dict(week_day_dates[slot]),
+                "reason": "Применена ручная правка оператора.",
+                "blocking": False,
+            })
 
         date_months_by_week: Dict[int, List[str]] = defaultdict(list)
         for (week, _), item in week_day_dates.items():
@@ -144,13 +181,21 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
                 month = date_months_by_week[week][0]
             if month:
                 week_months[week] = month
+        for raw_week, raw_month in (period_overrides.get("week_months") or {}).items():
+            try:
+                week = int(raw_week)
+            except (TypeError, ValueError):
+                continue
+            month = canonical_month(raw_month)
+            if month:
+                week_months[week] = month
 
-        period, period_warnings, period_errors = build_file_period_report(
+        period, period_warnings, _period_errors = build_file_period_report(
             week_numbers=[week for week, _, _ in weeks],
             week_months=week_months,
             week_day_dates=week_day_dates,
-            semester_info=semester,
-            year_info=year,
+            semester_info=period_overrides.get("semester_info") or semester,
+            year_info=period_overrides.get("year_info") or year,
         )
         period["source_file"] = report["file"]
         period["source_group"] = report["group"]
@@ -162,28 +207,21 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
                 reference_label=previous_label,
                 current_label=report["file"],
             ))
+        period["operator_actions"] = [
+            item.get("action") for item in period["issues"] if item.get("action")
+        ]
         period_warnings.extend(
             item["message"]
             for item in period["issues"]
-            if item["severity"] == "warning" and item["message"] not in period_warnings
-        )
-        period_errors.extend(
-            item["message"]
-            for item in period["issues"]
-            if item["severity"] == "error" and item["message"] not in period_errors
+            if item.get("severity") == "warning" and item["message"] not in period_warnings
         )
 
         report["period"] = period
         report["warnings"].extend(
             message for message in period_warnings if message not in report["warnings"]
         )
-        report["errors"].extend(
-            message for message in period_errors if message not in report["errors"]
-        )
-        # Keep even a conflicting period available to the batch validator, but
-        # use only successful periods as the next comparison reference.
-        if not period_errors:
-            self.loaded_periods.append((report["file"], period))
+        report["actions"].extend(period.get("operator_actions") or [])
+        self.loaded_periods.append((report["file"], period))
         return week_day_dates
 
     def load_group_schedule(
@@ -191,6 +229,7 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
         file_path: str,
         group_name: Optional[str] = None,
         layout: Optional[Union[ScheduleLayout, Dict[str, Any]]] = None,
+        period_overrides: Optional[Mapping[str, Any]] = None,
     ) -> List[Lesson]:
         path = Path(file_path)
         group_name = normalize_text(group_name) or path.stem
@@ -208,33 +247,70 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
             "errors": [],
             "samples": [],
             "period": {},
+            "actions": [],
+            "auto_repairs": [],
+            "layout_used": {},
+            "blocking": False,
         }
         self.last_report = report
         try:
             workbook = load_workbook(path, data_only=True, read_only=False)
         except Exception as exc:
             report["errors"].append(f"Не удалось открыть Excel-файл: {exc}")
+            report["actions"].append({
+                "type": "replace_file",
+                "label": "Выбрать другой файл",
+                "blocking": False,
+            })
+            report["status"] = "skipped"
             return []
+
         if layout is None:
             analysis = ScheduleAnalyzer().analyze(str(path))
             selected = analysis.layout
             report["warnings"].extend(item.message for item in analysis.diagnostics if item.severity != "info")
         else:
             selected = layout if isinstance(layout, ScheduleLayout) else ScheduleLayout.from_dict(layout)
+
         if selected.sheet_name not in workbook.sheetnames:
-            report["errors"].append(f"Лист «{selected.sheet_name}» отсутствует в книге.")
-            return []
+            replacement = workbook.sheetnames[0]
+            report["warnings"].append(
+                f"Лист «{selected.sheet_name}» не найден; автоматически выбран «{replacement}»."
+            )
+            report["auto_repairs"].append({
+                "type": "layout_patch",
+                "field": "sheet_name",
+                "before": selected.sheet_name,
+                "after": replacement,
+                "reason": "Выбран существующий лист книги.",
+                "blocking": False,
+            })
+            selected.sheet_name = replacement
+
         sheet = workbook[selected.sheet_name]
+        selected, repairs = selected.repaired(sheet)
+        report["auto_repairs"].extend(repairs)
+        report["layout_used"] = selected.to_dict()
         matrix = WorksheetMatrix(sheet)
         validation = selected.validate(sheet)
-        report["warnings"].extend(item.message for item in validation if item.severity == "warning")
-        report["errors"].extend(item.message for item in validation if item.severity == "error")
-        if report["errors"]:
-            return []
+        report["warnings"].extend(item.message for item in validation)
+
         semester, year = self._metadata(matrix)
         weeks = self._weeks(matrix, selected, report)
         if not weeks:
+            report["warnings"].append(
+                "Учебные недели пока не распознаны. Исправьте строку или столбцы недель прямо в редакторе."
+            )
+            report["actions"].append({
+                "type": "edit_layout",
+                "field": "weeks_row",
+                "selection_mode": "weeks",
+                "label": "Указать строку и столбцы недель",
+                "blocking": False,
+            })
+            report["status"] = "needs_operator"
             return []
+
         source_dates = self._source_period(
             matrix,
             selected,
@@ -242,10 +318,8 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
             semester,
             year,
             report,
+            period_overrides=period_overrides,
         )
-        if report["errors"]:
-            return []
-
         legend = self._legend(matrix, selected, report)
         lessons: List[Lesson] = []
         unknown: Set[str] = set()
@@ -319,10 +393,30 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
                     lessons.append(lesson)
                     if len(report["samples"]) < 12:
                         report["samples"].append(asdict(lesson))
+
         report["lesson_count"] = len(lessons)
         report["unknown_subjects"] = sorted(unknown)
         if not lessons:
-            report["errors"].append("По заданной разметке не найдено ни одного занятия.")
+            report["warnings"].append(
+                "По текущей разметке занятия не найдены. Файл сохранён в сеансе: поправьте слои или границы на этом же экране."
+            )
+            report["actions"].append({
+                "type": "edit_layout",
+                "field": "grid_start_row",
+                "selection_mode": "grid",
+                "label": "Указать сетку занятий",
+                "blocking": False,
+            })
+            report["status"] = "needs_operator"
         elif report["unknown_teacher_lessons"]:
-            report["warnings"].append(f"Для {report['unknown_teacher_lessons']} занятий не удалось определить преподавателя.")
+            report["warnings"].append(
+                f"Для {report['unknown_teacher_lessons']} занятий преподаватель не определён; они попадут в раздел «Не назначен».")
+            report["actions"].append({
+                "type": "open_teacher_mapping",
+                "label": "Уточнить преподавателей",
+                "blocking": False,
+            })
+            report["status"] = "ready_with_warnings"
+        else:
+            report["status"] = "ready_with_warnings" if report["warnings"] else "ready"
         return lessons

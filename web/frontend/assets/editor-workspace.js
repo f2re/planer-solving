@@ -2,8 +2,11 @@ const { ref, reactive, computed, watch, nextTick, onBeforeUnmount } = Vue;
 
 export { installEditorWorkspaceMarkup } from './editor-workspace-markup.js';
 
+const VIEW_STATE_VERSION = 2;
+
 export function createEditorWorkspaceState(addToast, schedule, interaction, workspace, platform) {
     const sheetWorkspaceOpen = ref(false);
+    const sheetWorkspacePreferred = ref(true);
     const filesPanelVisible = ref(true);
     const settingsPanelVisible = ref(false);
     const editorControlsVisible = ref(false);
@@ -25,9 +28,12 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
     let drag = null;
     let layoutTimer = null;
     let validationTimer = null;
+    let viewSaveTimer = null;
     let previousLayout = null;
     let baselineLayout = '';
     let suppressLayoutWatch = false;
+    let restoringView = false;
+    let viewWasRestored = false;
 
     const copy = value => JSON.parse(JSON.stringify(value || {}));
     const list = value => Array.isArray(value)
@@ -47,8 +53,100 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
     const selectedEditorTemplate = computed(() => workspace.selectedTemplate.value || null);
     const recalcLabel = computed(() => ({
         idle: 'Готово', pending: 'Изменения…', working: 'Пересчитываем…',
-        ready: 'Проверено', warning: 'Есть замечания', error: 'Ошибка'
+        ready: 'Проверено', warning: 'Есть подсказки', error: 'Нужно уточнить'
     }[recalcState.value] || 'Готово'));
+
+    function viewStorageKey() {
+        return `planner-editor-view-v${VIEW_STATE_VERSION}:${workspace.activeWorkspaceId.value || 'default'}`;
+    }
+    function defaultDockState() {
+        return {
+            files: { x: 16, y: 72, width: 290 },
+            settings: { x: Math.max(360, window.innerWidth - 390), y: 72, width: 370 }
+        };
+    }
+    function clampDockPanel(panel, fallback) {
+        const width = Math.max(220, Math.min(620, Number(panel?.width || fallback.width)));
+        return {
+            width,
+            x: Math.max(0, Math.min(Math.max(0, window.innerWidth - width), Number(panel?.x ?? fallback.x))),
+            y: Math.max(48, Math.min(Math.max(48, window.innerHeight - 100), Number(panel?.y ?? fallback.y)))
+        };
+    }
+    function currentViewState() {
+        return {
+            version: VIEW_STATE_VERSION,
+            savedAt: new Date().toISOString(),
+            preferredFullscreen: Boolean(sheetWorkspacePreferred.value),
+            panels: {
+                filesVisible: Boolean(filesPanelVisible.value),
+                settingsVisible: Boolean(settingsPanelVisible.value),
+                controlsVisible: Boolean(editorControlsVisible.value)
+            },
+            zoom: Number(sheetZoom.value),
+            liveRecalc: Boolean(liveRecalc.value),
+            dock: copy(dock)
+        };
+    }
+    function saveViewStateNow() {
+        if (restoringView) return;
+        try {
+            localStorage.setItem(viewStorageKey(), JSON.stringify(currentViewState()));
+            localStorage.setItem('planner-auto-fullscreen', sheetWorkspacePreferred.value ? '1' : '0');
+        } catch (_) {
+            // Private browsing or a full localStorage must not break the editor.
+        }
+    }
+    function scheduleViewSave() {
+        if (restoringView) return;
+        window.clearTimeout(viewSaveTimer);
+        viewSaveTimer = window.setTimeout(saveViewStateNow, 100);
+    }
+    function restoreViewState() {
+        restoringView = true;
+        const defaults = defaultDockState();
+        let stored = null;
+        try {
+            stored = JSON.parse(localStorage.getItem(viewStorageKey()) || 'null');
+        } catch (_) {
+            stored = null;
+        }
+        viewWasRestored = Boolean(stored && stored.version === VIEW_STATE_VERSION);
+        const legacyFullscreen = localStorage.getItem('planner-auto-fullscreen') !== '0';
+        sheetWorkspacePreferred.value = stored?.preferredFullscreen ?? legacyFullscreen;
+        filesPanelVisible.value = stored?.panels?.filesVisible ?? true;
+        settingsPanelVisible.value = stored?.panels?.settingsVisible ?? false;
+        editorControlsVisible.value = stored?.panels?.controlsVisible ?? false;
+        liveRecalc.value = stored?.liveRecalc ?? true;
+        const zoom = Number(stored?.zoom ?? 1);
+        sheetZoom.value = Number.isFinite(zoom) ? Math.max(0.2, Math.min(2.2, zoom)) : 1;
+        Object.assign(dock.files, clampDockPanel(stored?.dock?.files, defaults.files));
+        Object.assign(dock.settings, clampDockPanel(stored?.dock?.settings, defaults.settings));
+        restoringView = false;
+    }
+    function resetWorkspaceView() {
+        try {
+            localStorage.removeItem(viewStorageKey());
+        } catch (_) {
+            // Ignore storage restrictions.
+        }
+        restoringView = true;
+        const defaults = defaultDockState();
+        sheetWorkspacePreferred.value = true;
+        filesPanelVisible.value = true;
+        settingsPanelVisible.value = false;
+        editorControlsVisible.value = false;
+        sheetZoom.value = 1;
+        liveRecalc.value = true;
+        Object.assign(dock.files, defaults.files);
+        Object.assign(dock.settings, defaults.settings);
+        restoringView = false;
+        viewWasRestored = false;
+        saveViewStateNow();
+        addToast('Вид рабочей области сброшен', 'Панели, масштаб и положение окон возвращены к исходным.', 'success');
+        if (sheetWorkspaceOpen.value) fitSheetToScreen();
+    }
+    restoreViewState();
 
     function normalizedSignature() {
         return JSON.stringify(schedule.normalizedLayout(schedule.currentLayout.value || {}));
@@ -108,7 +206,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
             schedule.preview.value = data;
             fullPreviewSheet.value = layout.sheet_name;
         } catch (error) {
-            addToast('Рабочий лист', error.response?.data?.detail || 'Не удалось загрузить лист целиком.', 'error');
+            addToast('Рабочий лист', error.response?.data?.detail || 'Не удалось загрузить лист целиком.', 'warning');
         } finally {
             schedule.previewBusy.value = false;
         }
@@ -123,7 +221,8 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
                 file_id: file.file_id,
                 group_name: file.group_name,
                 layout: schedule.normalizedLayout(schedule.currentLayout.value),
-                workspace_id: workspace.activeWorkspaceId.value
+                workspace_id: workspace.activeWorkspaceId.value,
+                period_overrides: copy(schedule.periodOverrides?.[file.file_id] || {})
             }
         );
         schedule.validations[file.file_id] = data;
@@ -142,22 +241,21 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
                 await schedule.loadPreview();
             }
             const validation = await validateSilently();
-            if (validation?.status === 'error') recalcState.value = 'error';
-            else if (validation?.status === 'warning') recalcState.value = 'warning';
+            const count = validation?.report?.lesson_count || 0;
+            if (!count || validation?.status === 'warning' || validation?.status === 'error') recalcState.value = 'warning';
             else recalcState.value = 'ready';
             if (showToast) {
                 addToast(
                     'Разметка пересчитана',
-                    validation?.status === 'error'
-                        ? (validation.report?.errors || []).join(' ')
-                        : `Распознано занятий: ${validation?.report?.lesson_count || 0}.`,
-                    validation?.status || 'success'
+                    count
+                        ? `Распознано занятий: ${count}. Подсказки не блокируют формирование.`
+                        : 'Занятия пока не найдены. Укажите сетку на текущем экране.',
+                    count ? (validation?.status || 'success') : 'warning'
                 );
             }
-            if (sheetWorkspaceOpen.value && sheetZoom.value === 1) await fitSheetToScreen();
         } catch (error) {
-            recalcState.value = 'error';
-            if (showToast) addToast('Пересчёт', error.response?.data?.detail || 'Не удалось проверить разметку.', 'error');
+            recalcState.value = 'warning';
+            if (showToast) addToast('Пересчёт', error.response?.data?.detail || 'Проверка недоступна, но файл остаётся для правки.', 'warning');
         }
     }
 
@@ -176,23 +274,25 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
         await flushRecalculation(true);
     }
 
-    async function enterSheetWorkspace() {
+    async function enterSheetWorkspace(fromPreference = false) {
         if (!schedule.currentFile.value?.analysis) return;
         sheetWorkspaceOpen.value = true;
-        settingsPanelVisible.value = false;
-        filesPanelVisible.value = true;
+        if (!fromPreference) sheetWorkspacePreferred.value = true;
         document.documentElement.classList.add('sheet-workspace-open');
         await loadFullSheet();
         await nextTick();
-        await fitSheetToScreen();
+        if (!viewWasRestored) await fitSheetToScreen();
         resetLayoutBaseline();
+        scheduleViewSave();
     }
 
-    function closeSheetWorkspace() {
+    function closeSheetWorkspace(rememberClosed = false) {
         sheetWorkspaceOpen.value = false;
+        if (rememberClosed) sheetWorkspacePreferred.value = false;
         document.documentElement.classList.remove('sheet-workspace-open');
         pendingEditorExit.value = false;
         headerAnchor.value = null;
+        scheduleViewSave();
     }
 
     function leaveSheetWorkspace() {
@@ -201,7 +301,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
             requestTemplateSave();
             return;
         }
-        closeSheetWorkspace();
+        closeSheetWorkspace(true);
     }
 
     function zoomInSheet() { sheetZoom.value = Math.min(2.2, Math.round((sheetZoom.value + 0.1) * 10) / 10); }
@@ -220,6 +320,8 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
         const height = Math.max(1, table.scrollHeight);
         const scale = Math.min((wrap.clientWidth - 30) / width, (wrap.clientHeight - 30) / height, 1.4);
         sheetZoom.value = Math.max(0.2, Math.round(scale * 100) / 100);
+        viewWasRestored = true;
+        scheduleViewSave();
     }
 
     function relevantColumns(mode) {
@@ -316,6 +418,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
     function endDockDrag() {
         drag = null;
         window.removeEventListener('pointermove', moveDockDrag);
+        saveViewStateNow();
     }
     function dockPanelStyle(name) {
         if (!sheetWorkspaceOpen.value) return {};
@@ -336,7 +439,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
     }
     function leaveWithoutTemplateSave() {
         templateSaveOpen.value = false;
-        closeSheetWorkspace();
+        closeSheetWorkspace(true);
     }
     async function saveEditorTemplate() {
         if (!smartTemplateName.value || !schedule.currentLayout.value) return;
@@ -362,7 +465,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
             resetLayoutBaseline();
             templateSaveOpen.value = false;
             addToast('Шаблон сохранён', `«${response.data.name}», версия ${response.data.current_revision}.`, 'success');
-            if (pendingEditorExit.value) closeSheetWorkspace();
+            if (pendingEditorExit.value) closeSheetWorkspace(true);
         } catch (error) {
             addToast('Шаблон', error.response?.data?.detail || 'Не удалось сохранить разметку.', 'error');
         } finally {
@@ -405,10 +508,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
         await nextTick();
         resetLayoutBaseline();
         suppressLayoutWatch = false;
-        if (sheetWorkspaceOpen.value) {
-            await loadFullSheet();
-            await fitSheetToScreen();
-        }
+        if (sheetWorkspaceOpen.value) await loadFullSheet();
     });
     watch(() => schedule.currentLayout.value, layout => {
         if (!layout || suppressLayoutWatch) return;
@@ -421,22 +521,47 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
         scheduleRecalculation();
     }, { deep: true });
     watch(() => schedule.step.value, value => {
-        if (value === 2 && localStorage.getItem('planner-auto-fullscreen') !== '0') {
-            window.setTimeout(() => enterSheetWorkspace(), 80);
+        if (value === 2 && sheetWorkspacePreferred.value) {
+            window.setTimeout(() => enterSheetWorkspace(true), 80);
         }
-        if (value !== 2 && sheetWorkspaceOpen.value) closeSheetWorkspace();
+        if (value !== 2 && sheetWorkspaceOpen.value) closeSheetWorkspace(false);
     });
+    watch(() => workspace.activeWorkspaceId.value, () => {
+        restoreViewState();
+        if (sheetWorkspaceOpen.value && !sheetWorkspacePreferred.value) closeSheetWorkspace(false);
+    });
+    watch([
+        filesPanelVisible,
+        settingsPanelVisible,
+        editorControlsVisible,
+        sheetZoom,
+        liveRecalc,
+        sheetWorkspacePreferred,
+        () => dock.files.x,
+        () => dock.files.y,
+        () => dock.files.width,
+        () => dock.settings.x,
+        () => dock.settings.y,
+        () => dock.settings.width
+    ], scheduleViewSave);
 
     const resize = () => {
-        dock.settings.x = Math.min(dock.settings.x, Math.max(0, window.innerWidth - dock.settings.width));
-        if (sheetWorkspaceOpen.value) fitSheetToScreen();
+        const defaults = defaultDockState();
+        Object.assign(dock.files, clampDockPanel(dock.files, defaults.files));
+        Object.assign(dock.settings, clampDockPanel(dock.settings, defaults.settings));
+        scheduleViewSave();
     };
+    const beforeUnload = () => saveViewStateNow();
     window.addEventListener('resize', resize);
+    window.addEventListener('beforeunload', beforeUnload);
     window.addEventListener('pointermove', autoScrollSelection, { passive: true });
     onBeforeUnmount(() => {
+        saveViewStateNow();
         window.clearTimeout(layoutTimer);
         window.clearTimeout(validationTimer);
+        window.clearTimeout(viewSaveTimer);
         window.removeEventListener('resize', resize);
+        window.removeEventListener('beforeunload', beforeUnload);
         window.removeEventListener('pointermove', autoScrollSelection);
         window.removeEventListener('pointermove', moveDockDrag);
         document.documentElement.classList.remove('sheet-workspace-open');
@@ -444,6 +569,7 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
 
     return {
         sheetWorkspaceOpen,
+        sheetWorkspacePreferred,
         filesPanelVisible,
         settingsPanelVisible,
         editorControlsVisible,
@@ -458,12 +584,14 @@ export function createEditorWorkspaceState(addToast, schedule, interaction, work
         smartTemplateName,
         pendingEditorExit,
         selectedEditorTemplate,
+        dock,
         enterSheetWorkspace,
         leaveSheetWorkspace,
         zoomInSheet,
         zoomOutSheet,
         zoomSheetWheel,
         fitSheetToScreen,
+        resetWorkspaceView,
         recalculateNow,
         selectSheetRow,
         selectSheetColumn,

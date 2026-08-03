@@ -1,14 +1,73 @@
-"""Per-file and cross-file validation of academic schedule periods."""
+"""Non-blocking validation of academic schedule periods."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from .schedule_period_values import (
-    DAY_INDEX, DAY_NAMES, MONTH_NAMES, SEMESTER_LABELS,
-    _parse_slot_key, _slot_key, _text, academic_year_from_text,
-    canonical_month, month_number, semester_kind_from_months,
+    DAY_INDEX,
+    DAY_NAMES,
+    SEMESTER_LABELS,
+    _parse_slot_key,
+    _slot_key,
+    _text,
+    academic_year_from_text,
+    canonical_month,
+    month_number,
+    next_month,
+    semester_kind_from_months,
     semester_kind_from_text,
 )
+
+
+def _adjacent_month(left: Any, right: Any) -> bool:
+    left_name = canonical_month(left)
+    right_name = canonical_month(right)
+    return bool(left_name and right_name and (next_month(left_name) == right_name or next_month(right_name) == left_name))
+
+
+def _month_path(values: Sequence[Any]) -> List[str]:
+    """Keep chronological changes while collapsing repeated neighbouring cells."""
+
+    result: List[str] = []
+    for value in values:
+        month = canonical_month(value)
+        if month and (not result or result[-1] != month):
+            result.append(month)
+    return result
+
+
+def _unique_months(values: Sequence[Any]) -> List[str]:
+    """Return each month once, preserving first appearance for summaries."""
+
+    result: List[str] = []
+    for value in values:
+        month = canonical_month(value)
+        if month and month not in result:
+            result.append(month)
+    return result
+
+
+def _is_sequential_month_path(values: Sequence[Any]) -> bool:
+    ordered = _month_path(values)
+    return all(current == previous or next_month(previous) == current for previous, current in zip(ordered, ordered[1:]))
+
+
+def _issue(
+    severity: str,
+    code: str,
+    message: str,
+    *,
+    resolution: str = "review",
+    action: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    return {
+        "severity": severity,
+        "code": code,
+        "message": message,
+        "blocking": False,
+        "resolution": resolution,
+        "action": dict(action or {}),
+    }
 
 
 def build_file_period_report(
@@ -19,7 +78,12 @@ def build_file_period_report(
     semester_info: Any = "",
     year_info: Any = "",
 ) -> Tuple[Dict[str, Any], List[str], List[str]]:
-    """Build a JSON-safe period summary and parser-stage diagnostics."""
+    """Build a JSON-safe period report without rejecting recoverable input.
+
+    The month label above a week is a formatting hint, not a statement that all
+    six days belong to that month. Exact dates and their chronological sequence
+    have higher priority. Any uncertainty is returned as an editable suggestion.
+    """
 
     weeks = sorted({int(value) for value in week_numbers})
     normalized_week_months: Dict[str, str] = {}
@@ -45,77 +109,171 @@ def build_file_period_report(
                 "year": year if year >= 1900 else 0,
             }
 
-    ordered_months: List[str] = []
+    ordered_slots = sorted(
+        normalized_dates.items(),
+        key=lambda item: (
+            (_parse_slot_key(item[0]) or (10_000, ""))[0],
+            DAY_INDEX.get((_parse_slot_key(item[0]) or (0, ""))[1], 99),
+        ),
+    )
+    date_month_path = [item[1]["month"] for item in ordered_slots]
+    ordered_months = _unique_months([
+        *[normalized_week_months.get(str(week)) for week in weeks],
+        *date_month_path,
+    ])
+
+    week_month_sets: Dict[str, List[str]] = {}
+    week_transitions: List[Dict[str, Any]] = []
+    issues: List[Dict[str, Any]] = []
     for week in weeks:
-        month = normalized_week_months.get(str(week))
-        if month and month not in ordered_months:
-            ordered_months.append(month)
-    for key in sorted(normalized_dates, key=lambda item: (_parse_slot_key(item) or (10_000, ""))[0]):
-        month = normalized_dates[key]["month"]
-        if month not in ordered_months:
-            ordered_months.append(month)
+        day_months = [
+            normalized_dates[_slot_key(week, day_name)]["month"]
+            for day_name in DAY_NAMES
+            if _slot_key(week, day_name) in normalized_dates
+        ]
+        header = normalized_week_months.get(str(week))
+        month_set = _unique_months([header, *day_months])
+        week_month_sets[str(week)] = month_set
+
+        distinct_dates = _month_path(day_months)
+        if len(distinct_dates) > 1:
+            sequential = _is_sequential_month_path(distinct_dates)
+            week_transitions.append({
+                "week": week,
+                "months": distinct_dates,
+                "sequential": sequential,
+            })
+            if sequential:
+                issues.append(_issue(
+                    "info",
+                    "week_month_transition",
+                    (
+                        f"Неделя {week} переходит из {distinct_dates[0].lower()} в "
+                        f"{distinct_dates[-1].lower()}. Это нормальный календарный переход; "
+                        "даты приняты автоматически."
+                    ),
+                    resolution="auto",
+                ))
+            else:
+                issues.append(_issue(
+                    "warning",
+                    "week_month_order_uncertain",
+                    f"В неделе {week} месяцы идут необычно: {', '.join(distinct_dates)}.",
+                    action={
+                        "type": "edit_period",
+                        "week": week,
+                        "label": "Проверить даты этой недели",
+                    },
+                ))
+
+        if header and day_months and header not in day_months:
+            if any(_adjacent_month(header, value) for value in day_months):
+                issues.append(_issue(
+                    "info",
+                    "month_header_boundary",
+                    (
+                        f"Подпись «{header}» над неделей {week} относится к границе месяцев. "
+                        "Точные даты имеют приоритет."
+                    ),
+                    resolution="auto",
+                ))
+            else:
+                issues.append(_issue(
+                    "warning",
+                    "week_month_date_mismatch",
+                    (
+                        f"Подпись месяца над неделей {week} — «{header}», а даты относятся к: "
+                        f"{', '.join(_unique_months(day_months))}. Использованы точные даты."
+                    ),
+                    resolution="auto",
+                    action={
+                        "type": "edit_period",
+                        "week": week,
+                        "label": "Уточнить месяц или даты",
+                    },
+                ))
 
     declared = semester_kind_from_text(semester_info)
-    derived = semester_kind_from_months(ordered_months)
+    derived = semester_kind_from_months(date_month_path or ordered_months)
     academic_year, _ = academic_year_from_text(f"{year_info} {semester_info}")
-    issues: List[Dict[str, str]] = []
-
-    def issue(severity: str, code: str, message: str) -> None:
-        issues.append({"severity": severity, "code": code, "message": message})
 
     if derived == "mixed":
-        issue(
-            "error",
-            "mixed_semester_months",
-            "В одном исходном расписании одновременно обнаружены месяцы весеннего и осеннего семестров.",
-        )
+        if _is_sequential_month_path(date_month_path or ordered_months):
+            issues.append(_issue(
+                "info",
+                "semester_boundary_sequence",
+                "Календарь последовательно пересекает условную границу семестров; даты сохранены без блокировки.",
+                resolution="auto",
+            ))
+        else:
+            issues.append(_issue(
+                "warning",
+                "mixed_semester_months",
+                "В исходном расписании обнаружены месяцы разных условных семестров.",
+                action={
+                    "type": "calendar_policy",
+                    "value": "source",
+                    "label": "Использовать последовательность дат Excel",
+                },
+            ))
     elif declared != "unknown" and derived not in {"unknown", declared}:
-        issue(
-            "error",
+        issues.append(_issue(
+            "warning",
             "semester_month_mismatch",
-            f"Заголовок указывает {SEMESTER_LABELS[declared]} семестр, а месяцы относятся к {SEMESTER_LABELS[derived]} семестру.",
-        )
-    missing_month_weeks = [week for week in weeks if str(week) not in normalized_week_months]
+            (
+                f"Заголовок указывает {SEMESTER_LABELS[declared]} семестр, а даты больше похожи на "
+                f"{SEMESTER_LABELS[derived]}. Для результата использована фактическая последовательность дат."
+            ),
+            resolution="auto",
+            action={
+                "type": "calendar_policy",
+                "value": "source",
+                "label": "Оставить календарь исходного файла",
+            },
+        ))
+
+    missing_month_weeks = [week for week in weeks if not week_month_sets.get(str(week))]
     if not ordered_months:
-        issue(
+        issues.append(_issue(
             "warning",
             "months_not_found",
-            "Месяцы исходного расписания не определены. Перед формированием необходимо проверить строку месяцев и даты.",
-        )
+            "Месяцы не распознаны; календарь будет восстановлен по периоду рабочего пространства.",
+            resolution="auto",
+            action={
+                "type": "calendar_policy",
+                "value": "workspace",
+                "label": "Использовать период пространства",
+            },
+        ))
     elif missing_month_weeks:
         preview = ", ".join(map(str, missing_month_weeks[:8]))
         suffix = "…" if len(missing_month_weeks) > 8 else ""
-        issue(
+        issues.append(_issue(
             "warning",
             "month_gaps",
-            f"Не удалось определить месяц для недель: {preview}{suffix}.",
-        )
-    for week in weeks:
-        header_month = normalized_week_months.get(str(week))
-        date_months = {
-            item["month"]
-            for key, item in normalized_dates.items()
-            if (_parse_slot_key(key) or (None, None))[0] == week
-        }
-        if header_month and date_months and header_month not in date_months:
-            issue(
-                "error",
-                "week_month_date_mismatch",
-                (
-                    f"Для недели {week} строка месяцев указывает «{header_month}», "
-                    f"а строка дат относится к: {', '.join(sorted(date_months))}."
-                ),
-            )
+            f"Для недель {preview}{suffix} месяц будет достроен по соседним датам.",
+            resolution="auto",
+        ))
 
     expected_dates = len(weeks) * len(DAY_NAMES)
     if expected_dates and not normalized_dates:
-        issue(
+        issues.append(_issue(
             "warning",
             "dates_not_found",
-            "Даты дней недели не распознаны; календарь можно будет проверить только по строке месяцев.",
-        )
+            "Строка дат не распознана; будет использована строка месяцев или период пространства.",
+            resolution="auto",
+            action={
+                "type": "edit_layout",
+                "field": "date_row_offset",
+                "label": "Уточнить строку дат",
+            },
+        ))
 
-    effective_semester = declared if declared != "unknown" else (derived if derived != "mixed" else "unknown")
+    effective_semester = (
+        derived if derived in {"spring", "autumn"}
+        else declared if declared in {"spring", "autumn"}
+        else "unknown"
+    )
     if not academic_year:
         explicit_years = sorted({
             int(item.get("year") or 0)
@@ -134,17 +292,12 @@ def build_file_period_report(
                 ) else source_year
                 academic_year = f"{first_year}/{first_year + 1}"
 
-    ordered_slots = sorted(
-        normalized_dates.items(),
-        key=lambda item: (
-            (_parse_slot_key(item[0]) or (10_000, ""))[0],
-            DAY_INDEX.get((_parse_slot_key(item[0]) or (0, ""))[1], 99),
-        ),
-    )
     period = {
         "week_numbers": weeks,
         "week_months": normalized_week_months,
+        "week_month_sets": week_month_sets,
         "week_day_dates": normalized_dates,
+        "week_transitions": week_transitions,
         "months": ordered_months,
         "semester_kind": effective_semester,
         "semester_declared": declared,
@@ -158,10 +311,11 @@ def build_file_period_report(
         "first_source_date": ({"slot": ordered_slots[0][0], **ordered_slots[0][1]} if ordered_slots else None),
         "last_source_date": ({"slot": ordered_slots[-1][0], **ordered_slots[-1][1]} if ordered_slots else None),
         "issues": issues,
+        "operator_actions": [item["action"] for item in issues if item.get("action")],
+        "blocking": False,
     }
     warnings = [item["message"] for item in issues if item["severity"] == "warning"]
-    errors = [item["message"] for item in issues if item["severity"] == "error"]
-    return period, warnings, errors
+    return period, warnings, []
 
 
 def compare_file_periods(
@@ -170,56 +324,99 @@ def compare_file_periods(
     *,
     reference_label: str,
     current_label: str,
-) -> List[Dict[str, str]]:
-    """Compare two parser reports before their lessons are merged."""
+) -> List[Dict[str, Any]]:
+    """Compare files and return suggestions instead of blocking the batch."""
 
-    issues: List[Dict[str, str]] = []
+    issues: List[Dict[str, Any]] = []
     ref_semester = str(reference.get("semester_kind") or "unknown")
     cur_semester = str(current.get("semester_kind") or "unknown")
     if ref_semester in {"spring", "autumn"} and cur_semester in {"spring", "autumn"} and ref_semester != cur_semester:
-        issues.append({
-            "severity": "error",
-            "code": "source_semester_mismatch",
-            "message": (
-                f"Файлы относятся к разным семестрам: «{reference_label}» — {SEMESTER_LABELS[ref_semester]}, "
-                f"«{current_label}» — {SEMESTER_LABELS[cur_semester]}."
+        issues.append(_issue(
+            "warning",
+            "source_semester_mismatch",
+            (
+                f"Файлы помечены как разные семестры: «{reference_label}» — {SEMESTER_LABELS[ref_semester]}, "
+                f"«{current_label}» — {SEMESTER_LABELS[cur_semester]}. Они всё равно будут сведены по фактическим датам."
             ),
-        })
+            resolution="auto",
+            action={
+                "type": "calendar_policy",
+                "value": "source",
+                "label": "Свести по датам файлов",
+            },
+        ))
+
     ref_year = str(reference.get("academic_year") or "")
     cur_year = str(current.get("academic_year") or "")
     if ref_year and cur_year and ref_year != cur_year:
-        issues.append({
-            "severity": "error",
-            "code": "source_academic_year_mismatch",
-            "message": f"Файлы относятся к разным учебным годам: «{reference_label}» — {ref_year}, «{current_label}» — {cur_year}.",
-        })
+        issues.append(_issue(
+            "warning",
+            "source_academic_year_mismatch",
+            f"Учебные годы различаются: «{reference_label}» — {ref_year}, «{current_label}» — {cur_year}.",
+            action={
+                "type": "edit_period",
+                "label": "Проверить год конкретных дат",
+            },
+        ))
 
-    ref_week_months = {int(key): canonical_month(value) for key, value in (reference.get("week_months") or {}).items()}
-    cur_week_months = {int(key): canonical_month(value) for key, value in (current.get("week_months") or {}).items()}
-    for week in sorted(set(ref_week_months) & set(cur_week_months)):
-        left, right = ref_week_months[week], cur_week_months[week]
-        if left and right and left != right:
-            issues.append({
-                "severity": "error",
-                "code": "source_week_month_mismatch",
-                "message": f"Неделя {week} имеет разные месяцы: «{reference_label}» — {left}, «{current_label}» — {right}.",
-            })
-            break
+    ref_sets = reference.get("week_month_sets") or {
+        key: [value] for key, value in (reference.get("week_months") or {}).items()
+    }
+    cur_sets = current.get("week_month_sets") or {
+        key: [value] for key, value in (current.get("week_months") or {}).items()
+    }
+    for raw_week in sorted(set(ref_sets) & set(cur_sets), key=lambda value: int(value)):
+        left = [month for value in ref_sets.get(raw_week, []) if (month := canonical_month(value))]
+        right = [month for value in cur_sets.get(raw_week, []) if (month := canonical_month(value))]
+        if not left or not right or set(left) & set(right):
+            continue
+        if any(_adjacent_month(a, b) for a in left for b in right):
+            issues.append(_issue(
+                "info",
+                "source_week_month_transition",
+                (
+                    f"Неделя {raw_week} подписана соседними месяцами в разных файлах "
+                    f"({', '.join(left)} / {', '.join(right)}). Это допустимо на границе месяца."
+                ),
+                resolution="auto",
+            ))
+        else:
+            issues.append(_issue(
+                "warning",
+                "source_week_month_mismatch",
+                (
+                    f"Для недели {raw_week} файлы дают разные месяцы: «{reference_label}» — "
+                    f"{', '.join(left)}, «{current_label}» — {', '.join(right)}. Выберется наиболее согласованный календарь."
+                ),
+                resolution="auto",
+                action={
+                    "type": "edit_period",
+                    "week": int(raw_week),
+                    "label": "Уточнить неделю вручную",
+                },
+            ))
 
     ref_dates = reference.get("week_day_dates") or {}
     cur_dates = current.get("week_day_dates") or {}
     for key in sorted(set(ref_dates) & set(cur_dates)):
         left, right = ref_dates[key], cur_dates[key]
-        left_value = (canonical_month(left.get("month")), int(left.get("day") or 0))
-        right_value = (canonical_month(right.get("month")), int(right.get("day") or 0))
-        if all(left_value) and all(right_value) and left_value != right_value:
-            issues.append({
-                "severity": "error",
-                "code": "source_date_mismatch",
-                "message": (
-                    f"Дата {key.replace(':', ', ')} различается: «{reference_label}» — "
-                    f"{left_value[1]} {left_value[0].lower()}, «{current_label}» — {right_value[1]} {right_value[0].lower()}."
-                ),
-            })
-            break
+        left_value = (canonical_month(left.get("month")), int(left.get("day") or 0), int(left.get("year") or 0))
+        right_value = (canonical_month(right.get("month")), int(right.get("day") or 0), int(right.get("year") or 0))
+        if left_value[:2] == right_value[:2] and (not left_value[2] or not right_value[2] or left_value[2] == right_value[2]):
+            continue
+        issues.append(_issue(
+            "warning",
+            "source_date_mismatch",
+            (
+                f"Дата {key.replace(':', ', ')} различается: «{reference_label}» — "
+                f"{left_value[1]} {(left_value[0] or '').lower()}, «{current_label}» — "
+                f"{right_value[1]} {(right_value[0] or '').lower()}. Используется вариант, согласованный с большинством дат."
+            ),
+            resolution="auto",
+            action={
+                "type": "edit_period",
+                "slot": key,
+                "label": "Выбрать дату вручную",
+            },
+        ))
     return issues
