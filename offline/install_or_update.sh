@@ -66,6 +66,8 @@ if [[ $NO_SYSTEMD -eq 0 && $EUID -ne 0 ]]; then
 fi
 
 require_command tar
+require_command sed
+require_command find
 [[ -f "$BUNDLE_ROOT/manifest.json" ]] || die "manifest.json не найден. Запускайте сценарий из распакованного автономного пакета."
 [[ -d "$BUNDLE_ROOT/wheelhouse" ]] || die "wheelhouse не найден в автономном пакете."
 
@@ -113,8 +115,9 @@ fi
 
 if [[ $NO_SYSTEMD -eq 0 ]]; then
     if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+        NOLOGIN_SHELL="$(command -v nologin 2>/dev/null || command -v false 2>/dev/null || echo /bin/false)"
         if command -v useradd >/dev/null 2>&1; then
-            useradd --system --user-group --home-dir "$INSTALL_ROOT/shared/home" --shell /usr/sbin/nologin "$SERVICE_USER"
+            useradd --system --user-group --home-dir "$INSTALL_ROOT/shared/home" --shell "$NOLOGIN_SHELL" "$SERVICE_USER"
         elif command -v adduser >/dev/null 2>&1; then
             adduser --system --group --home "$INSTALL_ROOT/shared/home" --no-create-home "$SERVICE_USER"
         else
@@ -175,6 +178,20 @@ if ! "$RELEASE/.venv/bin/python" -m pip install \
     rm -rf "$RELEASE"
     die "Зависимости не установлены из wheelhouse. Проверьте соответствие Python, архитектуры и пакета."
 fi
+
+# Добавляем корень неизменяемого выпуска в sys.path самого venv. Благодаря
+# этому штатные команды `python -m tools...` работают из любого каталога,
+# а не только после ручного `cd` в текущий выпуск.
+SITE_PACKAGES="$("$RELEASE/.venv/bin/python" - <<'PY'
+import site
+paths = site.getsitepackages()
+if not paths:
+    raise SystemExit("site-packages не найден")
+print(paths[0])
+PY
+)"
+printf '%s\n' "$RELEASE" > "$SITE_PACKAGES/planner-solving-app.pth"
+chmod 0644 "$SITE_PACKAGES/planner-solving-app.pth"
 
 rm -rf "$RELEASE/data" "$RELEASE/input" "$RELEASE/output"
 ln -s "$SHARED/data" "$RELEASE/data"
@@ -269,6 +286,10 @@ cat > "$STATE/admin.sh" <<EOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
 CURRENT="\$(readlink -f "$INSTALL_ROOT/current")"
+cd "\$CURRENT"
+export PYTHONPATH="\$CURRENT"
+export PYTHONNOUSERSITE=1
+unset PYTHONHOME
 exec "\$CURRENT/.venv/bin/python" -m tools.user_admin \
   --data-dir "$SHARED/data" \
   --legacy-teachers "$SHARED/teachers.json" "\$@"
@@ -278,6 +299,7 @@ ln -sfn "$STATE/admin.sh" /usr/local/bin/planner-solving-admin 2>/dev/null || tr
 ln -sfn "$STATE/doctor.sh" /usr/local/bin/planner-solving-doctor 2>/dev/null || true
 
 if [[ $NO_SYSTEMD -eq 0 ]]; then
+    mkdir -p /etc/default /etc/systemd/system
     cat > /etc/default/planner-solving <<EOF
 PLANNER_INSTALL_ROOT="$INSTALL_ROOT"
 PLANNER_HOST="$HOST"
@@ -326,7 +348,7 @@ EOF
         systemd-analyze verify /etc/systemd/system/planner-solving.service
     fi
     service_start
-    if ! wait_for_health "$PYTHON_BIN" "$PORT" 60; then
+    if ! wait_for_health "$RELEASE/.venv/bin/python" "$PORT" 60; then
         warn "Служба запущена, но /api/health не отвечает."
         journalctl -u planner-solving.service -n 80 --no-pager >&2 2>/dev/null || true
         false
@@ -349,6 +371,8 @@ log "Установка версии $VERSION завершена."
 if [[ $NO_SYSTEMD -eq 1 ]]; then
     log "Запуск: $STATE/run.sh"
 else
-    log "Интерфейс: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 127.0.0.1):$PORT"
+    SERVER_IP="$(hostname -I 2>/dev/null | awk 'NF {print $1; exit}')"
+    SERVER_IP="${SERVER_IP:-127.0.0.1}"
+    log "Интерфейс: http://$SERVER_IP:$PORT"
     log "Диагностика: sudo planner-solving-doctor"
 fi
