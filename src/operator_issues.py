@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 
 def _code(prefix: str, message: str) -> str:
-    digest = hashlib.sha1(message.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
+    digest = hashlib.sha1(message.encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{digest}"
 
 
@@ -135,17 +135,32 @@ def build_operator_issues(report: Mapping[str, Any]) -> List[Dict[str, Any]]:
         if not isinstance(raw, Mapping):
             continue
         reason = str(raw.get("reason") or "Координаты нормализованы автоматически.").strip()
-        field = str(raw.get("field") or raw.get("type") or "layout")
+        repair_type = str(raw.get("type") or "layout")
+        field = str(raw.get("field") or repair_type)
+        operator_decision = repair_type == "teacher_override"
+        scope = (
+            "teacher" if operator_decision
+            else "calendar" if "period" in field
+            else "range"
+        )
         result.append(_issue(
-            code=f"auto_repair_{field}",
-            scope="calendar" if "period" in field else "range",
+            code=f"{'operator' if operator_decision else 'auto_repair'}_{field}",
+            scope=scope,
             severity="info",
             message=reason,
-            default_decision="Исправление уже применено к рабочей разметке.",
-            impact="Результат рассчитывается по исправленному безопасному варианту.",
-            resolution="auto",
+            default_decision=(
+                "Ручное назначение оператора применено."
+                if operator_decision
+                else "Исправление уже применено к рабочей разметке."
+            ),
+            impact=(
+                "Занятия дисциплины попадут в расписание выбранного преподавателя; решение сохранится в истории."
+                if operator_decision
+                else "Результат рассчитывается по исправленному безопасному варианту."
+            ),
+            resolution="operator" if operator_decision else "auto",
             actions=[],
-            source="auto_repair",
+            source="operator" if operator_decision else "auto_repair",
         ))
 
     for message_value in report.get("errors") or []:
@@ -239,6 +254,7 @@ def attach_operator_issues(report: Dict[str, Any]) -> Dict[str, Any]:
     report["resolution_summary"] = {
         "total": len(issues),
         "automatic": sum(item["resolution"] == "auto" for item in issues),
+        "operator": sum(item["resolution"] == "operator" for item in issues),
         "attention": sum(item["severity"] == "attention" for item in issues),
         "technical": sum(item["severity"] == "technical" for item in issues),
         "operator_actions": sum(bool(item.get("actions")) for item in issues),
