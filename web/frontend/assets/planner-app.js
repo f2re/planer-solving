@@ -1,12 +1,16 @@
 import { installWorkspaceMarkup, createWorkspaceState } from './workspace-state.js';
 import { createScheduleState } from './schedule-state.js';
 import { installInteractionMarkup, createInteractionState } from './interaction-ui.js';
+import { installOperationsMarkup } from './operations-ui.js';
+import { createOperationsState } from './operations-state.js';
 
 const { createApp, ref, onMounted } = Vue;
 
 export function mount() {
     installWorkspaceMarkup();
     installInteractionMarkup();
+    installOperationsMarkup();
+
     createApp({
         setup() {
             const toasts = ref([]);
@@ -22,98 +26,18 @@ export function mount() {
             };
 
             let schedule;
-            const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
+            let operations;
+            let initialized = false;
+            const workspace = createWorkspaceState(addToast, async () => {
+                schedule?.invalidateAll();
+                await operations?.onWorkspaceChanged();
+            });
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
             const interaction = createInteractionState(
                 addToast,
                 schedule,
                 workspace.activeWorkspaceId
             );
-
-            const rematchAfter = handler => async (...args) => {
-                const result = await handler(...args);
-                schedule.invalidateAll();
-                await interaction.rematchTemplates({ quiet: true });
-                return result;
-            };
-
-            const switchWorkspace = async id => {
-                await workspace.switchWorkspace(id);
-                if (workspace.managerTab.value === 'spaces') {
-                    workspace.editWorkspace(workspace.activeWorkspace.value);
-                }
-                await interaction.rematchTemplates({ quiet: true });
-            };
-
-            const deleteTeacher = async value => {
-                const teacher = typeof value === 'object' && value
-                    ? value
-                    : workspace.teachers.value.find(item => item.id === Number(value));
-                if (!teacher) {
-                    addToast('Преподаватель не найден', 'Обновите список и повторите действие.', 'warning');
-                    return;
-                }
-                await workspace.deleteTeacher(teacher);
-                schedule.invalidateAll();
-                await interaction.rematchTemplates({ quiet: true });
-            };
-
-            const saveTeacher = rematchAfter(workspace.saveTeacher);
-            const importTeachers = rematchAfter(workspace.importTeachers);
-            const importTemplates = rematchAfter(workspace.importTemplates);
-            const saveWorkspace = rematchAfter(workspace.saveWorkspace);
-            const duplicateWorkspace = rematchAfter(workspace.duplicateWorkspace);
-            const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
-            const importWorkspace = rematchAfter(workspace.importWorkspace);
-
-            const saveCurrentProfile = async () => {
-                const name = workspace.profileName.value.trim();
-                if (!name || !schedule.currentLayout.value) {
-                    addToast('Шаблон разметки', 'Введите название шаблона.', 'warning');
-                    return;
-                }
-                try {
-                    const existing = workspace.layoutProfiles.value.find(
-                        item => item.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru')
-                    );
-                    const layout = schedule.normalizedLayout(schedule.currentLayout.value);
-                    if (existing) {
-                        await workspace.updateTemplateLayout(
-                            existing.id,
-                            layout,
-                            name,
-                            existing.description || ''
-                        );
-                    } else {
-                        await workspace.createTemplate(name, '', layout);
-                    }
-                    workspace.profileName.value = name;
-                    addToast(
-                        'Шаблон сохранён',
-                        `«${name}» сохранён в пространстве «${workspace.activeWorkspace.value?.name}».`,
-                        'success'
-                    );
-                } catch (error) {
-                    addToast(
-                        'Ошибка шаблона',
-                        error.response?.data?.detail || 'Не удалось сохранить шаблон.',
-                        'error'
-                    );
-                }
-            };
-
-            const applySelectedProfile = async () => {
-                if (workspace.selectedTemplate.value) {
-                    await schedule.applyTemplate(workspace.selectedTemplate.value);
-                }
-            };
-
-            const deleteSelectedProfile = async () => {
-                if (workspace.selectedTemplate.value) {
-                    await workspace.deleteTemplate(workspace.selectedTemplate.value);
-                    await interaction.rematchTemplates({ quiet: true });
-                }
-            };
 
             const migrateLocalTemplates = async () => {
                 const key = 'planner-solving-layout-profiles-v1';
@@ -147,27 +71,128 @@ export function mount() {
                 }
             };
 
-            onMounted(async () => {
+            const initializeWorkspace = async () => {
+                if (initialized) {
+                    await workspace.loadSpaces(workspace.activeWorkspaceId.value);
+                    await workspace.loadData();
+                    return;
+                }
                 await workspace.init();
                 await migrateLocalTemplates();
+                initialized = true;
+            };
+
+            operations = createOperationsState(
+                addToast,
+                workspace,
+                schedule,
+                interaction,
+                initializeWorkspace
+            );
+
+            const rematchAfter = handler => async (...args) => {
+                const result = await handler(...args);
+                schedule.invalidateAll();
+                await interaction.rematchTemplates({ quiet: true });
+                return result;
+            };
+
+            const switchWorkspace = async id => {
+                await workspace.switchWorkspace(id);
+                if (workspace.managerTab.value === 'spaces') {
+                    workspace.editWorkspace(workspace.activeWorkspace.value);
+                }
+                await operations.onWorkspaceChanged();
+                await interaction.rematchTemplates({ quiet: true });
+            };
+
+            const deleteTeacher = async value => {
+                const teacher = typeof value === 'object' && value
+                    ? value
+                    : workspace.teachers.value.find(item => item.id === Number(value));
+                if (!teacher) {
+                    addToast('Преподаватель не найден', 'Обновите список и повторите действие.', 'warning');
+                    return;
+                }
+                await workspace.deleteTeacher(teacher);
+                schedule.invalidateAll();
+                await interaction.rematchTemplates({ quiet: true });
+            };
+
+            const saveTeacher = rematchAfter(workspace.saveTeacher);
+            const saveWorkspace = rematchAfter(workspace.saveWorkspace);
+            const duplicateWorkspace = rematchAfter(workspace.duplicateWorkspace);
+            const deleteWorkspace = rematchAfter(workspace.deleteWorkspace);
+
+            const saveCurrentProfile = async () => {
+                const name = workspace.profileName.value.trim();
+                if (!name || !schedule.currentLayout.value) {
+                    addToast('Шаблон разметки', 'Введите название шаблона.', 'warning');
+                    return;
+                }
+                try {
+                    const existing = workspace.layoutProfiles.value.find(
+                        item => item.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru')
+                    );
+                    const layout = schedule.normalizedLayout(schedule.currentLayout.value);
+                    if (existing) {
+                        await workspace.updateTemplateLayout(
+                            existing.id,
+                            layout,
+                            name,
+                            existing.description || ''
+                        );
+                    } else {
+                        await workspace.createTemplate(name, '', layout);
+                    }
+                    workspace.profileName.value = name;
+                    await operations.loadTemplateRevisions();
+                    addToast(
+                        'Шаблон сохранён',
+                        `«${name}» сохранён новой ревизией в пространстве «${workspace.activeWorkspace.value?.name}».`,
+                        'success'
+                    );
+                } catch (error) {
+                    addToast(
+                        'Ошибка шаблона',
+                        error.response?.data?.detail || 'Не удалось сохранить шаблон.',
+                        'error'
+                    );
+                }
+            };
+
+            const applySelectedProfile = async () => {
+                if (workspace.selectedTemplate.value) {
+                    await schedule.applyTemplate(workspace.selectedTemplate.value);
+                }
+            };
+
+            const deleteSelectedProfile = async () => {
+                if (workspace.selectedTemplate.value) {
+                    await workspace.deleteTemplate(workspace.selectedTemplate.value);
+                    await operations.loadTemplateRevisions();
+                    await interaction.rematchTemplates({ quiet: true });
+                }
+            };
+
+            onMounted(async () => {
+                await operations.initOperations();
             });
 
             return {
                 ...workspace,
                 ...schedule,
                 ...interaction,
+                ...operations,
                 toasts,
                 addToast,
                 removeToast,
                 switchWorkspace,
                 saveTeacher,
                 deleteTeacher,
-                importTeachers,
-                importTemplates,
                 saveWorkspace,
                 duplicateWorkspace,
                 deleteWorkspace,
-                importWorkspace,
                 saveCurrentProfile,
                 applySelectedProfile,
                 deleteSelectedProfile
