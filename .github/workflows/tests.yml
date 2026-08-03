@@ -43,7 +43,7 @@ jobs:
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
             web/backend/auth.py web/backend/password_reset_session.py web/backend/frontend_cache.py \
             web/backend/platform_api.py web/backend/errors.py \
-            web/backend/analysis_api.py web/backend/session_api.py web/backend/system_api.py \
+            web/backend/analysis_api.py web/backend/session_api.py web/backend/session_file_api.py web/backend/system_api.py \
             web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
 
       - name: Assert clean backend architecture
@@ -71,6 +71,8 @@ jobs:
         run: |
           node --check web/frontend/assets/app.js
           node --check web/frontend/assets/planner-app.js
+          node --check web/frontend/assets/operator-flow.js
+          node --check web/frontend/assets/session-file-actions.js
           node --check web/frontend/assets/workspace-state.js
           node --check web/frontend/assets/reactive-workspace.js
           node --check web/frontend/assets/schedule-layout-utils.js
