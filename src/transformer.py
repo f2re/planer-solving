@@ -1,57 +1,33 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .data_loader import Lesson
-
-MONTH_NAMES = {
-    1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель', 5: 'Май', 6: 'Июнь',
-    7: 'Июль', 8: 'Август', 9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь'
-}
-DAY_MAP = {'Пн': 0, 'Вт': 1, 'Ср': 2, 'Чт': 3, 'Пт': 4, 'Сб': 5}
-REVERSE_DAY_MAP = {value: key for key, value in DAY_MAP.items()}
+from .schedule_period import MONTH_NAMES, ResolvedScheduleCalendar, resolve_schedule_calendar
 
 
 def transform_to_teacher_grid(
     lessons: List[Lesson],
     teachers_config: List[Dict],
     start_date_str: str = '2026-02-10',
-    end_date_str: str = '2026-06-30'
+    end_date_str: str = '2026-06-30',
+    *,
+    period_reports: Optional[Sequence[Mapping[str, Any]]] = None,
+    resolved_calendar: Optional[ResolvedScheduleCalendar] = None,
 ) -> Dict[str, Any]:
-    try:
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-    except (TypeError, ValueError):
-        start_date = datetime.now().replace(month=2, day=1, hour=0, minute=0, second=0, microsecond=0)
-        end_date = start_date.replace(month=6, day=30)
+    """Build both summary grids from one verified academic calendar."""
 
-    monday = start_date - timedelta(days=start_date.weekday())
-    has_week_zero = any(getattr(item, "week", None) == 0 for item in lessons)
-    minimum_week = 0 if has_week_zero else 1
-
-    generated_dates = []
-    week_day_to_full_date = {}
-    week_to_month = {}
-    weeks_set = set()
-
-    current_week = minimum_week
-    current_monday = monday + timedelta(weeks=minimum_week - 1)
-    # Week 0 is a real value in several supplied schedules and represents the
-    # Monday immediately before configured week 1. Positive weeks outside the
-    # configured semester remain ignored, preserving the previous behaviour.
-    while current_monday <= end_date:
-        weeks_set.add(current_week)
-        for day_index in range(6):
-            dt = current_monday + timedelta(days=day_index)
-            month_name = MONTH_NAMES[dt.month]
-            day_num = dt.day
-            day_short = REVERSE_DAY_MAP[day_index]
-            generated_dates.append((month_name, day_num, current_week))
-            week_day_to_full_date[(current_week, day_short)] = (month_name, day_num)
-            week_to_month.setdefault(current_week, month_name)
-        current_monday += timedelta(weeks=1)
-        current_week += 1
+    calendar = resolved_calendar or resolve_schedule_calendar(
+        lessons,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str,
+        period_reports=period_reports,
+    )
+    generated_dates = calendar.summary_dates()
+    week_day_to_full_date = {
+        (week, day_name): (MONTH_NAMES[value.month], value.day)
+        for (week, day_name), value in calendar.week_day_to_date.items()
+    }
 
     grid_raw = {}
     grid_vertical = {}
@@ -98,10 +74,13 @@ def transform_to_teacher_grid(
         'grid': grid,
         'grid_vertical': grid_vertical,
         'dates': generated_dates,
-        'weeks': sorted(weeks_set),
-        'week_to_month': week_to_month,
+        'weeks': list(calendar.weeks),
+        'week_to_month': calendar.week_to_month,
         'week_day_to_date': week_day_to_full_date,
         'teachers': [teacher['short_name'] for teacher in teachers_config],
         'semester_info': semester_info,
         'year_info': year_info,
+        'period_report': calendar.report,
+        'period_warnings': list(calendar.warnings),
+        '_calendar': calendar,
     }

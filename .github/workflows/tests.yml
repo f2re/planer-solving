@@ -32,7 +32,8 @@ jobs:
         run: |
           python -m py_compile \
             src/schedule_layout.py src/worksheet_matrix.py src/schedule_detection.py \
-            src/schedule_analyzer.py src/teacher_resolver.py src/schedule_parser_geometry.py src/data_loader.py \
+            src/schedule_analyzer.py src/teacher_resolver.py src/schedule_parser_geometry.py \
+            src/schedule_period_values.py src/schedule_period_validation.py src/schedule_calendar.py src/schedule_period.py src/data_loader.py \
             src/transformer.py src/weekly_exporter.py src/template_matcher.py \
             src/template_learning.py src/import_wizard.py src/security.py \
             src/workspace_domain.py src/workspace_store.py src/sqlite_workspace_store.py \

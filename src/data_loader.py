@@ -1,15 +1,23 @@
 """Excel schedule parser driven by an operator-confirmed exact layout."""
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from openpyxl import load_workbook
 
 from .schedule_analyzer import LESSON_CODE_RE, ScheduleAnalyzer, ScheduleLayout, WorksheetMatrix, normalize_text
 from .schedule_parser_geometry import ScheduleParserGeometry
+from .schedule_period import (
+    build_file_period_report,
+    canonical_month,
+    compare_file_periods,
+    extract_date_parts,
+    next_month,
+)
 from .teacher_resolver import TeacherResolver
 
 logger = logging.getLogger(__name__)
@@ -29,9 +37,155 @@ class Lesson:
     month: str
     semester_info: str = ""
     year_info: str = ""
+    date_year: int = 0
 
 
 class DataLoader(TeacherResolver, ScheduleParserGeometry):
+    @staticmethod
+    def _date_rollover(previous_day: int, current_day: int) -> bool:
+        return bool(
+            previous_day
+            and current_day
+            and (
+                previous_day - current_day >= 15
+                or (previous_day >= 25 and current_day <= 7)
+            )
+        )
+
+    def _source_period(
+        self,
+        matrix: WorksheetMatrix,
+        layout: ScheduleLayout,
+        weeks: List[Tuple[int, int, int]],
+        semester: str,
+        year: str,
+        report: Dict[str, Any],
+    ) -> Dict[Tuple[int, str], Dict[str, Any]]:
+        """Read the source month/date scale before parsing individual lessons."""
+
+        header_months: Dict[int, str] = {}
+        current_header_month: Optional[str] = None
+        for week, header_col, _ in weeks:
+            parsed = (
+                canonical_month(matrix.value(layout.months_row, header_col))
+                if layout.months_row
+                else None
+            )
+            if parsed:
+                current_header_month = parsed
+            if current_header_month:
+                header_months[week] = current_header_month
+
+        day_rows = layout.resolved_day_rows()
+        day_names = layout.day_names[: len(day_rows)]
+        raw_slots: List[Dict[str, Any]] = []
+        for week, _, data_col in weeks:
+            for day_name, day_start in zip(day_names, day_rows):
+                date_row = day_start + layout.date_row_offset
+                raw_value = (
+                    matrix.value(date_row, data_col)
+                    if 1 <= date_row <= matrix.worksheet.max_row
+                    else None
+                )
+                raw_slots.append({
+                    "week": week,
+                    "day_name": day_name,
+                    "header_month": header_months.get(week),
+                    "parts": extract_date_parts(raw_value),
+                })
+
+        week_day_dates: Dict[Tuple[int, str], Dict[str, Any]] = {}
+        previous_day = 0
+        previous_month: Optional[str] = None
+        for slot in raw_slots:
+            parts = slot["parts"]
+            day = int(parts.get("day") or 0)
+            if not day:
+                continue
+            explicit_month = canonical_month(parts.get("month"))
+            header_month = canonical_month(slot.get("header_month"))
+            inferred_month = explicit_month
+
+            if not inferred_month:
+                inferred_month = previous_month or header_month
+                if previous_month and self._date_rollover(previous_day, day):
+                    inferred_month = next_month(previous_month)
+                elif (
+                    previous_month
+                    and header_month
+                    and header_month != previous_month
+                    and header_month == next_month(previous_month)
+                    and day <= 15
+                ):
+                    # A missing day near the month boundary can hide the
+                    # numerical rollover. The source month row is the anchor.
+                    inferred_month = header_month
+
+            if not inferred_month:
+                continue
+            week_day_dates[(slot["week"], slot["day_name"])] = {
+                "day": day,
+                "month": inferred_month,
+                "year": int(parts.get("year") or 0),
+            }
+            previous_day = day
+            previous_month = inferred_month
+
+        date_months_by_week: Dict[int, List[str]] = defaultdict(list)
+        for (week, _), item in week_day_dates.items():
+            month = canonical_month(item.get("month"))
+            if month and month not in date_months_by_week[week]:
+                date_months_by_week[week].append(month)
+
+        week_months: Dict[int, str] = {}
+        for week, _, _ in weeks:
+            month = header_months.get(week)
+            if not month and date_months_by_week.get(week):
+                month = date_months_by_week[week][0]
+            if month:
+                week_months[week] = month
+
+        period, period_warnings, period_errors = build_file_period_report(
+            week_numbers=[week for week, _, _ in weeks],
+            week_months=week_months,
+            week_day_dates=week_day_dates,
+            semester_info=semester,
+            year_info=year,
+        )
+        period["source_file"] = report["file"]
+        period["source_group"] = report["group"]
+
+        for previous_label, previous_period in self.loaded_periods:
+            period["issues"].extend(compare_file_periods(
+                previous_period,
+                period,
+                reference_label=previous_label,
+                current_label=report["file"],
+            ))
+        period_warnings.extend(
+            item["message"]
+            for item in period["issues"]
+            if item["severity"] == "warning" and item["message"] not in period_warnings
+        )
+        period_errors.extend(
+            item["message"]
+            for item in period["issues"]
+            if item["severity"] == "error" and item["message"] not in period_errors
+        )
+
+        report["period"] = period
+        report["warnings"].extend(
+            message for message in period_warnings if message not in report["warnings"]
+        )
+        report["errors"].extend(
+            message for message in period_errors if message not in report["errors"]
+        )
+        # Keep even a conflicting period available to the batch validator, but
+        # use only successful periods as the next comparison reference.
+        if not period_errors:
+            self.loaded_periods.append((report["file"], period))
+        return week_day_dates
+
     def load_group_schedule(
         self,
         file_path: str,
@@ -53,6 +207,7 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
             "warnings": [],
             "errors": [],
             "samples": [],
+            "period": {},
         }
         self.last_report = report
         try:
@@ -77,15 +232,21 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
         if report["errors"]:
             return []
         semester, year = self._metadata(matrix)
-        legend = self._legend(matrix, selected, report)
         weeks = self._weeks(matrix, selected, report)
         if not weeks:
             return []
-        months, current_month = {}, "Unknown"
-        for _, header_col, data_col in weeks:
-            if selected.months_row:
-                current_month = self._month(matrix.value(selected.months_row, header_col), current_month)
-            months[data_col] = current_month
+        source_dates = self._source_period(
+            matrix,
+            selected,
+            weeks,
+            semester,
+            year,
+            report,
+        )
+        if report["errors"]:
+            return []
+
+        legend = self._legend(matrix, selected, report)
         lessons: List[Lesson] = []
         unknown: Set[str] = set()
         grid_end = selected.grid_end_row or sheet.max_row
@@ -95,7 +256,6 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
         for day_name, day_start in zip(day_names, day_rows):
             if day_start > grid_end or day_start > sheet.max_row:
                 continue
-            date_row = day_start + selected.date_row_offset
             for pair_index, pair_offset in enumerate(pair_offsets):
                 pair = pair_index + 1
                 base = day_start + pair_offset
@@ -140,19 +300,21 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
                         unknown.add(subject)
                     else:
                         report["mapped_lessons"] += 1
+                    source_date = source_dates.get((week, day_name), {})
                     lesson = Lesson(
-                        group_name,
-                        subject,
-                        code,
-                        room,
-                        week,
-                        day_name,
-                        pair,
-                        teacher,
-                        self._day_number(matrix.value(date_row, data_col)) if 1 <= date_row <= sheet.max_row else 0,
-                        months.get(data_col, "Unknown"),
-                        semester,
-                        year,
+                        group=group_name,
+                        subject=subject,
+                        lesson_type_code=code,
+                        room=room,
+                        week=week,
+                        day_of_week=day_name,
+                        pair_num=pair,
+                        teacher=teacher,
+                        date_day=int(source_date.get("day") or 0),
+                        month=str(source_date.get("month") or "Unknown"),
+                        semester_info=semester,
+                        year_info=year,
+                        date_year=int(source_date.get("year") or 0),
                     )
                     lessons.append(lesson)
                     if len(report["samples"]) < 12:

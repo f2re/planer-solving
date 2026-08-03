@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from src.data_loader import DataLoader
 from src.exporter import export_to_excel
 from src.schedule_analyzer import ScheduleAnalyzer, ScheduleLayout
+from src.schedule_period import SchedulePeriodError, resolve_schedule_calendar
 from src.transformer import transform_to_teacher_grid
 from src.weekly_exporter import generate_weekly_semester_schedule
 from src.workspace_domain import default_semester_settings
@@ -218,7 +219,12 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     item.get("filename", spec.file_id),
                     session_id,
                 )
-                error_report = {"errors": ["Внутренняя ошибка парсинга."], "warnings": []}
+                error_report = {
+                    "file": item.get("filename", spec.file_id),
+                    "group": spec.group_name,
+                    "errors": ["Внутренняя ошибка парсинга."],
+                    "warnings": [],
+                }
                 try:
                     error_report["source_archive"] = _archive_source(
                         context,
@@ -228,6 +234,7 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                     )
                 except OSError:
                     pass
+                reports.append(error_report)
                 repository.record_processing_file(
                     run_id,
                     file_id=spec.file_id,
@@ -247,6 +254,42 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                 ))
 
         accumulated_warnings = list(loader.warnings)
+        settings = selected_workspace.get("settings") or {}
+        defaults = default_semester_settings()
+        start_date = str(settings.get("schedule_start_date") or defaults["schedule_start_date"])
+        end_date = str(settings.get("schedule_end_date") or defaults["schedule_end_date"])
+
+        try:
+            calendar = resolve_schedule_calendar(
+                lessons_all,
+                start_date_str=start_date,
+                end_date_str=end_date,
+                period_reports=reports,
+            )
+        except SchedulePeriodError as exc:
+            period_report = dict(exc.report)
+            period_report.setdefault("file", "Проверка периода")
+            period_report.setdefault("group", "Все загруженные расписания")
+            reports.append(period_report)
+            for warning in exc.warnings:
+                if warning not in accumulated_warnings:
+                    accumulated_warnings.append(warning)
+            reason = "; ".join(exc.errors[:3])
+            if len(exc.errors) > 3:
+                reason += f"; ещё ошибок: {len(exc.errors) - 3}."
+            return finish_failed(
+                run_id,
+                message=f"Формирование остановлено: период расписаний не согласован. {reason}",
+                details=details,
+                reports=reports,
+                warnings=accumulated_warnings,
+                actor=actor,
+            )
+
+        for warning in calendar.warnings:
+            if warning not in accumulated_warnings:
+                accumulated_warnings.append(warning)
+
         if not lessons_all:
             return finish_failed(
                 run_id,
@@ -273,15 +316,13 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
                 actor=actor,
             )
 
-        settings = selected_workspace.get("settings") or {}
-        defaults = default_semester_settings()
-        start_date = str(settings.get("schedule_start_date") or defaults["schedule_start_date"])
-        end_date = str(settings.get("schedule_end_date") or defaults["schedule_end_date"])
         transformed = transform_to_teacher_grid(
             filtered,
             teachers,
             start_date_str=start_date,
             end_date_str=end_date,
+            period_reports=reports,
+            resolved_calendar=calendar,
         )
         output_id = str(uuid.uuid4())
         filename = f"schedule_{output_id}.xlsx"
@@ -297,11 +338,13 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             try:
                 generate_weekly_semester_schedule(
                     teachers_config=teachers,
-                    lessons=lessons_all,
+                    lessons=filtered,
                     template_path=str(context.paths.weekly_template),
                     output_path=str(weekly_path),
                     start_date_str=start_date,
                     end_date_str=end_date,
+                    period_reports=reports,
+                    resolved_calendar=calendar,
                 )
                 artifacts.append({"kind": "weekly", "path": weekly_path})
             except Exception:
@@ -327,7 +370,11 @@ def build_schedule_router(context: ApplicationContext) -> APIRouter:
             warning_count=len(warnings) + sum(1 for item in details if item.status == "warning"),
             error_count=sum(1 for item in details if item.status == "error"),
             selected_templates=selected_templates,
-            report={"reports": reports, "details": [_model_dict(item) for item in details]},
+            report={
+                "reports": reports,
+                "details": [_model_dict(item) for item in details],
+                "period": transformed["period_report"],
+            },
             artifacts=artifacts,
             actor=actor,
         )
