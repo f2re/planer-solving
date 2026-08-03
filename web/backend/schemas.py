@@ -83,23 +83,33 @@ class LayoutTemplate(BaseModel):
     layout: Dict[str, Any]
     created_at: str = ""
     updated_at: str = ""
+    current_revision_id: Optional[str] = None
+    revision_number: Optional[int] = None
+    success_count: int = 0
+    failure_count: int = 0
+    last_used_at: Optional[str] = None
 
 
 class TemplateCreate(BaseModel):
     name: str
     description: str = ""
     layout: Dict[str, Any]
+    comment: str = ""
 
 
 class TemplateUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     layout: Optional[Dict[str, Any]] = None
+    comment: str = ""
 
 
 class ImportResult(BaseModel):
     added: int = 0
+    updated: int = 0
+    merged: int = 0
     skipped: int = 0
+    errors: int = 0
     total: int = 0
 
 
@@ -114,6 +124,7 @@ class FileUploadDetail(BaseModel):
 class ScheduleUploadResponse(BaseModel):
     filename: Optional[str] = None
     weekly_filename: Optional[str] = None
+    run_id: Optional[str] = None
     status: str
     message: str
     details: List[FileUploadDetail] = Field(default_factory=list)
