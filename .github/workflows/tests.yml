@@ -68,6 +68,7 @@ jobs:
           node --check web/frontend/assets/interaction-markup.js
           node --check web/frontend/assets/interaction-state.js
           node --check web/frontend/assets/platform-ui.js
+          node --check web/frontend/assets/platform-enhancements.js
 
       - name: Build real offline bundle
         run: bash offline/build_offline_bundle.sh --output dist
