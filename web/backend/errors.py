@@ -7,6 +7,16 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from src.operations_domain import (
+    AuthenticationRequired,
+    ImportJobNotFound,
+    InvalidCredentials,
+    OperationsError,
+    PermissionDenied,
+    ProcessingRunNotFound,
+    RevisionNotFound,
+    SetupRequired,
+)
 from src.workspace_domain import WorkspaceError, WorkspaceNotFound
 
 logger = logging.getLogger(__name__)
@@ -59,17 +69,43 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(WorkspaceNotFound)
     async def workspace_not_found_handler(_: Request, exc: WorkspaceNotFound) -> JSONResponse:
-        return JSONResponse(
-            status_code=404,
-            content=_payload(str(exc), "workspace_not_found"),
-        )
+        return JSONResponse(status_code=404, content=_payload(str(exc), "workspace_not_found"))
 
     @app.exception_handler(WorkspaceError)
     async def workspace_error_handler(_: Request, exc: WorkspaceError) -> JSONResponse:
-        return JSONResponse(
-            status_code=400,
-            content=_payload(str(exc), "workspace_error"),
-        )
+        return JSONResponse(status_code=400, content=_payload(str(exc), "workspace_error"))
+
+    @app.exception_handler(SetupRequired)
+    async def setup_required_handler(_: Request, exc: SetupRequired) -> JSONResponse:
+        return JSONResponse(status_code=428, content=_payload(str(exc), "setup_required"))
+
+    @app.exception_handler(AuthenticationRequired)
+    async def authentication_required_handler(_: Request, exc: AuthenticationRequired) -> JSONResponse:
+        return JSONResponse(status_code=401, content=_payload(str(exc), "authentication_required"))
+
+    @app.exception_handler(InvalidCredentials)
+    async def invalid_credentials_handler(_: Request, exc: InvalidCredentials) -> JSONResponse:
+        return JSONResponse(status_code=401, content=_payload(str(exc), "invalid_credentials"))
+
+    @app.exception_handler(PermissionDenied)
+    async def permission_denied_handler(_: Request, exc: PermissionDenied) -> JSONResponse:
+        return JSONResponse(status_code=403, content=_payload(str(exc), "permission_denied"))
+
+    @app.exception_handler(ImportJobNotFound)
+    async def import_not_found_handler(_: Request, exc: ImportJobNotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content=_payload(str(exc), "import_not_found"))
+
+    @app.exception_handler(ProcessingRunNotFound)
+    async def run_not_found_handler(_: Request, exc: ProcessingRunNotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content=_payload(str(exc), "processing_run_not_found"))
+
+    @app.exception_handler(RevisionNotFound)
+    async def revision_not_found_handler(_: Request, exc: RevisionNotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content=_payload(str(exc), "revision_not_found"))
+
+    @app.exception_handler(OperationsError)
+    async def operations_error_handler(_: Request, exc: OperationsError) -> JSONResponse:
+        return JSONResponse(status_code=400, content=_payload(str(exc), "operations_error"))
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
