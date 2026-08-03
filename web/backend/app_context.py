@@ -12,8 +12,8 @@ from typing import Any, Dict, Optional, Protocol
 import uuid
 
 from src.data_migrations import CURRENT_SCHEMA_VERSION, MigrationError, detect_schema_version
-from src.sqlite_workspace_store import SQLITE_SCHEMA_VERSION, SQLiteWorkspaceStore
-from src.workspace_store import WorkspaceError
+from src.platform_store import PLATFORM_SCHEMA_VERSION, PlatformStore
+from src.workspace_domain import WorkspaceError
 from web.backend.errors import SessionCorrupted, SessionNotFound, UploadedFileNotFound
 
 
@@ -144,8 +144,7 @@ class AnalysisSessionStore:
         return path
 
     def delete(self, session_id: str) -> None:
-        path = self.path(session_id)
-        shutil.rmtree(path)
+        shutil.rmtree(self.path(session_id))
 
 
 class ApplicationContext:
@@ -171,7 +170,7 @@ class ApplicationContext:
         if workspace_repository is None:
             self._validate_storage_schema()
             self._validate_legacy_schema_before_import()
-            workspace_repository = SQLiteWorkspaceStore(
+            workspace_repository = PlatformStore(
                 self.paths.workspace_database,
                 self.paths.workspaces_json,
                 self.paths.teachers_json,
@@ -193,16 +192,12 @@ class ApplicationContext:
             raise WorkspaceError(f"Не удалось проверить базу SQLite: {exc}") from exc
         if quick_check != "ok":
             raise WorkspaceError(f"База SQLite повреждена: {quick_check}")
-        if version > SQLITE_SCHEMA_VERSION:
+        if version > PLATFORM_SCHEMA_VERSION:
             raise WorkspaceError(
                 f"База SQLite имеет версию {version}, а приложение поддерживает только "
-                f"версию {SQLITE_SCHEMA_VERSION}. Установите более новую версию приложения."
+                f"версию {PLATFORM_SCHEMA_VERSION}. Установите более новую версию приложения."
             )
-        if 0 < version < SQLITE_SCHEMA_VERSION:
-            raise WorkspaceError(
-                f"База SQLite имеет версию {version} и требует миграции до версии "
-                f"{SQLITE_SCHEMA_VERSION}. Запустите штатное обновление приложения."
-            )
+        # Versions 0..4 are migrated transactionally by PlatformStore.
 
     def _validate_legacy_schema_before_import(self) -> None:
         if self.paths.workspace_database.exists() or not self.paths.workspaces_json.exists():
@@ -231,22 +226,25 @@ class ApplicationContext:
 
     def system_status(self) -> Dict[str, Any]:
         document = self.workspace_repository.load()
-        schema_version = (
-            self.workspace_repository.schema_version()
-            if hasattr(self.workspace_repository, "schema_version")
-            else int(document.get("version", 0))
-        )
+        schema_version = self.workspace_repository.schema_version()
         return {
             "status": "ok",
             "app_version": self.application_version(),
-            "data_schema_version": int(document.get("version", schema_version)),
+            "data_schema_version": int(document.get("version", 0)),
             "storage_schema_version": schema_version,
             "supported_data_schema_version": CURRENT_SCHEMA_VERSION,
-            "storage": "sqlite" if self.paths.workspace_database.exists() else "custom",
+            "supported_storage_schema_version": PLATFORM_SCHEMA_VERSION,
+            "storage": "sqlite-platform",
+            "features": {
+                "import_wizard": True,
+                "template_revisions": True,
+                "processing_history": True,
+                "roles": True,
+                "audit": True,
+                "composite_templates": True,
+            },
         }
 
-    # Temporary compatibility aliases for extensions that are migrated in the
-    # same release. They are instance attributes, not mutable module globals.
     @property
     def BASE_DIR(self) -> Path:
         return self.paths.base_dir
