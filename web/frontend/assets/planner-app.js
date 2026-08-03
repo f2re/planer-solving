@@ -37,21 +37,25 @@ export function mount() {
             let schedule;
             const workspace = createWorkspaceState(addToast, () => schedule?.invalidateAll());
             schedule = createScheduleState(addToast, workspace.activeWorkspaceId);
-            const scheduleDraft = createScheduleDraftState(
+            const interaction = createInteractionState(
                 addToast,
                 schedule,
                 workspace.activeWorkspaceId
+            );
+            // Draft wrappers are created after the interaction layer so they
+            // preserve streaming upload, template matching and range cleanup
+            // instead of accidentally replacing those handlers.
+            const scheduleDraft = createScheduleDraftState(
+                addToast,
+                schedule,
+                workspace.activeWorkspaceId,
+                interaction
             );
             const reactiveWorkspace = createReactiveWorkspaceState(addToast, workspace, schedule);
             workspace.loadData = reactiveWorkspace.refreshData;
             workspace.loadSpaces = reactiveWorkspace.refreshSpaces;
             workspace.refreshWorkspace = reactiveWorkspace.refreshWorkspace;
 
-            const interaction = createInteractionState(
-                addToast,
-                schedule,
-                workspace.activeWorkspaceId
-            );
             const sampleLayout = createSampleLayoutState(addToast, schedule);
             const platform = createPlatformState(addToast, workspace, schedule);
             const editor = createEditorWorkspaceState(
@@ -277,8 +281,11 @@ export function mount() {
             return {
                 ...workspace,
                 ...schedule,
-                ...scheduleDraft,
                 ...interaction,
+                // Durable draft handlers deliberately come last: they wrap the
+                // interaction functions and add persistence without disabling
+                // upload progress, template matching or range cleanup.
+                ...scheduleDraft,
                 ...sampleLayout,
                 ...platform,
                 ...reactiveWorkspace,
