@@ -8,12 +8,17 @@ from fastapi import APIRouter
 
 from web.backend.app_context import ApplicationContext
 from web.backend.errors import StorageUnavailable
+from web.backend.processing_recovery import install_processing_recovery
 from web.backend.recovery_status import build_recovery_status
 
 logger = logging.getLogger(__name__)
 
 
 def build_system_router(context: ApplicationContext) -> APIRouter:
+    # Router construction happens after the schedule router but before the app
+    # starts serving requests. Method lookup on the repository remains dynamic,
+    # so the guard also covers schedule closures created earlier.
+    install_processing_recovery(context.workspace_repository)
     router = APIRouter(tags=["system"])
 
     def status() -> Dict[str, Any]:
