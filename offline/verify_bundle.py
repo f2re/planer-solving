@@ -5,12 +5,29 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
 
 class VerificationError(RuntimeError):
     pass
+
+
+REQUIRED_FRONTEND_FILES = (
+    "index.html",
+    "assets/app.css",
+    "assets/app.js",
+    "assets/vue.global.prod.js",
+    "assets/axios.min.js",
+    "assets/planner-app.js",
+    "assets/unified-operations.js",
+)
+ABSOLUTE_ASSET_RE = re.compile(r"['\"](/assets/[A-Za-z0-9_./-]+\.(?:js|css))['\"]")
+HTML_ASSET_RE = re.compile(r"(?:src|href)=['\"]/?assets/([^'\"]+)['\"]")
+STATIC_IMPORT_RE = re.compile(r"\bfrom\s+['\"](\.[^'\"]+\.js)['\"]")
+SIDE_EFFECT_IMPORT_RE = re.compile(r"\bimport\s+['\"](\.[^'\"]+\.js)['\"]")
+DYNAMIC_IMPORT_RE = re.compile(r"\bimport\s*\(\s*['\"](\.[^'\"]+\.js)['\"]\s*\)")
 
 
 def sha256(path: Path) -> str:
@@ -42,6 +59,90 @@ def safe_path(root: Path, relative: str) -> Path:
     return candidate
 
 
+def verify_frontend(root: Path, manifest: dict[str, Any]) -> tuple[list[str], int]:
+    """Require the browser entrypoint and all local module dependencies."""
+
+    app_root = (root / "app").resolve()
+    frontend = app_root / "web" / "frontend"
+    errors: list[str] = []
+    queue: list[Path] = []
+    visited: set[Path] = set()
+    checked = 0
+
+    def add(path: Path) -> None:
+        resolved = path.resolve(strict=False)
+        try:
+            resolved.relative_to(frontend)
+        except ValueError:
+            errors.append(f"Ссылка интерфейса выходит за каталог frontend: {path}")
+            return
+        if resolved not in queue and resolved not in visited:
+            queue.append(resolved)
+
+    for relative in REQUIRED_FRONTEND_FILES:
+        add(frontend / relative)
+
+    index = frontend / "index.html"
+    if index.is_file():
+        try:
+            source = index.read_text(encoding="utf-8")
+            for relative in HTML_ASSET_RE.findall(source):
+                add(frontend / "assets" / relative)
+        except OSError as exc:
+            errors.append(f"Не удалось прочитать app/web/frontend/index.html: {exc}")
+
+    app_script = frontend / "assets" / "app.js"
+    if app_script.is_file():
+        try:
+            source = app_script.read_text(encoding="utf-8")
+            for absolute in ABSOLUTE_ASSET_RE.findall(source):
+                add(frontend / absolute.removeprefix("/"))
+        except OSError as exc:
+            errors.append(f"Не удалось прочитать app/web/frontend/assets/app.js: {exc}")
+
+    while queue:
+        path = queue.pop(0)
+        if path in visited:
+            continue
+        visited.add(path)
+        try:
+            relative_frontend = path.relative_to(frontend).as_posix()
+            relative_bundle = path.relative_to(root).as_posix()
+        except ValueError:
+            errors.append(f"Недопустимый путь интерфейса: {path}")
+            continue
+
+        if not path.is_file():
+            errors.append(f"Отсутствует обязательный файл интерфейса: {relative_frontend}")
+            continue
+        if relative_bundle not in manifest["files"]:
+            errors.append(f"Файл интерфейса отсутствует в manifest: {relative_bundle}")
+            continue
+        try:
+            if path.stat().st_size <= 0:
+                errors.append(f"Пустой файл интерфейса: {relative_frontend}")
+                continue
+            checked += 1
+            if path.suffix != ".js":
+                continue
+            source = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"Файл интерфейса недоступен: {relative_frontend}: {exc}")
+            continue
+
+        for absolute in ABSOLUTE_ASSET_RE.findall(source):
+            add(frontend / absolute.removeprefix("/"))
+        imports = (
+            STATIC_IMPORT_RE.findall(source)
+            + SIDE_EFFECT_IMPORT_RE.findall(source)
+            + DYNAMIC_IMPORT_RE.findall(source)
+        )
+        for imported in imports:
+            add(path.parent / imported)
+
+    return errors, checked
+
+
 def verify_bundle(root: Path, manifest_path: Path | None = None) -> dict[str, Any]:
     root = root.resolve()
     manifest_path = (manifest_path or root / "manifest.json").resolve()
@@ -65,10 +166,14 @@ def verify_bundle(root: Path, manifest_path: Path | None = None) -> dict[str, An
             errors.append(f"Контрольная сумма не совпадает: {relative}")
             continue
         checked += 1
+
+    frontend_errors, frontend_checked = verify_frontend(root, manifest)
+    errors.extend(frontend_errors)
     return {
         "ok": not errors,
         "checked": checked,
         "expected": len(manifest["files"]),
+        "frontend_checked": frontend_checked,
         "errors": errors,
         "manifest": manifest,
     }
@@ -88,7 +193,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.as_json:
         print(json.dumps({k: v for k, v in result.items() if k != "manifest"}, ensure_ascii=False, indent=2))
     elif result["ok"]:
-        print(f"Пакет проверен: {result['checked']} файлов.")
+        print(
+            f"Пакет проверен: {result['checked']} файлов; "
+            f"цепочка интерфейса: {result['frontend_checked']} файлов."
+        )
     else:
         print("Пакет повреждён:", file=sys.stderr)
         for error in result["errors"]:
