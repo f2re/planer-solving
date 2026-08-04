@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 from typing import Any
@@ -26,6 +27,94 @@ REQUIRED_MODULES = (
     "ortools",
     "multipart",
 )
+REQUIRED_FRONTEND_FILES = (
+    "index.html",
+    "assets/app.css",
+    "assets/app.js",
+    "assets/vue.global.prod.js",
+    "assets/axios.min.js",
+    "assets/planner-app.js",
+    "assets/unified-operations.js",
+)
+ABSOLUTE_ASSET_RE = re.compile(r"['\"](/assets/[A-Za-z0-9_./-]+\.(?:js|css))['\"]")
+HTML_ASSET_RE = re.compile(r"(?:src|href)=['\"]/?assets/([^'\"]+)['\"]")
+STATIC_IMPORT_RE = re.compile(r"\bfrom\s+['\"](\.[^'\"]+\.js)['\"]")
+SIDE_EFFECT_IMPORT_RE = re.compile(r"\bimport\s+['\"](\.[^'\"]+\.js)['\"]")
+DYNAMIC_IMPORT_RE = re.compile(r"\bimport\s*\(\s*['\"](\.[^'\"]+\.js)['\"]\s*\)")
+
+
+def frontend_asset_errors(frontend_dir: Path) -> tuple[list[str], list[str]]:
+    """Validate the entrypoint and the complete local ES-module dependency closure."""
+
+    frontend = frontend_dir.resolve()
+    errors: list[str] = []
+    checked: list[str] = []
+    queue: list[Path] = []
+    visited: set[Path] = set()
+
+    def add(path: Path) -> None:
+        resolved = path.resolve(strict=False)
+        try:
+            resolved.relative_to(frontend)
+        except ValueError:
+            errors.append(f"Ссылка интерфейса выходит за каталог frontend: {path}")
+            return
+        if resolved not in visited and resolved not in queue:
+            queue.append(resolved)
+
+    for relative in REQUIRED_FRONTEND_FILES:
+        add(frontend / relative)
+
+    index = frontend / "index.html"
+    if index.is_file():
+        try:
+            source = index.read_text(encoding="utf-8")
+            for relative in HTML_ASSET_RE.findall(source):
+                add(frontend / "assets" / relative)
+        except OSError as exc:
+            errors.append(f"Не удалось прочитать index.html: {exc}")
+
+    app_script = frontend / "assets" / "app.js"
+    if app_script.is_file():
+        try:
+            source = app_script.read_text(encoding="utf-8")
+            for absolute in ABSOLUTE_ASSET_RE.findall(source):
+                add(frontend / absolute.removeprefix("/"))
+        except OSError as exc:
+            errors.append(f"Не удалось прочитать assets/app.js: {exc}")
+
+    while queue:
+        path = queue.pop(0)
+        if path in visited:
+            continue
+        visited.add(path)
+        relative = path.relative_to(frontend).as_posix()
+        if not path.is_file():
+            errors.append(f"Отсутствует файл интерфейса: {relative}")
+            continue
+        try:
+            if path.stat().st_size <= 0:
+                errors.append(f"Пустой файл интерфейса: {relative}")
+                continue
+            checked.append(relative)
+            if path.suffix != ".js":
+                continue
+            source = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"Файл интерфейса недоступен: {relative}: {exc}")
+            continue
+
+        for absolute in ABSOLUTE_ASSET_RE.findall(source):
+            add(frontend / absolute.removeprefix("/"))
+        relative_imports = (
+            STATIC_IMPORT_RE.findall(source)
+            + SIDE_EFFECT_IMPORT_RE.findall(source)
+            + DYNAMIC_IMPORT_RE.findall(source)
+        )
+        for imported in relative_imports:
+            add(path.parent / imported)
+
+    return errors, sorted(set(checked))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         "base_prefix": sys.base_prefix,
         "full": bool(args.full),
         "modules": {},
+        "mutable_targets": {},
     }
 
     if sys.version_info < (3, 11):
@@ -109,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
         app_root / "web" / "backend" / "main.py",
         app_root / "web" / "backend" / "recovery_catalog.py",
         app_root / "web" / "frontend" / "index.html",
+        app_root / "web" / "frontend" / "assets" / "app.js",
+        app_root / "web" / "frontend" / "assets" / "unified-operations.js",
         app_root / "requirements-runtime.txt",
     )
     for path in required_files:
@@ -118,6 +210,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"Отсутствует файл приложения: {path}",
                 "Повторно разверните тот же выпуск штатным установщиком с --repair; shared-данные сохранятся.",
             )
+
+    frontend_errors, frontend_checked = frontend_asset_errors(app_root / "web" / "frontend")
+    details["frontend_assets"] = frontend_checked
+    for message in frontend_errors:
+        issue(
+            "internal_error",
+            message,
+            "Автономный пакет неполон или смешаны версии файлов. Повторно скопируйте архив и .sha256, затем выполните установщик с --repair.",
+        )
 
     for name in ("data", "input", "output"):
         expected = shared_dir / name if shared_dir.name != name else shared_dir
@@ -129,14 +230,52 @@ def main(argv: list[str] | None = None) -> int:
             expected = app_root / name
         writable_directory(expected)
 
+    # Installed releases are immutable. All mutable links must resolve into
+    # shared before the application is opened, otherwise atomic *.tmp writes
+    # will incorrectly target the date-stamped release directory.
+    installed_layout = shared_dir.name == "shared" and (
+        (app_root / "teachers.json").is_symlink()
+        or os.environ.get("PLANNER_SHARED_DIR")
+    )
+    if installed_layout:
+        expected_targets = {
+            "data": shared_dir / "data",
+            "input": shared_dir / "input",
+            "output": shared_dir / "output",
+            "teachers.json": shared_dir / "teachers.json",
+        }
+        for name, expected in expected_targets.items():
+            logical = app_root / name
+            resolved = logical.resolve(strict=False)
+            expected_resolved = expected.resolve(strict=False)
+            details["mutable_targets"][name] = str(resolved)
+            if resolved != expected_resolved:
+                issue(
+                    "storage_unavailable",
+                    f"Изменяемый путь {logical} ведёт в {resolved}, ожидался {expected_resolved}.",
+                    "Не меняйте права каталога выпуска. Повторите установку с --repair: установщик восстановит ссылки на shared.",
+                )
+        writable_directory(shared_dir)
+
     if args.full:
         previous_base = os.environ.get("PLANNER_BASE_DIR")
+        previous_shared = os.environ.get("PLANNER_SHARED_DIR")
         os.environ["PLANNER_BASE_DIR"] = str(app_root)
+        if shared_dir.name == "shared":
+            os.environ["PLANNER_SHARED_DIR"] = str(shared_dir)
         try:
             from web.backend.app_factory import create_app
 
             app = create_app(app_root)
             details["routes"] = len(app.routes)
+            context = app.state.context
+            details["resolved_teachers_json"] = str(context.paths.teachers_json)
+            if installed_layout and context.paths.teachers_json != (shared_dir / "teachers.json").resolve():
+                issue(
+                    "storage_unavailable",
+                    "Приложение не использует shared/teachers.json как изменяемое хранилище.",
+                    "Выполните установщик с --repair и не запускайте код непосредственно из каталога releases.",
+                )
         except Exception as exc:  # pragma: no cover - exercised by broken installations
             issue(
                 "workspace_error",
@@ -148,6 +287,10 @@ def main(argv: list[str] | None = None) -> int:
                 os.environ.pop("PLANNER_BASE_DIR", None)
             else:
                 os.environ["PLANNER_BASE_DIR"] = previous_base
+            if previous_shared is None:
+                os.environ.pop("PLANNER_SHARED_DIR", None)
+            else:
+                os.environ["PLANNER_SHARED_DIR"] = previous_shared
 
     details["ok"] = not errors
     details["errors"] = errors
@@ -177,7 +320,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(
                 "Окружение службы исправно: "
-                f"Python {details['python_version']}, модулей {len(REQUIRED_MODULES)}{suffix}."
+                f"Python {details['python_version']}, модулей {len(REQUIRED_MODULES)}, "
+                f"файлов интерфейса {len(frontend_checked)}{suffix}."
             )
         for warning in warnings:
             print(f"Предупреждение: {warning}", file=sys.stderr)
