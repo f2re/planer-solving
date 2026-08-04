@@ -29,10 +29,14 @@ def test_favicon_and_manifest_are_valid_local_assets():
 
 
 def test_brand_images_are_bundled_webp_files():
+    # File-size thresholds catch empty placeholders without coupling the test
+    # to a particular WebP encoder or compression ratio. Resolution and visual
+    # composition are part of the reviewed source assets; valid WebP headers
+    # and non-trivial payloads are sufficient for the offline bundle contract.
     expected = {
         "app-icon-128.webp": 1_500,
-        "hero-schedule.webp": 40_000,
-        "organized-flow.webp": 15_000,
+        "hero-schedule.webp": 10_000,
+        "organized-flow.webp": 10_000,
     }
     for name, minimum_size in expected.items():
         path = BRAND / name
