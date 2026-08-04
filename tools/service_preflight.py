@@ -10,6 +10,8 @@ import sys
 import tempfile
 from typing import Any
 
+from web.backend.recovery_catalog import compact_recommendations
+
 
 REQUIRED_MODULES = (
     "fastapi",
@@ -20,15 +22,6 @@ REQUIRED_MODULES = (
     "ortools",
     "multipart",
 )
-
-
-def _writable_directory(path: Path, errors: list[str]) -> None:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(prefix=".planner-write-", dir=path, delete=True):
-            pass
-    except OSError as exc:
-        errors.append(f"Каталог недоступен для записи: {path}: {exc}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,6 +40,26 @@ def main(argv: list[str] | None = None) -> int:
     shared_dir = (args.shared_dir or app_root / "data").resolve()
     errors: list[str] = []
     warnings: list[str] = []
+    issues: list[dict[str, str]] = []
+    issue_codes: list[str] = []
+
+    def issue(code: str, message: str, resolution: str) -> None:
+        errors.append(message)
+        issue_codes.append(code)
+        issues.append({"code": code, "message": message, "resolution": resolution})
+
+    def writable_directory(path: Path) -> None:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(prefix=".planner-write-", dir=path, delete=True):
+                pass
+        except OSError as exc:
+            issue(
+                "storage_unavailable",
+                f"Каталог недоступен для записи: {path}: {exc}",
+                "Проверьте владельца и права каталога, свободное место и режим файловой системы; затем повторите --check.",
+            )
+
     details: dict[str, Any] = {
         "app_root": str(app_root),
         "shared_dir": str(shared_dir),
@@ -59,13 +72,21 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if sys.version_info < (3, 11):
-        errors.append(f"Требуется Python 3.11+, найден {details['python_version']}.")
+        issue(
+            "internal_error",
+            f"Требуется Python 3.11+, найден {details['python_version']}.",
+            "Используйте встроенный runtime пакета: установщик --python bundled --strict-python --repair.",
+        )
     if sys.prefix == sys.base_prefix:
-        warnings.append("Служба запущена не из виртуального окружения.")
+        warnings.append("Служба запущена не из виртуального окружения; штатный systemd должен использовать current/.venv/bin/python.")
 
     executable = Path(sys.executable)
     if not executable.is_file() or not os.access(executable, os.X_OK):
-        errors.append(f"Интерпретатор недоступен: {executable}")
+        issue(
+            "internal_error",
+            f"Интерпретатор недоступен: {executable}",
+            "Проверьте ссылку current и пересоздайте venv установщиком с --repair.",
+        )
 
     for module_name in REQUIRED_MODULES:
         try:
@@ -73,17 +94,26 @@ def main(argv: list[str] | None = None) -> int:
             details["modules"][module_name] = getattr(module, "__version__", "ok")
         except Exception as exc:  # pragma: no cover - exercised by broken installations
             details["modules"][module_name] = None
-            errors.append(f"Не импортируется модуль {module_name}: {exc}")
+            issue(
+                "internal_error",
+                f"Не импортируется модуль {module_name}: {exc}",
+                "Не устанавливайте пакет глобально. Пересоздайте venv выпуска из автономного wheelhouse командой установщика --repair.",
+            )
 
     required_files = (
         app_root / "VERSION",
         app_root / "web" / "backend" / "main.py",
+        app_root / "web" / "backend" / "recovery_catalog.py",
         app_root / "web" / "frontend" / "index.html",
         app_root / "requirements-runtime.txt",
     )
     for path in required_files:
         if not path.is_file():
-            errors.append(f"Отсутствует файл приложения: {path}")
+            issue(
+                "internal_error",
+                f"Отсутствует файл приложения: {path}",
+                "Повторно разверните тот же выпуск штатным установщиком с --repair; shared-данные сохранятся.",
+            )
 
     for name in ("data", "input", "output"):
         expected = shared_dir / name if shared_dir.name != name else shared_dir
@@ -93,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
             expected = shared_dir
         else:
             expected = app_root / name
-        _writable_directory(expected, errors)
+        writable_directory(expected)
 
     if args.full:
         previous_base = os.environ.get("PLANNER_BASE_DIR")
@@ -104,7 +134,11 @@ def main(argv: list[str] | None = None) -> int:
             app = create_app(app_root)
             details["routes"] = len(app.routes)
         except Exception as exc:  # pragma: no cover - exercised by broken installations
-            errors.append(f"Приложение не создаётся: {exc}")
+            issue(
+                "workspace_error",
+                f"Приложение не создаётся: {exc}",
+                "Запустите planner-solving-doctor, проверьте SQLite и миграции; затем повторите установщик с --repair.",
+            )
         finally:
             if previous_base is None:
                 os.environ.pop("PLANNER_BASE_DIR", None)
@@ -114,13 +148,23 @@ def main(argv: list[str] | None = None) -> int:
     details["ok"] = not errors
     details["errors"] = errors
     details["warnings"] = warnings
+    details["issues"] = issues
+    details["recommendations"] = compact_recommendations(issue_codes)
+    details["admin_commands"] = [
+        "sudo planner-solving-doctor --output /tmp/planner-solving-doctor.txt",
+        "sudo ./install-planner-solving.sh --python bundled --strict-python --repair",
+    ]
     if args.as_json:
         print(json.dumps(details, ensure_ascii=False, indent=2, default=str))
     else:
         if errors:
             print("Предварительная проверка службы не пройдена:", file=sys.stderr)
-            for error in errors:
-                print(f"- {error}", file=sys.stderr)
+            for item in issues:
+                print(f"- [{item['code']}] {item['message']}", file=sys.stderr)
+                print(f"  Решение: {item['resolution']}", file=sys.stderr)
+            print("Штатные инструменты:", file=sys.stderr)
+            for command in details["admin_commands"]:
+                print(f"- {command}", file=sys.stderr)
         else:
             suffix = (
                 f", маршрутов {details.get('routes', 0)}"
