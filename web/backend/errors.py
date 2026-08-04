@@ -85,6 +85,16 @@ def _known_codes() -> set[str]:
     }
 
 
+def _operator_fix_action() -> dict[str, Any]:
+    return {
+        "type": "keep_current_tab",
+        "label": "Исправить данные",
+        "description": "Остаться в текущем окне, изменить указанное значение и повторить действие.",
+        "primary": True,
+        "requires_admin": False,
+    }
+
+
 def _recovery(
     *,
     code: str,
@@ -121,14 +131,8 @@ def _recovery(
         overrides=values,
         extra_actions=actions,
     )
-    if not known and status_code < 500 and not actions:
-        descriptor["actions"] = [{
-            "type": "keep_current_tab",
-            "label": "Исправить данные",
-            "description": "Остаться в текущем окне, изменить указанное значение и повторить действие.",
-            "primary": True,
-            "requires_admin": False,
-        }]
+    if status_code < 500 and not actions and (not known or code == "workspace_error"):
+        descriptor["actions"] = [_operator_fix_action()]
     return descriptor
 
 
@@ -241,13 +245,13 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(WorkspaceError)
     async def workspace_error_handler(request: Request, exc: WorkspaceError) -> JSONResponse:
-        # WorkspaceError represents a domain validation or business-rule
-        # conflict. Real sqlite3/OSError failures are classified separately by
-        # the generic handler and remain 503/507 critical incidents.
+        # Preserve the public code used by clients, while status/recovery
+        # distinguish a correctable business rule (400) from sqlite failure
+        # (503, emitted by the generic sqlite3 handler).
         return _response(
             request=request,
             message=str(exc),
-            code="workspace_validation_error",
+            code="workspace_error",
             status_code=400,
             recovery={
                 "title": "Исправьте данные",
