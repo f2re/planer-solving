@@ -1,4 +1,23 @@
 const INSTALL_MARK = 'plannerFailureRecoveryInstalled';
+const ACTIONABLE_CODES = new Set([
+    'session_not_found',
+    'session_corrupted',
+    'uploaded_file_not_found',
+    'storage_unavailable',
+    'workspace_not_found',
+    'workspace_error',
+    'draft_revision_conflict',
+    'draft_too_large',
+    'replacement_rejected',
+    'append_commit_failed',
+    'replacement_commit_failed',
+    'remove_commit_failed',
+    'restore_commit_failed',
+    'source_archive_missing',
+    'output_write_failed',
+    'processing_history_unavailable',
+    'internal_error',
+]);
 let lastFailure = null;
 let interceptorId = null;
 
@@ -36,22 +55,25 @@ function closeCenter() {
 
 function normalizedFailure(errorOrPayload) {
     const response = errorOrPayload?.response;
-    const payload = response?.data || errorOrPayload?.detail || errorOrPayload || {};
-    const recovery = payload.recovery || {};
+    const raw = response?.data || errorOrPayload || {};
+    const payload = raw && typeof raw === 'object' ? raw : { detail: String(raw) };
+    const recovery = payload.recovery && typeof payload.recovery === 'object'
+        ? payload.recovery
+        : {};
     return {
         status: Number(response?.status || payload.status || 0),
         code: String(payload.code || recovery.code || 'internal_error'),
         incidentId: String(payload.incident_id || recovery.incident_id || ''),
         detail: String(payload.detail || recovery.detail || 'Операция не выполнена.'),
         recovery,
-        requestConfig: response ? errorOrPayload.config : errorOrPayload?.requestConfig,
+        requestConfig: response ? errorOrPayload.config : payload.requestConfig,
     };
 }
 
 function shouldOpen(value) {
     return value.recovery?.severity === 'critical'
         || value.status >= 500
-        || ['session_corrupted', 'storage_unavailable', 'output_write_failed', 'workspace_error'].includes(value.code);
+        || ACTIONABLE_CODES.has(value.code);
 }
 
 function formatBytes(value) {
@@ -109,22 +131,39 @@ function renderDiagnostics(container, data) {
     }
 }
 
+async function retryRequest(failure) {
+    const app = proxy();
+    const config = failure.requestConfig;
+    if (!config) {
+        closeCenter();
+        app?.addToast?.(
+            'Повторите действие',
+            'Автоматический повтор для этой операции недоступен. Текущий сеанс сохранён; повторите исходную команду в интерфейсе.',
+            'info',
+        );
+        return;
+    }
+    closeCenter();
+    try {
+        if (config.transport === 'fetch') {
+            const response = await fetch(config.input, config.init || {});
+            if (!response.ok) return;
+        } else if (window.axios) {
+            await window.axios({ ...config, headers: { ...(config.headers || {}) } });
+        } else {
+            throw new Error('Клиент запросов недоступен');
+        }
+        app?.addToast?.('Повтор выполнен', 'Операция завершилась без критической ошибки.', 'success');
+    } catch (_) {
+        // The interceptors open the current failure with a new incident id.
+    }
+}
+
 async function executeAction(action, failure, diagnostics) {
     const app = proxy();
     const type = String(action?.type || '');
     if (type === 'retry_request') {
-        if (!failure.requestConfig || !window.axios) {
-            window.location.reload();
-            return;
-        }
-        const config = { ...failure.requestConfig, headers: { ...(failure.requestConfig.headers || {}) } };
-        closeCenter();
-        try {
-            await window.axios(config);
-            app?.addToast?.('Повтор выполнен', 'Операция завершилась без критической ошибки.', 'success');
-        } catch (_) {
-            // The interceptor opens the current failure with a new incident id.
-        }
+        await retryRequest(failure);
         return;
     }
     if (type === 'open_diagnostics') {
@@ -149,18 +188,23 @@ async function executeAction(action, failure, diagnostics) {
     }
     if (type === 'start_new_session') {
         closeCenter();
-        await app?.resetWorkflow?.();
+        if (typeof app?.resetWorkflow === 'function') await app.resetWorkflow();
+        else {
+            localStorage.removeItem('planner-active-session-v1');
+            window.location.reload();
+        }
         return;
     }
     if (type === 'restore_server_draft') {
         closeCenter();
-        await window.__plannerSessionDraft?.restore?.();
+        if (window.__plannerSessionDraft?.restore) await window.__plannerSessionDraft.restore();
+        else app?.addToast?.('Черновик', 'Обновите страницу: сохранённый черновик будет восстановлен автоматически.', 'info');
         return;
     }
     if (type === 'open_history') {
         closeCenter();
         if (typeof app?.openOperations === 'function') app.openOperations('history');
-        else {
+        else if (app) {
             app.operationsOpen = true;
             app.operationsTab = 'history';
         }
@@ -179,21 +223,24 @@ async function executeAction(action, failure, diagnostics) {
     }
     if (type === 'replace_current_file') {
         closeCenter();
+        if (!app) return;
         app.step = 2;
         await Vue.nextTick();
         const input = document.querySelector('.file-item.selected .file-session-actions input[type="file"]')
             || document.querySelector('.file-item.selected input[type="file"]');
         if (input) input.click();
-        else app?.addToast?.('Замена файла', 'Откройте нужный файл в списке и нажмите «Заменить».', 'info');
+        else app.addToast?.('Замена файла', 'Откройте нужный файл в списке и нажмите «Заменить».', 'info');
         return;
     }
     if (type === 'generate_now') {
         closeCenter();
-        await app?.generate?.();
+        if (typeof app?.generate === 'function') await app.generate();
+        else app?.addToast?.('Формирование', 'Вернитесь к редактору и нажмите «Сформировать результат».', 'info');
         return;
     }
     if (type === 'review_session_files') {
         closeCenter();
+        if (!app) return;
         app.step = 2;
         await Vue.nextTick();
         document.querySelector('.file-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
