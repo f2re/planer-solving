@@ -29,6 +29,7 @@ def test_failure_center_handles_every_operator_action_family():
     assert "planner:failure" in source
     assert "incidentId" in source
     assert "state_preserved" in source
+    assert "ACTIONABLE_CODES" in source
     assert "http://" not in source
     assert "https://" not in source
 
@@ -39,9 +40,11 @@ def test_fetch_failures_are_forwarded_without_consuming_response():
     assert "return response" in source
     assert "planner:failure" in source
     assert "pathname.startsWith('/api/')" in source
+    assert "transport: 'fetch'" in source
+    assert "path !== '/api/system/recovery'" in source
 
 
-def test_recovery_is_installed_after_vue_and_before_draft_runtime():
+def test_recovery_interceptors_precede_vue_startup_requests_and_draft_runtime():
     source = read("app.js")
     assert "'/assets/failure-recovery.css'" in source
     assert "import('/assets/failure-recovery.js')" in source
@@ -50,7 +53,7 @@ def test_recovery_is_installed_after_vue_and_before_draft_runtime():
     failure = source.index("failureRecovery.installFailureRecovery?.()")
     fetch = source.index("fetchRecovery.installFetchRecovery?.()")
     draft = source.index("draftRuntime.installSessionDraftRuntime?.()")
-    assert mount < failure < fetch < draft
+    assert failure < fetch < mount < draft
 
 
 def test_recovery_styles_support_mobile_and_reduced_motion():
