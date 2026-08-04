@@ -71,6 +71,9 @@ function normalizedFailure(errorOrPayload) {
 }
 
 function shouldOpen(value) {
+    // The public `workspace_error` code is also used for correctable business
+    // validation. Only its 5xx form represents SQLite/storage failure.
+    if (value.code === 'workspace_error' && value.status < 500) return false;
     return value.recovery?.severity === 'critical'
         || value.status >= 500
         || ACTIONABLE_CODES.has(value.code);
