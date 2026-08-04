@@ -6,7 +6,8 @@
         started: true,
         mounted: false,
         startedAt: Date.now(),
-        error: null
+        error: null,
+        optionalFailures: []
     };
 
     for (const href of [
@@ -68,6 +69,31 @@
         document.body.appendChild(box);
     }
 
+    function optionalModule(result, label) {
+        if (result.status === 'fulfilled') return result.value || {};
+        boot.optionalFailures.push({ label, error: errorText(result.reason) });
+        console.warn(`[planner] ${label} was not loaded`, result.reason);
+        return {};
+    }
+
+    function runOptional(label, callback) {
+        if (typeof callback !== 'function') return undefined;
+        try {
+            return callback();
+        } catch (error) {
+            boot.optionalFailures.push({ label, error: errorText(error) });
+            console.warn(`[planner] ${label} failed and was disabled`, error);
+            return undefined;
+        }
+    }
+
+    function markMounted() {
+        boot.mounted = true;
+        boot.mountedAt = Date.now();
+        window.clearTimeout(watchdog);
+        document.getElementById('planner-startup-error')?.remove();
+    }
+
     window.addEventListener('error', event => {
         if (!boot.mounted) showStartupFailure(event.error || event.message);
     });
@@ -91,83 +117,52 @@
         import('/assets/fetch-recovery.js')
     ])
         .then(results => {
-            const brandResult = results[0];
-            const operatorFlowResult = results[1];
+            const brand = optionalModule(results[0], 'visual identity');
+            const operatorFlow = optionalModule(results[1], 'operator flow enhancements');
             const applicationResult = results[2];
-            const draftRuntimeResult = results[3];
-            const unifiedOperationsResult = results[4];
-            const failureRecoveryResult = results[5];
-            const fetchRecoveryResult = results[6];
+            const draftRuntime = optionalModule(results[3], 'server draft runtime');
+            const unifiedOperations = optionalModule(results[4], 'unified operations center');
+            const failureRecovery = optionalModule(results[5], 'failure recovery center');
+            const fetchRecovery = optionalModule(results[6], 'fetch recovery interceptor');
+
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
-
-            const brand = brandResult.status === 'fulfilled' ? brandResult.value : {};
-            if (brandResult.status !== 'fulfilled') {
-                console.warn('[planner] visual identity was not loaded', brandResult.reason);
-            }
-
-            const operatorFlow = operatorFlowResult.status === 'fulfilled'
-                ? operatorFlowResult.value
-                : {};
-            if (operatorFlowResult.status !== 'fulfilled') {
-                console.warn('[planner] operator flow enhancements were not loaded', operatorFlowResult.reason);
-            }
-
-            const draftRuntime = draftRuntimeResult.status === 'fulfilled'
-                ? draftRuntimeResult.value
-                : {};
-            if (draftRuntimeResult.status !== 'fulfilled') {
-                console.warn('[planner] server draft runtime was not loaded', draftRuntimeResult.reason);
-            }
-
-            const unifiedOperations = unifiedOperationsResult.status === 'fulfilled'
-                ? unifiedOperationsResult.value
-                : {};
-            if (unifiedOperationsResult.status !== 'fulfilled') {
-                console.warn('[planner] unified operations center was not loaded', unifiedOperationsResult.reason);
-            }
-
-            const failureRecovery = failureRecoveryResult.status === 'fulfilled'
-                ? failureRecoveryResult.value
-                : {};
-            if (failureRecoveryResult.status !== 'fulfilled') {
-                console.warn('[planner] failure recovery center was not loaded', failureRecoveryResult.reason);
-            }
-
-            const fetchRecovery = fetchRecoveryResult.status === 'fulfilled'
-                ? fetchRecoveryResult.value
-                : {};
-            if (fetchRecoveryResult.status !== 'fulfilled') {
-                console.warn('[planner] fetch recovery interceptor was not loaded', fetchRecoveryResult.reason);
-            }
-
-            // Static brand markup and network recovery are installed before Vue
-            // can issue its initial API requests. Thus storage/workspace failures
-            // during mounted hooks receive the same actionable recovery UI.
-            brand.installBrandMetadata?.();
-            brand.installBrandMarkup?.();
-            operatorFlow.installOperatorFlowMarkup?.();
-            failureRecovery.installFailureRecovery?.();
-            fetchRecovery.installFetchRecovery?.();
-
             const application = applicationResult.value;
             if (typeof application.mount !== 'function') {
                 throw new TypeError('Модуль planner-app.js не экспортирует функцию mount().');
             }
+
+            // Эти расширения меняют только статическую разметку и перехватчики.
+            // Их отказ не должен блокировать основное Vue-приложение.
+            runOptional('brand metadata', () => brand.installBrandMetadata?.());
+            runOptional('brand markup', () => brand.installBrandMarkup?.());
+            runOptional('operator flow markup', () => operatorFlow.installOperatorFlowMarkup?.());
+            runOptional('failure recovery', () => failureRecovery.installFailureRecovery?.());
+            runOptional('fetch recovery', () => fetchRecovery.installFetchRecovery?.());
+
+            // Единственный критический этап клиентского запуска — монтирование
+            // основного приложения. Сразу после него страница считается рабочей.
             application.mount();
-            operatorFlow.installOperatorFlowRuntime?.();
-            draftRuntime.installSessionDraftRuntime?.();
-            unifiedOperations.installUnifiedOperationsRuntime?.();
+            markMounted();
 
-            boot.mounted = true;
-            boot.mountedAt = Date.now();
-            window.clearTimeout(watchdog);
-            document.getElementById('planner-startup-error')?.remove();
+            // Все последующие модули являются улучшениями. Ошибка в одном из них,
+            // включая unified-operations.js, записывается в диагностику, но не
+            // скрывает уже смонтированное рабочее место оператора.
+            runOptional('operator flow runtime', () => operatorFlow.installOperatorFlowRuntime?.());
+            runOptional('server draft runtime', () => draftRuntime.installSessionDraftRuntime?.());
+            runOptional('unified operations runtime', () => unifiedOperations.installUnifiedOperationsRuntime?.());
 
-            // Политика пустых паролей не должна задерживать основной интерфейс.
-            // Даже если вспомогательный модуль повреждён, Vue уже смонтирован.
             import('/assets/ui-runtime-fixes.js')
-                .then(runtime => runtime.installPasswordInputPolicy?.())
-                .catch(error => console.warn('[planner] password policy was not installed', error));
+                .then(runtime => runOptional(
+                    'password input policy',
+                    () => runtime.installPasswordInputPolicy?.()
+                ))
+                .catch(error => {
+                    boot.optionalFailures.push({
+                        label: 'password input policy',
+                        error: errorText(error)
+                    });
+                    console.warn('[planner] password policy was not loaded', error);
+                });
         })
         .catch(showStartupFailure);
 })();
