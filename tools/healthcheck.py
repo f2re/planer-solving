@@ -16,7 +16,12 @@ from src.data_migrations import (
     validate_document,
 )
 from src.platform_store import PLATFORM_SCHEMA_VERSION
-from web.backend.recovery_catalog import compact_recommendations
+
+try:
+    from web.backend.recovery_catalog import compact_recommendations
+except Exception:  # The diagnostic must still run when the active release is incomplete.
+    def compact_recommendations(_codes: list[str]) -> list[dict[str, Any]]:
+        return []
 
 REQUIRED_PLATFORM_TABLES = {
     "workspaces",
