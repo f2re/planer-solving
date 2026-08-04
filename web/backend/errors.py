@@ -97,7 +97,8 @@ def _recovery(
 ) -> dict[str, Any]:
     values = dict(overrides or {})
     lookup_code = code
-    if code not in _known_codes():
+    known = code in _known_codes()
+    if not known:
         lookup_code = "internal_error"
         values.setdefault("code", code)
         values.setdefault("title", "Операция не выполнена")
@@ -112,7 +113,7 @@ def _recovery(
                 else "Повторите действие один раз; при повторном отказе откройте диагностику и передайте код инцидента администратору."
             ),
         )
-    return recovery_for(
+    descriptor = recovery_for(
         lookup_code,
         detail=detail,
         incident_id=incident_id,
@@ -120,6 +121,15 @@ def _recovery(
         overrides=values,
         extra_actions=actions,
     )
+    if not known and status_code < 500 and not actions:
+        descriptor["actions"] = [{
+            "type": "keep_current_tab",
+            "label": "Исправить данные",
+            "description": "Остаться в текущем окне, изменить указанное значение и повторить действие.",
+            "primary": True,
+            "requires_admin": False,
+        }]
+    return descriptor
 
 
 def _payload(
@@ -231,11 +241,21 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(WorkspaceError)
     async def workspace_error_handler(request: Request, exc: WorkspaceError) -> JSONResponse:
+        # WorkspaceError represents a domain validation or business-rule
+        # conflict. Real sqlite3/OSError failures are classified separately by
+        # the generic handler and remain 503/507 critical incidents.
         return _response(
             request=request,
             message=str(exc),
-            code="workspace_error",
-            status_code=503,
+            code="workspace_validation_error",
+            status_code=400,
+            recovery={
+                "title": "Исправьте данные",
+                "severity": "technical",
+                "retryable": True,
+                "state_preserved": True,
+                "guidance": "Измените указанное поле или решение и повторите операцию. Предыдущие данные не перезаписаны.",
+            },
         )
 
     @app.exception_handler(Exception)
