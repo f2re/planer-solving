@@ -70,6 +70,7 @@ jobs:
       - name: Check frontend JavaScript
         run: |
           node --check web/frontend/assets/app.js
+          node --check web/frontend/assets/brand-refresh.js
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/operator-flow.js
           node --check web/frontend/assets/session-file-actions.js
