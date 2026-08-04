@@ -7,13 +7,33 @@ function requestUrl(input) {
     return String(input?.url || '');
 }
 
-function isPlannerApi(url) {
+function plannerApiPath(url) {
     try {
         const parsed = new URL(url, window.location.href);
-        return parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/');
+        if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith('/api/')) return '';
+        return parsed.pathname;
     } catch (_) {
-        return false;
+        return '';
     }
+}
+
+function cloneableRequest(input, init = {}) {
+    const url = requestUrl(input);
+    if (!url || input instanceof Request) return null;
+    const body = init.body;
+    if (body !== undefined && body !== null && typeof body !== 'string') return null;
+    return {
+        transport: 'fetch',
+        input: url,
+        init: {
+            method: init.method,
+            headers: init.headers,
+            body,
+            credentials: init.credentials,
+            cache: init.cache,
+            keepalive: init.keepalive,
+        },
+    };
 }
 
 export function installFetchRecovery() {
@@ -23,7 +43,10 @@ export function installFetchRecovery() {
     window.fetch = async (...args) => {
         const response = await originalFetch(...args);
         const url = requestUrl(args[0]);
-        if (!response.ok && isPlannerApi(url)) {
+        const path = plannerApiPath(url);
+        // The diagnostics panel renders a local error for this endpoint; opening
+        // a second recovery dialog would obscure the original failure.
+        if (!response.ok && path && path !== '/api/system/recovery') {
             try {
                 const payload = await response.clone().json();
                 if (payload?.recovery) {
@@ -31,7 +54,7 @@ export function installFetchRecovery() {
                         detail: {
                             ...payload,
                             status: response.status,
-                            requestConfig: null,
+                            requestConfig: cloneableRequest(args[0], args[1] || {}),
                         },
                     }));
                 }
