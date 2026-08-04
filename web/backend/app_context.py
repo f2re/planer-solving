@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import tempfile
 import time
 from typing import Any, Dict, Optional, Protocol
 import uuid
@@ -29,6 +30,7 @@ class WorkspaceRepository(Protocol):
 @dataclass(frozen=True)
 class ApplicationPaths:
     base_dir: Path
+    shared_dir: Path
     data_dir: Path
     input_dir: Path
     output_dir: Path
@@ -43,16 +45,34 @@ class ApplicationPaths:
     @classmethod
     def from_base_dir(cls, base_dir: Path) -> "ApplicationPaths":
         base = Path(base_dir).resolve()
-        data = base / "data"
-        input_dir = base / "input"
+        configured_shared = os.environ.get("PLANNER_SHARED_DIR", "").strip()
+
+        if configured_shared:
+            shared = Path(configured_shared).expanduser().resolve()
+            data = shared / "data"
+            input_dir = shared / "input"
+            output_dir = shared / "output"
+            teachers_json = shared / "teachers.json"
+        else:
+            # Offline releases expose mutable data through symlinks. Resolve the
+            # targets once here so atomic writers create their temporary files in
+            # /opt/planner-solving/shared, never beside a root-owned release link.
+            data = (base / "data").resolve(strict=False)
+            input_dir = (base / "input").resolve(strict=False)
+            output_dir = (base / "output").resolve(strict=False)
+            teachers_json = (base / "teachers.json").resolve(strict=False)
+            parents = {data.parent, input_dir.parent, output_dir.parent, teachers_json.parent}
+            shared = parents.pop() if len(parents) == 1 else base
+
         return cls(
             base_dir=base,
+            shared_dir=shared,
             data_dir=data,
             input_dir=input_dir,
-            output_dir=base / "output",
+            output_dir=output_dir,
             session_root=input_dir / "analysis_sessions",
             frontend_dir=base / "web" / "frontend",
-            teachers_json=base / "teachers.json",
+            teachers_json=teachers_json,
             workspaces_json=data / "workspaces.json",
             workspace_database=data / "planner-solving.sqlite3",
             version_file=base / "VERSION",
@@ -68,10 +88,52 @@ class AnalysisSessionStore:
 
     @staticmethod
     def atomic_json_write(path: Path, data: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, path)
+        """Write JSON atomically in the real target directory.
+
+        ``Path.with_suffix('.tmp')`` is unsafe for release symlinks and for
+        concurrent workers: it places one predictable temporary file beside the
+        symlink. Resolve the target, create a unique file on the same filesystem,
+        fsync it, then replace the target while preserving the release symlink.
+        """
+
+        logical_path = Path(path)
+        logical_path.parent.mkdir(parents=True, exist_ok=True)
+        target = logical_path.resolve(strict=False)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        mode = 0o640
+        try:
+            mode = target.stat().st_mode & 0o777
+        except OSError:
+            pass
+
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            dir=target.parent,
+        )
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, mode)
+            stream = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1  # ownership transferred to the file object
+            with stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+            try:
+                directory_fd = os.open(target.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            temporary.unlink(missing_ok=True)
 
     def cleanup_old(self) -> None:
         threshold = time.time() - self.max_age_seconds
