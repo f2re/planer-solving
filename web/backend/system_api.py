@@ -1,4 +1,4 @@
-"""Health and application-version endpoints."""
+"""Health, application-version and operator recovery endpoints."""
 from __future__ import annotations
 
 import logging
@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from web.backend.app_context import ApplicationContext
 from web.backend.errors import StorageUnavailable
+from web.backend.recovery_status import build_recovery_status
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +21,20 @@ def build_system_router(context: ApplicationContext) -> APIRouter:
             return context.system_status()
         except Exception as exc:
             logger.exception("Workspace storage health check failed")
-            raise StorageUnavailable("Хранилище данных недоступно.") from exc
+            raise StorageUnavailable(
+                "Хранилище данных недоступно. Откройте диагностику, устраните первый критический пункт и повторите запрос."
+            ) from exc
+
+    def recovery_status() -> Dict[str, Any]:
+        try:
+            return build_recovery_status(context)
+        except Exception as exc:
+            logger.exception("Recovery diagnostics failed")
+            raise StorageUnavailable(
+                "Диагностика не завершена. Выполните planner-solving-doctor на сервере и приложите отчёт."
+            ) from exc
 
     router.add_api_route("/api/health", status, methods=["GET"])
     router.add_api_route("/api/system/version", status, methods=["GET"])
+    router.add_api_route("/api/system/recovery", recovery_status, methods=["GET"])
     return router
