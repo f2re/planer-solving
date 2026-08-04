@@ -1,0 +1,163 @@
+.failure-recovery-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 120000;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, .48);
+    backdrop-filter: blur(16px) saturate(125%);
+    -webkit-backdrop-filter: blur(16px) saturate(125%);
+}
+.failure-recovery-dialog {
+    width: min(760px, 100%);
+    max-height: min(860px, calc(100vh - 40px));
+    overflow: auto;
+    border: 1px solid rgba(255, 255, 255, .72);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 32px 90px rgba(15, 23, 42, .28);
+}
+.failure-recovery-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 22px 16px;
+    border-bottom: 1px solid rgba(15, 23, 42, .08);
+}
+.failure-recovery-symbol {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 15px;
+    color: #fff;
+    background: linear-gradient(145deg, #f59e0b, #d97706);
+    box-shadow: 0 12px 28px rgba(217, 119, 6, .24), inset 0 1px 0 rgba(255,255,255,.42);
+    font-size: 23px;
+    font-weight: 900;
+}
+.failure-recovery-symbol.critical { background: linear-gradient(145deg, #ef4444, #b91c1c); box-shadow: 0 12px 28px rgba(185, 28, 28, .25); }
+.failure-recovery-eyebrow {
+    display: block;
+    margin-bottom: 3px;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.failure-recovery-header h2 { margin: 0; color: #172033; font-size: clamp(20px, 3vw, 28px); letter-spacing: -.035em; }
+.failure-recovery-close {
+    width: 38px;
+    height: 38px;
+    border: 0;
+    border-radius: 12px;
+    color: #64748b;
+    background: #f1f5f9;
+    cursor: pointer;
+    font-size: 23px;
+}
+.failure-recovery-close:hover { color: #0f172a; background: #e2e8f0; }
+.failure-recovery-body { display: grid; gap: 13px; padding: 20px 22px; }
+.failure-recovery-detail { margin: 0; color: #172033; font-size: 15px; font-weight: 750; line-height: 1.48; }
+.failure-recovery-guidance { margin: 0; color: #526075; font-size: 13px; line-height: 1.58; }
+.failure-recovery-facts { display: flex; flex-wrap: wrap; gap: 8px; }
+.failure-recovery-facts span {
+    padding: 7px 10px;
+    border: 1px solid #dbe3ed;
+    border-radius: 999px;
+    color: #475569;
+    background: #f8fafc;
+    font-size: 11px;
+    font-weight: 780;
+}
+.failure-recovery-facts .preserved { color: #0f766e; border-color: #bce8df; background: #ecfdf8; }
+.failure-recovery-facts .lost { color: #b45309; border-color: #f6d7a7; background: #fff8e9; }
+.failure-recovery-facts .retryable { color: #315efb; border-color: #c8d4ff; background: #f0f4ff; }
+.failure-recovery-technical {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+.failure-recovery-technical summary { padding: 10px 12px; color: #64748b; cursor: pointer; font-size: 11px; font-weight: 760; }
+.failure-recovery-technical > div { display: grid; gap: 6px; padding: 0 12px 12px; }
+.failure-recovery-technical code { overflow-wrap: anywhere; color: #475569; font-size: 10px; }
+.failure-recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    padding: 16px 22px 22px;
+    border-top: 1px solid rgba(15, 23, 42, .08);
+}
+.failure-recovery-actions .btn { min-height: 40px; }
+.failure-diagnostics {
+    display: grid;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dbe3ed;
+    border-radius: 15px;
+    background: #f8fafc;
+}
+.failure-diagnostics[hidden] { display: none; }
+.failure-diagnostics-header { display: grid; gap: 2px; }
+.failure-diagnostics-header strong { font-size: 13px; }
+.failure-diagnostics-header small { color: #64748b; font-size: 10px; }
+.failure-diagnostics-list { display: grid; gap: 7px; }
+.failure-diagnostic {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 9px;
+    padding: 9px;
+    border: 1px solid #dbe3ed;
+    border-radius: 11px;
+    background: #fff;
+}
+.failure-diagnostic.ok { border-color: #bce8df; }
+.failure-diagnostic.warning { border-color: #f4d49a; background: #fffbeb; }
+.failure-diagnostic.critical { border-color: #fecaca; background: #fff1f2; }
+.failure-diagnostic-badge {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: #fff;
+    background: #16a36f;
+    font-size: 12px;
+    font-weight: 900;
+}
+.failure-diagnostic.warning .failure-diagnostic-badge { background: #d97706; }
+.failure-diagnostic.critical .failure-diagnostic-badge { background: #dc2626; }
+.failure-diagnostic > div { min-width: 0; }
+.failure-diagnostic strong { display: block; margin-bottom: 2px; font-size: 11px; }
+.failure-diagnostic p { margin: 0; color: #526075; font-size: 10px; line-height: 1.42; }
+.failure-diagnostic small { display: block; margin-top: 4px; color: #315efb; font-size: 9px; line-height: 1.4; }
+.failure-command-list { display: grid; gap: 7px; }
+.failure-command-list > strong { font-size: 11px; }
+.failure-command {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 9px;
+    background: #eef2f7;
+}
+.failure-command code { overflow-wrap: anywhere; color: #334155; font-size: 9px; }
+.failure-diagnostics-loading,
+.failure-diagnostics-error { padding: 12px; color: #64748b; text-align: center; font-size: 11px; }
+.failure-diagnostics-error { color: #b91c1c; }
+@media (max-width: 620px) {
+    .failure-recovery-backdrop { align-items: end; padding: 0; }
+    .failure-recovery-dialog { max-height: 92vh; border-radius: 22px 22px 0 0; }
+    .failure-recovery-header { grid-template-columns: auto minmax(0, 1fr) auto; padding: 16px; }
+    .failure-recovery-body { padding: 16px; }
+    .failure-recovery-actions { display: grid; grid-template-columns: 1fr; padding: 14px 16px 18px; }
+    .failure-recovery-actions .btn { width: 100%; }
+    .failure-command { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .failure-recovery-backdrop *, .failure-recovery-dialog * { scroll-behavior: auto !important; transition: none !important; }
+}
