@@ -1,0 +1,27 @@
+{
+  "name": "Planner Solving — рабочее место оператора",
+  "short_name": "Planner Solving",
+  "description": "Интерактивный разбор, исправление и формирование расписаний Excel.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef3ff",
+  "theme_color": "#315efb",
+  "categories": ["productivity", "education", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/brand/app-icon-128.webp",
+      "sizes": "128x128",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}
