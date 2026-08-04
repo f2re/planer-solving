@@ -140,20 +140,20 @@
                 console.warn('[planner] fetch recovery interceptor was not loaded', fetchRecoveryResult.reason);
             }
 
-            // Static brand markup is installed before Vue takes ownership of
-            // the document. This avoids post-mount DOM churn and keeps startup
-            // deterministic even when optional visual assets are unavailable.
+            // Static brand markup and network recovery are installed before Vue
+            // can issue its initial API requests. Thus storage/workspace failures
+            // during mounted hooks receive the same actionable recovery UI.
             brand.installBrandMetadata?.();
             brand.installBrandMarkup?.();
             operatorFlow.installOperatorFlowMarkup?.();
+            failureRecovery.installFailureRecovery?.();
+            fetchRecovery.installFetchRecovery?.();
 
             const application = applicationResult.value;
             if (typeof application.mount !== 'function') {
                 throw new TypeError('Модуль planner-app.js не экспортирует функцию mount().');
             }
             application.mount();
-            failureRecovery.installFailureRecovery?.();
-            fetchRecovery.installFetchRecovery?.();
             operatorFlow.installOperatorFlowRuntime?.();
             draftRuntime.installSessionDraftRuntime?.();
             unifiedOperations.installUnifiedOperationsRuntime?.();
