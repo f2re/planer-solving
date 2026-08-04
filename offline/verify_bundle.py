@@ -167,8 +167,14 @@ def verify_bundle(root: Path, manifest_path: Path | None = None) -> dict[str, An
             continue
         checked += 1
 
-    frontend_errors, frontend_checked = verify_frontend(root, manifest)
-    errors.extend(frontend_errors)
+    frontend_checked = 0
+    has_frontend = any(
+        relative.startswith("app/web/frontend/")
+        for relative in manifest["files"]
+    )
+    if has_frontend:
+        frontend_errors, frontend_checked = verify_frontend(root, manifest)
+        errors.extend(frontend_errors)
     return {
         "ok": not errors,
         "checked": checked,
