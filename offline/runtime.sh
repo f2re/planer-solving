@@ -42,17 +42,19 @@ if [[ -z "$MANAGED_RUNTIME" || ! -x "$MANAGED_RUNTIME/python" ]]; then
     MANAGED_RUNTIME=""
     LEGACY_RUNTIME=1
 fi
-[[ -d "$INSTALL_ROOT/shared" ]] || fail "Каталог данных отсутствует: $INSTALL_ROOT/shared"
+SHARED="$INSTALL_ROOT/shared"
+[[ -d "$SHARED" ]] || fail "Каталог данных отсутствует: $SHARED"
 
 export PLANNER_BASE_DIR="$CURRENT"
+export PLANNER_SHARED_DIR="$SHARED"
 export PYTHONPATH="$CURRENT"
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONUNBUFFERED=1
 export PYTHONNOUSERSITE=1
 export VIRTUAL_ENV="$CURRENT/.venv"
 export PATH="$VIRTUAL_ENV/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-export HOME="${PLANNER_HOME:-$INSTALL_ROOT/shared/home}"
-export XDG_CACHE_HOME="${PLANNER_CACHE_DIR:-$INSTALL_ROOT/shared/cache}"
+export HOME="${PLANNER_HOME:-$SHARED/home}"
+export XDG_CACHE_HOME="${PLANNER_CACHE_DIR:-$SHARED/cache}"
 unset PYTHONHOME
 mkdir -p "$HOME" "$XDG_CACHE_HOME"
 cd "$CURRENT"
@@ -61,6 +63,7 @@ if [[ "$MODE" == print ]]; then
     cat <<EOF_PRINT
 INSTALL_ROOT=$INSTALL_ROOT
 CURRENT=$CURRENT
+SHARED=$SHARED
 MANAGED_RUNTIME=${MANAGED_RUNTIME:-legacy/system}
 LEGACY_RUNTIME=$LEGACY_RUNTIME
 PYTHON=$PYTHON
@@ -78,14 +81,14 @@ fi
 if [[ -f "$CURRENT/tools/service_preflight.py" ]]; then
     "$PYTHON" -m tools.service_preflight \
         --app-root "$CURRENT" \
-        --shared-dir "$INSTALL_ROOT/shared" \
+        --shared-dir "$SHARED" \
         --full
 fi
 
 if [[ "$MODE" == check ]]; then
     "$PYTHON" -m tools.healthcheck \
         --app-root "$CURRENT" \
-        --data-dir "$INSTALL_ROOT/shared/data"
+        --data-dir "$SHARED/data"
     exit 0
 fi
 

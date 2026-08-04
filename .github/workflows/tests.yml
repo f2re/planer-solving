@@ -97,6 +97,7 @@ jobs:
           node --check web/frontend/assets/platform-ui.js
           node --check web/frontend/assets/platform-enhancements.js
           node tests/frontend_runtime_probe.mjs
+          node tests/frontend_boot_probe.mjs
           node tests/editor_history_probe.mjs
 
       - name: Build autonomous runtime bundle
@@ -112,7 +113,7 @@ jobs:
       - name: Verify archive checksum
         run: cd dist && sha256sum -c *.tar.gz.sha256
 
-      - name: Test Python discovery, installation, repair and update preservation
+      - name: Test Python discovery, immutable release, page startup, repair and update preservation
         run: |
           set -Eeuo pipefail
           install_root="$RUNNER_TEMP/planner-solving-install"
@@ -142,15 +143,67 @@ jobs:
               --no-systemd \
               --yes
 
+          first_release="$(readlink -f "$install_root/current")"
+          test -L "$first_release/teachers.json"
+          test "$(readlink -f "$first_release/teachers.json")" = "$(readlink -f "$install_root/shared/teachers.json")"
+
+          # The production release is root-owned and immutable. Reproduce that
+          # contract even in the unprivileged CI installation. A regression to
+          # release/teachers.json.tmp now fails here deterministically.
+          chmod a-w "$first_release"
           env PLANNER_INSTALL_ROOT="$install_root" PLANNER_PORT=18081 \
             "$install_root/state/run-service.sh" --check
+          test ! -e "$first_release/teachers.json.tmp"
+          test "$(find "$first_release" -maxdepth 1 -name '.teachers.json.*.tmp' | wc -l)" -eq 0
+
+          # Start the exact installed runtime and verify the HTML entrypoint and
+          # the module that previously prevented the page from loading.
+          server_log="$RUNNER_TEMP/planner-solving-server.log"
+          env PLANNER_INSTALL_ROOT="$install_root" PLANNER_PORT=18081 \
+            "$install_root/state/run-service.sh" >"$server_log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+          "$install_root/current/.venv/bin/python" - 18081 <<'PY'
+          import sys, time
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          port = int(sys.argv[1])
+          base = f"http://127.0.0.1:{port}"
+          last_error = None
+          for _ in range(60):
+              try:
+                  with urlopen(base + "/api/health", timeout=2) as response:
+                      if response.status == 200:
+                          break
+              except (OSError, URLError) as exc:
+                  last_error = exc
+                  time.sleep(1)
+          else:
+              raise SystemExit(f"server did not start: {last_error}")
+
+          expectations = {
+              "/": "Planner Solving",
+              "/assets/app.js": "__plannerSolvingBoot",
+              "/assets/planner-app.js": "export function mount",
+              "/assets/unified-operations.js": "installUnifiedOperationsRuntime",
+          }
+          for path, marker in expectations.items():
+              with urlopen(base + path, timeout=4) as response:
+                  body = response.read().decode("utf-8")
+                  assert response.status == 200, (path, response.status)
+                  assert marker in body, (path, marker)
+          PY
+          kill "$server_pid"
+          wait "$server_pid" || true
+          trap - EXIT
+
           env PLANNER_INSTALL_ROOT="$install_root" \
             "$install_root/state/python-info.sh" > "$RUNNER_TEMP/python-info.txt"
           grep -F "Рабочий venv:" "$RUNNER_TEMP/python-info.txt"
           grep -F "Управляемый runtime:" "$RUNNER_TEMP/python-info.txt"
 
           printf 'preserve-me\n' > "$install_root/shared/data/installer-preservation-marker"
-          first_release="$(readlink -f "$install_root/current")"
 
           env PLANNER_INVOKING_USER="$(id -un)" PLANNER_INVOKING_HOME="$HOME" \
             bash "$bundle/install_or_update.sh" \
@@ -166,8 +219,10 @@ jobs:
           second_release="$(readlink -f "$install_root/current")"
           test "$first_release" != "$second_release"
           test "$(cat "$install_root/shared/data/installer-preservation-marker")" = "preserve-me"
+          chmod a-w "$second_release"
           env PLANNER_INSTALL_ROOT="$install_root" PLANNER_PORT=18081 \
             "$install_root/state/run-service.sh" --check
+          test ! -e "$second_release/teachers.json.tmp"
           (
             cd "$RUNNER_TEMP"
             "$install_root/state/admin.sh" list >/dev/null
