@@ -10,7 +10,11 @@ import sys
 import tempfile
 from typing import Any
 
-from web.backend.recovery_catalog import compact_recommendations
+try:
+    from web.backend.recovery_catalog import compact_recommendations
+except Exception:  # The preflight must explain an incomplete release, not crash on import.
+    def compact_recommendations(_codes: list[str]) -> list[dict[str, Any]]:
+        return []
 
 
 REQUIRED_MODULES = (
