@@ -22,7 +22,8 @@
         '/assets/session-draft.css',
         '/assets/history-ux.css',
         '/assets/unified-operations.css',
-        '/assets/brand-refresh.css'
+        '/assets/brand-refresh.css',
+        '/assets/failure-recovery.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
@@ -85,7 +86,9 @@
         import('/assets/operator-flow.js'),
         import('/assets/planner-app.js'),
         import('/assets/session-draft-runtime.js'),
-        import('/assets/unified-operations.js')
+        import('/assets/unified-operations.js'),
+        import('/assets/failure-recovery.js'),
+        import('/assets/fetch-recovery.js')
     ])
         .then(results => {
             const brandResult = results[0];
@@ -93,6 +96,8 @@
             const applicationResult = results[2];
             const draftRuntimeResult = results[3];
             const unifiedOperationsResult = results[4];
+            const failureRecoveryResult = results[5];
+            const fetchRecoveryResult = results[6];
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
 
             const brand = brandResult.status === 'fulfilled' ? brandResult.value : {};
@@ -121,12 +126,28 @@
                 console.warn('[planner] unified operations center was not loaded', unifiedOperationsResult.reason);
             }
 
-            // Static brand markup is installed before Vue takes ownership of
-            // the document. This avoids post-mount DOM churn and keeps startup
-            // deterministic even when optional visual assets are unavailable.
+            const failureRecovery = failureRecoveryResult.status === 'fulfilled'
+                ? failureRecoveryResult.value
+                : {};
+            if (failureRecoveryResult.status !== 'fulfilled') {
+                console.warn('[planner] failure recovery center was not loaded', failureRecoveryResult.reason);
+            }
+
+            const fetchRecovery = fetchRecoveryResult.status === 'fulfilled'
+                ? fetchRecoveryResult.value
+                : {};
+            if (fetchRecoveryResult.status !== 'fulfilled') {
+                console.warn('[planner] fetch recovery interceptor was not loaded', fetchRecoveryResult.reason);
+            }
+
+            // Static brand markup and network recovery are installed before Vue
+            // can issue its initial API requests. Thus storage/workspace failures
+            // during mounted hooks receive the same actionable recovery UI.
             brand.installBrandMetadata?.();
             brand.installBrandMarkup?.();
             operatorFlow.installOperatorFlowMarkup?.();
+            failureRecovery.installFailureRecovery?.();
+            fetchRecovery.installFetchRecovery?.();
 
             const application = applicationResult.value;
             if (typeof application.mount !== 'function') {

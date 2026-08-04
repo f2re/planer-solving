@@ -42,7 +42,7 @@ jobs:
             offline/build_bundle.py offline/python_runtime.py offline/verify_bundle.py \
             web/backend/main.py web/backend/app_factory.py web/backend/app_context.py \
             web/backend/auth.py web/backend/password_reset_session.py web/backend/frontend_cache.py \
-            web/backend/platform_api.py web/backend/errors.py \
+            web/backend/platform_api.py web/backend/errors.py web/backend/recovery_catalog.py web/backend/recovery_status.py \
             web/backend/analysis_api.py web/backend/session_api.py web/backend/session_file_api.py web/backend/session_draft_api.py web/backend/system_api.py \
             web/backend/workspace_api.py web/backend/workspace_schedule.py web/backend/schemas.py
 
@@ -71,6 +71,8 @@ jobs:
         run: |
           node --check web/frontend/assets/app.js
           node --check web/frontend/assets/brand-refresh.js
+          node --check web/frontend/assets/failure-recovery.js
+          node --check web/frontend/assets/fetch-recovery.js
           node --check web/frontend/assets/planner-app.js
           node --check web/frontend/assets/operator-flow.js
           node --check web/frontend/assets/session-file-actions.js
