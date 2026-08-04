@@ -87,7 +87,8 @@
         import('/assets/planner-app.js'),
         import('/assets/session-draft-runtime.js'),
         import('/assets/unified-operations.js'),
-        import('/assets/failure-recovery.js')
+        import('/assets/failure-recovery.js'),
+        import('/assets/fetch-recovery.js')
     ])
         .then(results => {
             const brandResult = results[0];
@@ -96,6 +97,7 @@
             const draftRuntimeResult = results[3];
             const unifiedOperationsResult = results[4];
             const failureRecoveryResult = results[5];
+            const fetchRecoveryResult = results[6];
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
 
             const brand = brandResult.status === 'fulfilled' ? brandResult.value : {};
@@ -131,6 +133,13 @@
                 console.warn('[planner] failure recovery center was not loaded', failureRecoveryResult.reason);
             }
 
+            const fetchRecovery = fetchRecoveryResult.status === 'fulfilled'
+                ? fetchRecoveryResult.value
+                : {};
+            if (fetchRecoveryResult.status !== 'fulfilled') {
+                console.warn('[planner] fetch recovery interceptor was not loaded', fetchRecoveryResult.reason);
+            }
+
             // Static brand markup is installed before Vue takes ownership of
             // the document. This avoids post-mount DOM churn and keeps startup
             // deterministic even when optional visual assets are unavailable.
@@ -144,6 +153,7 @@
             }
             application.mount();
             failureRecovery.installFailureRecovery?.();
+            fetchRecovery.installFetchRecovery?.();
             operatorFlow.installOperatorFlowRuntime?.();
             draftRuntime.installSessionDraftRuntime?.();
             unifiedOperations.installUnifiedOperationsRuntime?.();
