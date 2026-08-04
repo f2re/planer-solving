@@ -21,7 +21,8 @@
         '/assets/session-file-actions.css',
         '/assets/session-draft.css',
         '/assets/history-ux.css',
-        '/assets/unified-operations.css'
+        '/assets/unified-operations.css',
+        '/assets/brand-refresh.css'
     ]) {
         if (document.querySelector(`link[data-planner-style="${href}"]`)) continue;
         const link = document.createElement('link');
@@ -80,17 +81,24 @@
     }, 10000);
 
     Promise.allSettled([
+        import('/assets/brand-refresh.js'),
         import('/assets/operator-flow.js'),
         import('/assets/planner-app.js'),
         import('/assets/session-draft-runtime.js'),
         import('/assets/unified-operations.js')
     ])
         .then(results => {
-            const operatorFlowResult = results[0];
-            const applicationResult = results[1];
-            const draftRuntimeResult = results[2];
-            const unifiedOperationsResult = results[3];
+            const brandResult = results[0];
+            const operatorFlowResult = results[1];
+            const applicationResult = results[2];
+            const draftRuntimeResult = results[3];
+            const unifiedOperationsResult = results[4];
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
+
+            const brand = brandResult.status === 'fulfilled' ? brandResult.value : {};
+            if (brandResult.status !== 'fulfilled') {
+                console.warn('[planner] visual identity was not loaded', brandResult.reason);
+            }
 
             const operatorFlow = operatorFlowResult.status === 'fulfilled'
                 ? operatorFlowResult.value
@@ -113,7 +121,13 @@
                 console.warn('[planner] unified operations center was not loaded', unifiedOperationsResult.reason);
             }
 
+            // Static brand markup is installed before Vue takes ownership of
+            // the document. This avoids post-mount DOM churn and keeps startup
+            // deterministic even when optional visual assets are unavailable.
+            brand.installBrandMetadata?.();
+            brand.installBrandMarkup?.();
             operatorFlow.installOperatorFlowMarkup?.();
+
             const application = applicationResult.value;
             if (typeof application.mount !== 'function') {
                 throw new TypeError('Модуль planner-app.js не экспортирует функцию mount().');
