@@ -1,7 +1,9 @@
 """Application exceptions and actionable, safe FastAPI error responses."""
 from __future__ import annotations
 
+import errno
 import logging
+import sqlite3
 from typing import Any, Mapping, Sequence
 import uuid
 
@@ -61,19 +63,8 @@ def _incident_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-def _recovery(
-    *,
-    code: str,
-    detail: str,
-    request: Request,
-    incident_id: str,
-    status_code: int,
-    overrides: Mapping[str, Any] | None = None,
-    actions: Sequence[Mapping[str, Any]] = (),
-) -> dict[str, Any]:
-    values = dict(overrides or {})
-    lookup_code = code
-    if code not in {
+def _known_codes() -> set[str]:
+    return {
         "session_not_found",
         "session_corrupted",
         "uploaded_file_not_found",
@@ -91,7 +82,22 @@ def _recovery(
         "output_write_failed",
         "processing_history_unavailable",
         "internal_error",
-    }:
+    }
+
+
+def _recovery(
+    *,
+    code: str,
+    detail: str,
+    request: Request,
+    incident_id: str,
+    status_code: int,
+    overrides: Mapping[str, Any] | None = None,
+    actions: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    values = dict(overrides or {})
+    lookup_code = code
+    if code not in _known_codes():
         lookup_code = "internal_error"
         values.setdefault("code", code)
         values.setdefault("title", "Операция не выполнена")
@@ -168,6 +174,40 @@ def _response(
     )
 
 
+def _unexpected_kind(request: Request, exc: Exception) -> tuple[str, int, str]:
+    path = request.url.path
+    if isinstance(exc, sqlite3.Error):
+        return (
+            "workspace_error",
+            503,
+            "Операция с базой данных не завершена. Текущий сеанс сохранён; откройте диагностику и повторите действие после восстановления SQLite.",
+        )
+    if isinstance(exc, OSError):
+        write_failure = getattr(exc, "errno", None) in {
+            errno.ENOSPC,
+            errno.EDQUOT,
+            errno.EACCES,
+            errno.EROFS,
+            errno.EIO,
+        }
+        if write_failure or "/generate" in path or "/download/" in path:
+            return (
+                "output_write_failed",
+                507,
+                "Не удалось записать или открыть готовый файл. Исходники и решения сохранены; проверьте место и права каталога результатов, затем повторите формирование.",
+            )
+        return (
+            "storage_unavailable",
+            503,
+            "Файловое хранилище временно недоступно. Текущий сеанс не удалён; откройте диагностику и повторите действие после восстановления доступа.",
+        )
+    return (
+        "internal_error",
+        500,
+        "Внутренняя ошибка приложения. Текущий сеанс не удалён; повторите действие один раз или откройте диагностику.",
+    )
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApplicationError)
     async def application_error_handler(request: Request, exc: ApplicationError) -> JSONResponse:
@@ -201,24 +241,23 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
         incident_id = _incident_id()
+        code, status_code, message = _unexpected_kind(request, exc)
         logger.error(
-            "Unhandled error %s for %s %s",
+            "Unhandled error %s (%s) for %s %s",
             incident_id,
+            code,
             request.method,
             request.url.path,
             exc_info=(type(exc), exc, exc.__traceback__),
         )
         return JSONResponse(
-            status_code=500,
+            status_code=status_code,
             content=_payload(
-                message=(
-                    "Внутренняя ошибка приложения. Текущий сеанс не удалён; "
-                    "повторите действие один раз или откройте диагностику."
-                ),
-                code="internal_error",
+                message=message,
+                code=code,
                 request=request,
                 incident_id=incident_id,
-                status_code=500,
+                status_code=status_code,
             ),
             headers={"X-Planner-Incident": incident_id},
         )
