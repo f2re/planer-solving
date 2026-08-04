@@ -109,6 +109,7 @@ collect_report() {
     fi
     if command -v curl >/dev/null 2>&1; then
         run curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" || status=1
+        run curl -fsS --max-time 8 "http://127.0.0.1:$PORT/api/system/recovery" || true
     elif [[ -x "$python" ]]; then
         run "$python" - "$PORT" <<'PY' || status=1
 import sys
@@ -122,11 +123,22 @@ PY
     [[ -f "$INSTALL_ROOT/state/last-update.json" ]] && cat "$INSTALL_ROOT/state/last-update.json" || echo "Сведения отсутствуют."
     [[ -f "$INSTALL_ROOT/state/history.jsonl" ]] && tail -n 15 "$INSTALL_ROOT/state/history.jsonl" || true
 
+    section "План восстановления"
+    echo "1. Не удаляйте $INSTALL_ROOT/shared: там находятся база, черновики, история и результаты."
+    echo "2. Устраните первый неуспешный раздел выше: место/права, Python, SQLite, systemd или порт."
+    echo "3. Безопасное восстановление выпуска и venv:"
+    echo "   sudo ./install-planner-solving.sh --python bundled --strict-python --repair"
+    echo "4. После восстановления перезапустите и проверьте службу:"
+    echo "   sudo systemctl daemon-reload"
+    echo "   sudo systemctl restart $SERVICE"
+    echo "   curl -fsS http://127.0.0.1:$PORT/api/health"
+    echo "5. Если ошибка повторяется, приложите этот отчёт и код инцидента из интерфейса."
+
     section "Итог"
     if [[ $status -eq 0 ]]; then
-        echo "Критических проблем не обнаружено."
+        echo "Критических проблем не обнаружено. Повтор операции безопасен."
     else
-        echo "Обнаружены ошибки. Исправьте первый неуспешный раздел или выполните установщик с --repair."
+        echo "Обнаружены ошибки. Рабочие данные не удаляйте; выполните план восстановления выше."
     fi
     return "$status"
 }
