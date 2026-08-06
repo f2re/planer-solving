@@ -1,6 +1,13 @@
 import { installUnifiedOperationsMarkup } from './unified-operations.js';
 
 export function installEditorWorkspaceMarkup() {
+    if (!document.querySelector('link[data-workflow-audit-style]')) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = '/assets/workflow-audit.css';
+        link.dataset.workflowAuditStyle = '1';
+        document.head.appendChild(link);
+    }
     const grid = document.querySelector('.workflow-grid');
     if (!grid || document.querySelector('.sheet-command-bar')) return;
 
