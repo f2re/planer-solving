@@ -8,10 +8,13 @@ INDEX = ROOT / "web" / "frontend" / "index.html"
 
 def test_operator_flow_is_loaded_before_vue_mount() -> None:
     source = (ASSETS / "app.js").read_text(encoding="utf-8")
+    markup = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
 
     assert "operator-flow.css" in source
     assert "session-file-actions.css" in source
     assert "import('/assets/operator-flow.js')" in source
+    assert "/assets/interface-clean.css" in markup
+    assert "clean-flow-2-21.css" not in markup
     assert source.index("installOperatorFlowMarkup") < source.index("application.mount()")
     assert source.index("application.mount()") < source.index("installOperatorFlowRuntime")
 
@@ -31,8 +34,9 @@ def test_nonblocking_policy_lives_in_base_template_without_duplicate_copy() -> N
 
     assert "Результат создаётся из пригодных данных" in base
     assert "остаются доступными для исправления" in base
-    assert "operator-principles')?.remove()" in enhancements
-    assert "brand-feature-list')?.remove()" in enhancements
+    assert "operator-principles" not in enhancements
+    assert "brand-feature-list" not in enhancements
+    assert "Stable wording markers" not in enhancements
     assert "function text(" not in enhancements
     assert "document.title =" not in enhancements
     assert "upload-header .page-title" not in enhancements

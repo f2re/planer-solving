@@ -29,10 +29,6 @@ def test_favicon_and_manifest_are_valid_local_assets():
 
 
 def test_brand_images_are_bundled_webp_files():
-    # File-size thresholds catch empty placeholders without coupling the test
-    # to a particular WebP encoder or compression ratio. Resolution and visual
-    # composition are part of the reviewed source assets; valid WebP headers
-    # and non-trivial payloads are sufficient for the offline bundle contract.
     expected = {
         "app-icon-128.webp": 1_500,
         "hero-schedule.webp": 10_000,
@@ -79,7 +75,7 @@ def test_brand_is_installed_before_vue_mount_and_css_is_last():
 
 def test_brand_styles_cover_start_result_and_accessibility():
     source = (ASSETS / "brand-refresh.css").read_text(encoding="utf-8")
-    clean = (ASSETS / "clean-flow-2-21.css").read_text(encoding="utf-8")
+    clean = (ASSETS / "interface-clean.css").read_text(encoding="utf-8")
     required = (
         ".brand-mark-image",
         ".brand-hero-visual",

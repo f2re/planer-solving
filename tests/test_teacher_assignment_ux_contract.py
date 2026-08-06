@@ -23,11 +23,11 @@ def test_assignment_dialog_has_three_simple_roles_and_workspace_defaults() -> No
 def test_start_and_result_screens_are_compact_and_result_image_is_reactive() -> None:
     flow = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
     brand = (ASSETS / "brand-refresh.js").read_text(encoding="utf-8")
-    styles = (ASSETS / "clean-flow-2-21.css").read_text(encoding="utf-8")
+    styles = (ASSETS / "interface-clean.css").read_text(encoding="utf-8")
 
-    assert "operator-principles" in flow
-    assert ".remove()" in flow
-    assert "brand-feature-list" in flow
+    assert "operator-principles" not in flow
+    assert "brand-feature-list" not in flow
+    assert "/assets/interface-clean.css" in flow
     assert "decorateResultCard" in brand
     assert "MutationObserver" in brand
     assert "organized-flow.webp" in brand

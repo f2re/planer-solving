@@ -23,8 +23,6 @@ REQUIRED_MODULES = (
     "uvicorn",
     "pydantic",
     "openpyxl",
-    "pandas",
-    "ortools",
     "multipart",
 )
 REQUIRED_FRONTEND_FILES = (
@@ -36,15 +34,20 @@ REQUIRED_FRONTEND_FILES = (
     "assets/planner-app.js",
     "assets/unified-operations.js",
 )
-ABSOLUTE_ASSET_RE = re.compile(r"['\"](/assets/[A-Za-z0-9_./-]+\.(?:js|css))['\"]")
-HTML_ASSET_RE = re.compile(r"(?:src|href)=['\"]/?assets/([^'\"]+)['\"]")
-STATIC_IMPORT_RE = re.compile(r"\bfrom\s+['\"](\.[^'\"]+\.js)['\"]")
-SIDE_EFFECT_IMPORT_RE = re.compile(r"\bimport\s+['\"](\.[^'\"]+\.js)['\"]")
-DYNAMIC_IMPORT_RE = re.compile(r"\bimport\s*\(\s*['\"](\.[^'\"]+\.js)['\"]\s*\)")
+LOCAL_ASSET_RE = re.compile(
+    r"[\'\"](/(?:assets/[A-Za-z0-9_./-]+|favicon\.(?:svg|ico)|site\.webmanifest))[\'\"]"
+)
+HTML_ASSET_RE = re.compile(
+    r"(?:src|href)=[\'\"](/?(?:assets/[^\'\"]+|favicon\.(?:svg|ico)|site\.webmanifest))[\'\"]"
+)
+CSS_URL_RE = re.compile(r"url\(\s*[\'\"]?([^\'\")]+)[\'\"]?\s*\)")
+STATIC_IMPORT_RE = re.compile(r"\bfrom\s+[\'\"](\.[^\'\"]+\.js)[\'\"]")
+SIDE_EFFECT_IMPORT_RE = re.compile(r"\bimport\s+[\'\"](\.[^\'\"]+\.js)[\'\"]")
+DYNAMIC_IMPORT_RE = re.compile(r"\bimport\s*\(\s*[\'\"](\.[^\'\"]+\.js)[\'\"]\s*\)")
 
 
 def frontend_asset_errors(frontend_dir: Path) -> tuple[list[str], list[str]]:
-    """Validate the entrypoint and the complete local ES-module dependency closure."""
+    """Validate entrypoints, local dependency closure and orphan assets."""
 
     frontend = frontend_dir.resolve()
     errors: list[str] = []
@@ -64,24 +67,8 @@ def frontend_asset_errors(frontend_dir: Path) -> tuple[list[str], list[str]]:
 
     for relative in REQUIRED_FRONTEND_FILES:
         add(frontend / relative)
-
-    index = frontend / "index.html"
-    if index.is_file():
-        try:
-            source = index.read_text(encoding="utf-8")
-            for relative in HTML_ASSET_RE.findall(source):
-                add(frontend / "assets" / relative)
-        except OSError as exc:
-            errors.append(f"Не удалось прочитать index.html: {exc}")
-
-    app_script = frontend / "assets" / "app.js"
-    if app_script.is_file():
-        try:
-            source = app_script.read_text(encoding="utf-8")
-            for absolute in ABSOLUTE_ASSET_RE.findall(source):
-                add(frontend / absolute.removeprefix("/"))
-        except OSError as exc:
-            errors.append(f"Не удалось прочитать assets/app.js: {exc}")
+    for relative in ("favicon.svg", "favicon.ico", "site.webmanifest"):
+        add(frontend / relative)
 
     while queue:
         path = queue.pop(0)
@@ -97,22 +84,46 @@ def frontend_asset_errors(frontend_dir: Path) -> tuple[list[str], list[str]]:
                 errors.append(f"Пустой файл интерфейса: {relative}")
                 continue
             checked.append(relative)
-            if path.suffix != ".js":
+            if path.suffix not in {".html", ".js", ".css", ".webmanifest"}:
                 continue
             source = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             errors.append(f"Файл интерфейса недоступен: {relative}: {exc}")
             continue
 
-        for absolute in ABSOLUTE_ASSET_RE.findall(source):
+        for absolute in LOCAL_ASSET_RE.findall(source):
             add(frontend / absolute.removeprefix("/"))
-        relative_imports = (
-            STATIC_IMPORT_RE.findall(source)
-            + SIDE_EFFECT_IMPORT_RE.findall(source)
-            + DYNAMIC_IMPORT_RE.findall(source)
+        if path.suffix == ".html":
+            for reference in HTML_ASSET_RE.findall(source):
+                add(frontend / reference.lstrip("/"))
+        elif path.suffix == ".css":
+            for reference in CSS_URL_RE.findall(source):
+                if reference.startswith(("data:", "http://", "https://", "#")):
+                    continue
+                add(
+                    frontend / reference.lstrip("/")
+                    if reference.startswith("/")
+                    else path.parent / reference
+                )
+        elif path.suffix == ".js":
+            relative_imports = (
+                STATIC_IMPORT_RE.findall(source)
+                + SIDE_EFFECT_IMPORT_RE.findall(source)
+                + DYNAMIC_IMPORT_RE.findall(source)
+            )
+            for imported in relative_imports:
+                add(path.parent / imported)
+
+    inventory = {
+        path.resolve()
+        for path in frontend.rglob("*")
+        if path.is_file()
+    }
+    for path in sorted(inventory - visited):
+        errors.append(
+            "Неиспользуемый файл интерфейса: "
+            + path.relative_to(frontend).as_posix()
         )
-        for imported in relative_imports:
-            add(path.parent / imported)
 
     return errors, sorted(set(checked))
 
@@ -230,9 +241,6 @@ def main(argv: list[str] | None = None) -> int:
             expected = app_root / name
         writable_directory(expected)
 
-    # Installed releases are immutable. All mutable links must resolve into
-    # shared before the application is opened, otherwise atomic *.tmp writes
-    # will incorrectly target the date-stamped release directory.
     installed_layout = shared_dir.name == "shared" and (
         (app_root / "teachers.json").is_symlink()
         or os.environ.get("PLANNER_SHARED_DIR")

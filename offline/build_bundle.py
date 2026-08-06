@@ -26,10 +26,45 @@ BUNDLE_FORMAT_VERSION = 3
 EXCLUDED_NAMES = {
     ".git", ".github", ".gemini", ".idea", ".vscode", ".venv", "venv", "env",
     "__pycache__", ".pytest_cache", ".offline-cache", "dist", "build", "backups",
-    "wheelhouse", "tests",
+    "wheelhouse", "tests", "offline",
 }
 EXCLUDED_RELATIVE = {Path("data"), Path("input"), Path("output")}
+EXCLUDED_FILES = {Path(".gitignore"), Path("GEMINI.md"), Path("requirements.txt")}
+RUNTIME_DOCS = {
+    Path("docs/INSTALLATION.md"),
+    Path("docs/OFFLINE_UPDATE.md"),
+    Path("docs/OPERATOR_GUIDE.md"),
+    Path("docs/PASSWORD_RESET.md"),
+    Path("docs/README_RUNTIME.md"),
+    Path("docs/TROUBLESHOOTING.md"),
+}
+REQUIRED_APPLICATION_FILES = {
+    Path("VERSION"),
+    Path("requirements-runtime.txt"),
+    Path("start_web.sh"),
+    Path("web/backend/main.py"),
+    Path("web/frontend/index.html"),
+    Path("web/frontend/assets/app.js"),
+    Path("web/frontend/assets/app.css"),
+    Path("web/frontend/assets/vue.global.prod.js"),
+    Path("web/frontend/assets/axios.min.js"),
+}
+BANNED_APPLICATION_FILES = {
+    Path("inspect_bottom.py"),
+    Path("inspect_xlsx.py"),
+    Path("main.py"),
+    Path("run_full_process.py"),
+    Path("plan.md"),
+    Path("planner-web.service"),
+    Path("teacher_schedules.xlsx"),
+    Path("web/frontend/assets/bootstrap.min.css"),
+    Path("web/frontend/assets/readability.css"),
+}
 SENSITIVE_FILENAMES = {"workspaces.json", "teachers.json", "config.json", "config.local.json"}
+BANNED_WHEEL_DISTRIBUTIONS = {
+    "absl_py", "immutabledict", "numpy", "ortools", "pandas", "protobuf",
+    "python_dateutil", "six",
+}
 SUPPORT_SCRIPTS = (
     "install_or_update.sh",
     "rollback.sh",
@@ -56,6 +91,10 @@ def should_copy(relative: Path) -> bool:
         return False
     if relative in EXCLUDED_RELATIVE or any(parent in EXCLUDED_RELATIVE for parent in relative.parents):
         return False
+    if relative in EXCLUDED_FILES:
+        return False
+    if relative.parts and relative.parts[0] == "docs" and relative not in RUNTIME_DOCS:
+        return False
     if relative.name.endswith((".pyc", ".pyo", ".log", ".tmp")):
         return False
     if relative.name in SENSITIVE_FILENAMES or relative.name == ".env" or relative.name.startswith(".env."):
@@ -63,7 +102,12 @@ def should_copy(relative: Path) -> bool:
     return True
 
 
-def copy_application(source: Path, destination: Path) -> None:
+def copy_application(
+    source: Path,
+    destination: Path,
+    *,
+    validate: bool = False,
+) -> None:
     for path in source.rglob("*"):
         relative = path.relative_to(source)
         if not should_copy(relative):
@@ -77,6 +121,26 @@ def copy_application(source: Path, destination: Path) -> None:
     for directory in ("data", "input", "output"):
         (destination / directory).mkdir(parents=True, exist_ok=True)
         (destination / directory / ".gitkeep").touch()
+    if validate:
+        missing = sorted(
+            str(relative)
+            for relative in REQUIRED_APPLICATION_FILES
+            if not (destination / relative).is_file()
+        )
+        if missing:
+            raise RuntimeError(
+                "В runtime-копии отсутствуют обязательные файлы: "
+                + ", ".join(missing)
+            )
+    leaked = sorted(
+        str(relative)
+        for relative in BANNED_APPLICATION_FILES
+        if (destination / relative).exists()
+    )
+    if leaked:
+        raise RuntimeError(
+            "В runtime-копию попали запрещённые артефакты: " + ", ".join(leaked)
+        )
 
 
 def run(command: list[str], cwd: Path | None = None, *, capture: bool = False) -> str:
@@ -151,6 +215,7 @@ def build(args: argparse.Namespace) -> Path:
     runtime_python = getattr(args, "runtime_python", None) or args.python
     include_runtime = bool(getattr(args, "include_python_runtime", True))
     supplied_runtime = getattr(args, "use_python_runtime", None)
+    validate_application = bool(getattr(args, "validate_application", False))
 
     output_dir = args.output.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -166,7 +231,7 @@ def build(args: argparse.Namespace) -> Path:
         wheelhouse = stage / "wheelhouse"
         app_dir.mkdir(parents=True)
         wheelhouse.mkdir(parents=True)
-        copy_application(root, app_dir)
+        copy_application(root, app_dir, validate=validate_application)
 
         requirements = root / "requirements-runtime.txt"
         if not requirements.exists():
@@ -184,6 +249,20 @@ def build(args: argparse.Namespace) -> Path:
                 args.python, "-m", "pip", "download", "--dest", str(wheelhouse),
                 "--requirement", str(requirements), "--only-binary=:all:",
             ], cwd=root)
+
+        leaked_wheels = sorted(
+            path.name
+            for path in wheelhouse.glob("*.whl")
+            if any(
+                path.name.casefold().startswith(f"{distribution}-")
+                for distribution in BANNED_WHEEL_DISTRIBUTIONS
+            )
+        )
+        if leaked_wheels:
+            raise RuntimeError(
+                "Wheelhouse содержит неиспользуемые зависимости: "
+                + ", ".join(leaked_wheels)
+            )
 
         for script in SUPPORT_SCRIPTS:
             source = support_dir / script
@@ -297,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
         dest="include_python_runtime",
         help="создать облегчённый пакет без встроенного Python",
     )
-    parser.set_defaults(include_python_runtime=True)
+    parser.set_defaults(include_python_runtime=True, validate_application=True)
     args = parser.parse_args(argv)
     try:
         build(args)

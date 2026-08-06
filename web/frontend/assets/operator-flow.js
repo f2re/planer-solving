@@ -1,30 +1,22 @@
 const FLOW_READY = 'operatorFlowReady';
 
-// Stable wording markers retained for architecture regressions and older
-// extensions. They are intentionally not rendered in the compact 2.21 UI:
-// «Вернуться к проверке», «Ничего не блокируется», «Контроль решений»,
-// «Назначить преподавателей».
-
 function insertOnce(target, position, marker, html) {
     if (!target || document.querySelector(marker)) return;
     target.insertAdjacentHTML(position, html);
 }
 
-function installCleanFlowStyle() {
-    if (document.querySelector('link[data-clean-flow-221]')) return;
+function installInterfaceStyle() {
+    if (document.querySelector('link[data-interface-clean-style]')) return;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/assets/clean-flow-2-21.css';
-    link.dataset.cleanFlow221 = '1';
+    link.href = '/assets/interface-clean.css';
+    link.dataset.interfaceCleanStyle = '1';
     document.head.appendChild(link);
 }
 
 function simplifyStartScreen() {
     const uploadCard = document.querySelector('.upload-card');
     if (!uploadCard) return;
-    uploadCard.querySelector('.brand-feature-list')?.remove();
-    uploadCard.querySelector('.brand-hero-visual figcaption')?.remove();
-    uploadCard.querySelector('.operator-principles')?.remove();
 
     const lead = uploadCard.querySelector('.page-lead');
     if (lead) {
@@ -46,7 +38,7 @@ function simplifyStartScreen() {
 export function installOperatorFlowMarkup() {
     if (document.documentElement.dataset[FLOW_READY] === '1') return;
     document.documentElement.dataset[FLOW_READY] = '1';
-    installCleanFlowStyle();
+    installInterfaceStyle();
     simplifyStartScreen();
 
     const workflow = document.querySelector('.workflow-grid');
