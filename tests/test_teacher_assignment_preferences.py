@@ -3,6 +3,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from src.data_loader import Lesson
+from src.teacher_assignment import resolve_teacher_collisions
 from src.teacher_resolver import TeacherResolver
 from web.backend.app_factory import create_app
 
@@ -86,3 +88,46 @@ def test_role_preferences_feed_resolver_and_validation_report(tmp_path: Path) ->
         "practice": ["Петров П.П."],
         "reserve": ["Сидоров С.С."],
     }
+
+
+def test_configured_reserve_precedes_teacher_of_another_role() -> None:
+    teachers = [
+        {"id": 1, **teacher_payload("Иванов И.И.", "Иванов Иван Иванович")},
+        {"id": 2, **teacher_payload("Петров П.П.", "Петров Пётр Петрович")},
+        {"id": 3, **teacher_payload("Сидоров С.С.", "Сидоров Сергей Сергеевич")},
+    ]
+    lessons = [
+        Lesson(
+            group="Ф-1", subject="Физика", lesson_type_code="Л", room="101",
+            week=1, day_of_week="Пн", pair_num=1, teacher="Иванов И.И.",
+            date_day=1, month="Сентябрь",
+        ),
+        Lesson(
+            group="М-1", subject="Математика", lesson_type_code="Л", room="102",
+            week=1, day_of_week="Пн", pair_num=1, teacher="Иванов И.И.",
+            date_day=1, month="Сентябрь",
+        ),
+    ]
+    report = resolve_teacher_collisions(
+        lessons,
+        teachers,
+        candidate_catalog={
+            "физика": {
+                "lecturer": ["Иванов И.И."],
+                "other": [],
+                "reserve": [],
+                "all": ["Иванов И.И."],
+            },
+            "математика": {
+                "lecturer": ["Иванов И.И."],
+                "other": ["Петров П.П."],
+                "reserve": ["Сидоров С.С."],
+                "all": ["Иванов И.И.", "Петров П.П.", "Сидоров С.С."],
+            },
+        },
+    )
+
+    assert lessons[0].teacher == "Иванов И.И."
+    assert lessons[1].teacher == "Сидоров С.С."
+    decision = next(item for item in report["decisions"] if item["subject"] == "Математика")
+    assert decision["reserve_used"] is True
