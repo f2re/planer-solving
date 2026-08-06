@@ -71,7 +71,7 @@ export function installEditorWorkspaceMarkup() {
           <span class="sheet-file-save-state" :class="{dirty:layoutDirty}">
             {{ layoutDirty ? 'Изменения файла — в черновике' : 'Разметка файла сохранена' }}
           </span>
-          <button type="button" class="sheet-tool save" @click="requestTemplateSave" title="Сохранить текущую разметку как глобальный шаблон для будущих файлов">◆ <span>Шаблон</span></button>
+          <button type="button" class="sheet-tool save" @click="requestTemplateSave" title="Сохранить текущую разметку как глобальный шаблон для будущих файлов">◆ <span>Сохранить как шаблон</span></button>
           <button type="button" class="sheet-tool generate" @click="generateFromEditor" :disabled="generating" title="Проверить все файлы и сформировать расписание">
             ▶ <span>{{ generating ? 'Формируем…' : 'Сформировать' }}</span>
           </button>
