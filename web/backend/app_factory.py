@@ -18,6 +18,7 @@ from web.backend.session_api import build_session_router
 from web.backend.session_draft_api import build_session_draft_router
 from web.backend.session_file_api import build_session_file_router
 from web.backend.system_api import build_system_router
+from web.backend.teacher_assignment_api import build_teacher_assignment_router
 from web.backend.workspace_api import build_workspace_router
 from web.backend.workspace_schedule import build_schedule_router
 
@@ -47,6 +48,7 @@ def create_app(
     app.include_router(build_session_draft_router(context))
     app.include_router(build_session_router(context))
     app.include_router(build_workspace_router(context))
+    app.include_router(build_teacher_assignment_router(context))
     app.include_router(build_schedule_router(context))
     app.include_router(build_platform_router(context))
     app.include_router(build_system_router(context))
