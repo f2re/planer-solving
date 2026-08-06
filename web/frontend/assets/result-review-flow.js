@@ -14,6 +14,14 @@ function ensureStylesheet() {
     document.head.appendChild(link);
 }
 
+function replaceVueClick(node, expression) {
+    if (!node) return;
+    const shorthand = [...node.attributes]
+        .find(attribute => attribute.name === '@click');
+    if (shorthand) node.removeAttributeNode(shorthand);
+    node.setAttribute('v-on:click', expression);
+}
+
 function ensureIllustration(card, anchor, className, source, alt, width, height) {
     if (!card || !anchor) return false;
     let figure = card.querySelector(`.${className}`);
@@ -81,14 +89,14 @@ export function installResultReviewMarkup() {
 
     const returnButton = document.querySelector('.return-to-editor');
     if (returnButton) {
-        returnButton.setAttribute('@click', 'returnToCorrections()');
+        replaceVueClick(returnButton, 'returnToCorrections()');
         returnButton.textContent = 'Исправить и сформировать заново';
     }
 
     const fileAction = document.querySelector('.result-file-action');
     if (fileAction) {
-        fileAction.setAttribute(
-            '@click',
+        replaceVueClick(
+            fileAction,
             'returnToCorrections().then(() => selectFile(detail.file_id))'
         );
     }
