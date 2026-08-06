@@ -85,6 +85,7 @@ class AssignmentUnit:
     current_teacher: str = ""
     manual_teacher: str = ""
     primary: List[str] = field(default_factory=list)
+    reserve: List[str] = field(default_factory=list)
     fallback: List[str] = field(default_factory=list)
     assigned: str = ""
     used_fallback: bool = False
@@ -95,7 +96,12 @@ class AssignmentUnit:
             return [self.manual_teacher]
         return [
             *self.primary,
-            *[value for value in self.fallback if value not in self.primary],
+            *[value for value in self.reserve if value not in self.primary],
+            *[
+                value
+                for value in self.fallback
+                if value not in self.primary and value not in self.reserve
+            ],
         ]
 
 
@@ -139,6 +145,8 @@ def _build_units(
         role = _role(lesson_type)
         entry = _catalog_entry(candidate_catalog, subject_key)
         primary = _unique(entry.get(role) or [], valid_teachers)
+        reserve = _unique(entry.get("reserve") or [], valid_teachers)
+        reserve = [value for value in reserve if value not in primary]
         opposite = "other" if role == "lecturer" else "lecturer"
         fallback = _unique(
             [
@@ -147,19 +155,26 @@ def _build_units(
             ],
             valid_teachers,
         )
-        fallback = [value for value in fallback if value not in primary]
+        fallback = [
+            value
+            for value in fallback
+            if value not in primary and value not in reserve
+        ]
 
         current_raw = _text(getattr(sample, "teacher", ""))
         current = valid_teachers.get(
             current_raw.casefold().replace("ё", "е"),
             "",
         )
-        if current and current not in primary and current not in fallback:
-            # An extracted teacher is retained as a candidate, but does not
-            # become role-compatible merely because a legacy greedy pass chose
-            # that teacher. With no legend data, it remains the only primary
-            # candidate; with role data, it is a fallback preference.
-            if primary or fallback:
+        if (
+            current
+            and current not in primary
+            and current not in reserve
+            and current not in fallback
+        ):
+            # An extracted teacher remains a candidate. Explicit role and
+            # reserve preferences still keep their higher priority.
+            if primary or reserve or fallback:
                 fallback.insert(0, current)
             else:
                 primary.append(current)
@@ -184,6 +199,7 @@ def _build_units(
                 current_teacher=current,
                 manual_teacher=manual,
                 primary=primary,
+                reserve=reserve,
                 fallback=fallback,
             )
         )
@@ -219,10 +235,15 @@ def _candidate_cost(
     total_load: Counter,
     subject_load: Counter,
 ) -> Tuple[int, int, int, int, str]:
-    role_penalty = 0 if teacher in unit.primary else 50
+    if teacher in unit.primary:
+        preference_penalty = 0
+    elif teacher in unit.reserve:
+        preference_penalty = 25
+    else:
+        preference_penalty = 50
     current_penalty = 0 if teacher == unit.current_teacher else 8
     return (
-        role_penalty,
+        preference_penalty,
         current_penalty,
         int(subject_load[(teacher, unit.subject_key)]),
         int(total_load[teacher]),
@@ -429,9 +450,14 @@ def resolve_teacher_collisions(
             reason = "Применено ручное назначение оператора."
         elif after == UNASSIGNED_TEACHER:
             reason = "Свободного допустимого преподавателя в этом слоте нет."
+        elif after in unit.reserve:
+            reason = (
+                "Использован настроенный резервный преподаватель "
+                "для устранения коллизии."
+            )
         elif unit.used_fallback:
             reason = (
-                "Использован резервный преподаватель дисциплины "
+                "Использован другой преподаватель дисциплины "
                 "для устранения коллизии."
             )
         elif before != after and unit.current_teacher:
@@ -464,6 +490,7 @@ def resolve_teacher_collisions(
                 "after": after,
                 "manual": bool(unit.manual_teacher),
                 "role_fallback": unit.used_fallback,
+                "reserve_used": after in unit.reserve,
                 "candidates": list(unit.candidates),
                 "reason": reason,
             }
@@ -545,8 +572,8 @@ def resolve_teacher_collisions(
                     f"назначений: {fallback_count}."
                 ),
                 default_decision=(
-                    "Резервный преподаватель выбран только среди "
-                    "преподавателей этой дисциплины."
+                    "Сначала используется настроенный резерв, затем другой "
+                    "допустимый преподаватель дисциплины."
                 ),
                 impact=(
                     "Роль преподавателя отклонена от предпочтительной, "
@@ -565,7 +592,7 @@ def resolve_teacher_collisions(
     )
     load_values = list(balanced_load.values())
     return {
-        "algorithm": "slot-bipartite-matching-v2",
+        "algorithm": "slot-bipartite-matching-v3",
         "unit_count": len(units),
         "lesson_count": len(lessons),
         "original_conflict_count": original_count,
