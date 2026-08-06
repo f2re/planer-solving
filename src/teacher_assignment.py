@@ -52,7 +52,7 @@ def _slot(lesson: Any) -> Tuple[int, str, int]:
 
 
 def _unit_signature(lesson: Any) -> Tuple[str, str, str]:
-    """Parallel groups are one unit only for the same actual lesson."""
+    """Parallel groups form one unit only for the same actual lesson."""
 
     return (
         _key(getattr(lesson, "subject", "")),
@@ -93,7 +93,10 @@ class AssignmentUnit:
     def candidates(self) -> List[str]:
         if self.manual_teacher:
             return [self.manual_teacher]
-        return [*self.primary, *[value for value in self.fallback if value not in self.primary]]
+        return [
+            *self.primary,
+            *[value for value in self.fallback if value not in self.primary],
+        ]
 
 
 def _catalog_entry(
@@ -111,24 +114,24 @@ def _build_units(
     candidate_catalog: Mapping[str, Any],
     manual_overrides: Mapping[str, str],
 ) -> List[AssignmentUnit]:
-    grouped: MutableMapping[Tuple[Tuple[int, str, int], Tuple[str, str, str]], List[Any]]
-    grouped = defaultdict(list)
+    grouped: MutableMapping[
+        Tuple[Tuple[int, str, int], Tuple[str, str, str]],
+        List[Any],
+    ] = defaultdict(list)
     for lesson in lessons:
         grouped[(_slot(lesson), _unit_signature(lesson))].append(lesson)
 
     units: List[AssignmentUnit] = []
-    for index, ((slot, signature), unit_lessons) in enumerate(
-        sorted(
-            grouped.items(),
-            key=lambda item: (
-                item[0][0][0],
-                item[0][0][1],
-                item[0][0][2],
-                item[0][1],
-            ),
+    ordered_groups = sorted(
+        grouped.items(),
+        key=lambda item: (
+            item[0][0][0],
+            item[0][0][1],
+            item[0][0][2],
+            item[0][1],
         ),
-        1,
-    ):
+    )
+    for index, ((slot, signature), unit_lessons) in enumerate(ordered_groups, 1):
         sample = unit_lessons[0]
         subject = _text(getattr(sample, "subject", ""))
         subject_key = _key(subject)
@@ -144,46 +147,67 @@ def _build_units(
             ],
             valid_teachers,
         )
+        fallback = [value for value in fallback if value not in primary]
 
         current_raw = _text(getattr(sample, "teacher", ""))
-        current = valid_teachers.get(current_raw.casefold().replace("ё", "е"), "")
-        if current and current not in primary:
-            # The teacher explicitly extracted from a schedule cell is a strong
-            # preference, even if the legend was incomplete.
-            primary.insert(0, current)
+        current = valid_teachers.get(
+            current_raw.casefold().replace("ё", "е"),
+            "",
+        )
+        if current and current not in primary and current not in fallback:
+            # An extracted teacher is retained as a candidate, but does not
+            # become role-compatible merely because a legacy greedy pass chose
+            # that teacher. With no legend data, it remains the only primary
+            # candidate; with role data, it is a fallback preference.
+            if primary or fallback:
+                fallback.insert(0, current)
+            else:
+                primary.append(current)
 
         manual_raw = _text(manual_overrides.get(subject_key))
-        manual = valid_teachers.get(manual_raw.casefold().replace("ё", "е"), "")
-        if manual and manual not in primary:
-            primary.insert(0, manual)
+        manual = valid_teachers.get(
+            manual_raw.casefold().replace("ё", "е"),
+            "",
+        )
 
-        units.append(AssignmentUnit(
-            id=index,
-            slot=slot,
-            signature=signature,
-            lessons=unit_lessons,
-            subject=subject,
-            subject_key=subject_key,
-            lesson_type=lesson_type,
-            role=role,
-            room=_text(getattr(sample, "room", "")),
-            current_teacher=current,
-            manual_teacher=manual,
-            primary=primary,
-            fallback=[value for value in fallback if value not in primary],
-        ))
+        units.append(
+            AssignmentUnit(
+                id=index,
+                slot=slot,
+                signature=signature,
+                lessons=unit_lessons,
+                subject=subject,
+                subject_key=subject_key,
+                lesson_type=lesson_type,
+                role=role,
+                room=_text(getattr(sample, "room", "")),
+                current_teacher=current,
+                manual_teacher=manual,
+                primary=primary,
+                fallback=fallback,
+            )
+        )
     return units
 
 
-def _original_conflicts(units: Sequence[AssignmentUnit]) -> Dict[Tuple[int, str, int], Dict[str, List[int]]]:
-    result: Dict[Tuple[int, str, int], Dict[str, List[int]]] = {}
-    by_slot: MutableMapping[Tuple[int, str, int], MutableMapping[str, List[int]]]
-    by_slot = defaultdict(lambda: defaultdict(list))
+def _original_conflicts(
+    units: Sequence[AssignmentUnit],
+) -> Dict[Tuple[int, str, int], Dict[str, List[int]]]:
+    by_slot: MutableMapping[
+        Tuple[int, str, int],
+        MutableMapping[str, List[int]],
+    ] = defaultdict(lambda: defaultdict(list))
     for unit in units:
         if unit.current_teacher:
             by_slot[unit.slot][unit.current_teacher].append(unit.id)
+
+    result: Dict[Tuple[int, str, int], Dict[str, List[int]]] = {}
     for slot, teachers in by_slot.items():
-        conflicts = {teacher: ids for teacher, ids in teachers.items() if len(ids) > 1}
+        conflicts = {
+            teacher: ids
+            for teacher, ids in teachers.items()
+            if len(ids) > 1
+        }
         if conflicts:
             result[slot] = conflicts
     return result
@@ -194,11 +218,12 @@ def _candidate_cost(
     teacher: str,
     total_load: Counter,
     subject_load: Counter,
-) -> Tuple[int, int, int, str]:
+) -> Tuple[int, int, int, int, str]:
     role_penalty = 0 if teacher in unit.primary else 50
     current_penalty = 0 if teacher == unit.current_teacher else 8
     return (
-        role_penalty + current_penalty,
+        role_penalty,
+        current_penalty,
         int(subject_load[(teacher, unit.subject_key)]),
         int(total_load[teacher]),
         teacher.casefold(),
@@ -211,7 +236,12 @@ def _assign_slot(
     total_load: Counter,
     subject_load: Counter,
 ) -> List[AssignmentUnit]:
-    """Maximum matching with deterministic, load-aware augmenting paths."""
+    """Assign one timetable slot with deterministic augmenting paths.
+
+    Free role-compatible candidates are always considered before moving an
+    already assigned unit. This prevents a practical lesson from displacing a
+    lecturer to a fallback teacher while a free practical teacher exists.
+    """
 
     occupant: Dict[str, AssignmentUnit] = {}
     unresolved: List[AssignmentUnit] = []
@@ -219,8 +249,6 @@ def _assign_slot(
     fixed = [unit for unit in slot_units if unit.manual_teacher]
     movable = [unit for unit in slot_units if not unit.manual_teacher]
 
-    # Manual decisions are hard constraints. A duplicate manual decision is not
-    # silently moved: it stays visible as an unresolved collision.
     for unit in sorted(fixed, key=lambda item: item.id):
         teacher = unit.manual_teacher
         if teacher and teacher not in occupant:
@@ -232,14 +260,36 @@ def _assign_slot(
     def ordered_candidates(unit: AssignmentUnit) -> List[str]:
         return sorted(
             unit.candidates,
-            key=lambda teacher: _candidate_cost(unit, teacher, total_load, subject_load),
+            key=lambda teacher: _candidate_cost(
+                unit,
+                teacher,
+                total_load,
+                subject_load,
+            ),
         )
 
-    def place(unit: AssignmentUnit, visited_teachers: set[str], visited_units: set[int]) -> bool:
+    def place(
+        unit: AssignmentUnit,
+        visited_teachers: set[str],
+        visited_units: set[int],
+    ) -> bool:
         if unit.id in visited_units:
             return False
         visited_units.add(unit.id)
-        for teacher in ordered_candidates(unit):
+        candidates = ordered_candidates(unit)
+
+        # First take the best free candidate. Do not disturb an earlier,
+        # higher-priority assignment when a direct free option exists.
+        for teacher in candidates:
+            if teacher in visited_teachers or teacher in occupant:
+                continue
+            visited_teachers.add(teacher)
+            occupant[teacher] = unit
+            unit.assigned = teacher
+            return True
+
+        # Only then search for an augmenting path.
+        for teacher in candidates:
             if teacher in visited_teachers:
                 continue
             visited_teachers.add(teacher)
@@ -250,12 +300,9 @@ def _assign_slot(
                 return True
             if previous.manual_teacher:
                 continue
-            previous_teacher = previous.assigned
             if place(previous, visited_teachers, visited_units):
                 occupant[teacher] = unit
                 unit.assigned = teacher
-                if previous_teacher and occupant.get(previous_teacher) is previous:
-                    occupant.pop(previous_teacher, None)
                 return True
         return False
 
@@ -277,7 +324,8 @@ def _assign_slot(
 
     for unit in slot_units:
         unit.used_fallback = bool(
-            unit.assigned
+            not unit.manual_teacher
+            and unit.assigned
             and unit.assigned != UNASSIGNED_TEACHER
             and unit.assigned not in unit.primary
         )
@@ -325,15 +373,7 @@ def resolve_teacher_collisions(
     candidate_catalog: Mapping[str, Any] | None = None,
     manual_overrides: Mapping[str, str] | None = None,
 ) -> Dict[str, Any]:
-    """Resolve teacher collisions globally after every source file was parsed.
-
-    The algorithm builds assignment units for all groups, treats truly parallel
-    groups of one lesson as one unit, and performs a deterministic bipartite
-    matching for every timetable slot. Role-compatible teachers are preferred;
-    role fallback is allowed only when it avoids a collision. Remaining
-    impossible assignments are moved to ``Не назначен`` instead of hiding a
-    double booking.
-    """
+    """Resolve teacher collisions globally after every source file was parsed."""
 
     valid_teachers: Dict[str, str] = {}
     for teacher in teachers_config:
@@ -354,17 +394,21 @@ def resolve_teacher_collisions(
     subject_load: Counter = Counter()
     unresolved: List[AssignmentUnit] = []
 
-    slots: MutableMapping[Tuple[int, str, int], List[AssignmentUnit]]
-    slots = defaultdict(list)
+    slots: MutableMapping[
+        Tuple[int, str, int],
+        List[AssignmentUnit],
+    ] = defaultdict(list)
     for unit in units:
         slots[unit.slot].append(unit)
 
     for slot in sorted(slots):
-        unresolved.extend(_assign_slot(
-            slots[slot],
-            total_load=total_load,
-            subject_load=subject_load,
-        ))
+        unresolved.extend(
+            _assign_slot(
+                slots[slot],
+                total_load=total_load,
+                subject_load=subject_load,
+            )
+        )
 
     decisions: List[Dict[str, Any]] = []
     reassigned = 0
@@ -386,32 +430,49 @@ def resolve_teacher_collisions(
         elif after == UNASSIGNED_TEACHER:
             reason = "Свободного допустимого преподавателя в этом слоте нет."
         elif unit.used_fallback:
-            reason = "Использован резервный преподаватель дисциплины для устранения коллизии."
+            reason = (
+                "Использован резервный преподаватель дисциплины "
+                "для устранения коллизии."
+            )
         elif before != after and unit.current_teacher:
-            reason = "Занятие переназначено свободному преподавателю дисциплины."
+            reason = (
+                "Занятие переназначено свободному преподавателю дисциплины."
+            )
         elif before != after:
-            reason = "Выбран свободный преподаватель с подходящей ролью и меньшей нагрузкой."
+            reason = (
+                "Выбран свободный преподаватель с подходящей ролью "
+                "и меньшей нагрузкой."
+            )
 
-        decisions.append({
-            "unit_id": unit.id,
-            "week": unit.slot[0],
-            "day": unit.slot[1],
-            "pair": unit.slot[2],
-            "groups": sorted({_text(getattr(item, "group", "")) for item in unit.lessons}),
-            "subject": unit.subject,
-            "lesson_type": unit.lesson_type,
-            "role": unit.role,
-            "room": unit.room,
-            "before": before,
-            "after": after,
-            "manual": bool(unit.manual_teacher),
-            "role_fallback": unit.used_fallback,
-            "candidates": list(unit.candidates),
-            "reason": reason,
-        })
+        decisions.append(
+            {
+                "unit_id": unit.id,
+                "week": unit.slot[0],
+                "day": unit.slot[1],
+                "pair": unit.slot[2],
+                "groups": sorted(
+                    {
+                        _text(getattr(item, "group", ""))
+                        for item in unit.lessons
+                    }
+                ),
+                "subject": unit.subject,
+                "lesson_type": unit.lesson_type,
+                "role": unit.role,
+                "room": unit.room,
+                "before": before,
+                "after": after,
+                "manual": bool(unit.manual_teacher),
+                "role_fallback": unit.used_fallback,
+                "candidates": list(unit.candidates),
+                "reason": reason,
+            }
+        )
 
     unresolved_items = [
-        item for item in decisions if item["after"] == UNASSIGNED_TEACHER
+        item
+        for item in decisions
+        if item["after"] == UNASSIGNED_TEACHER
     ]
     original_count = sum(
         sum(max(0, len(unit_ids) - 1) for unit_ids in teachers.values())
@@ -422,48 +483,89 @@ def resolve_teacher_collisions(
 
     issues: List[Dict[str, Any]] = []
     if unresolved_items:
-        issues.append(_issue(
-            code="teacher_conflicts_unresolved",
-            severity="problem",
-            priority=100,
-            message=f"Не удалось автоматически назначить преподавателя для {len(unresolved_items)} занятий без двойной занятости.",
-            default_decision="Неразрешимые занятия помещены в раздел «Не назначен», а не наложены на уже занятого преподавателя.",
-            impact="В итоговом расписании не скрывается двойная занятость; оператор видит конкретные занятия для ручного решения.",
-            resolution="unresolved",
-            items=unresolved_items,
-        ))
+        issues.append(
+            _issue(
+                code="teacher_conflicts_unresolved",
+                severity="problem",
+                priority=100,
+                message=(
+                    "Не удалось автоматически назначить преподавателя для "
+                    f"{len(unresolved_items)} занятий без двойной занятости."
+                ),
+                default_decision=(
+                    "Неразрешимые занятия помещены в раздел «Не назначен», "
+                    "а не наложены на уже занятого преподавателя."
+                ),
+                impact=(
+                    "В итоговом расписании не скрывается двойная занятость; "
+                    "оператор видит конкретные занятия для ручного решения."
+                ),
+                resolution="unresolved",
+                items=unresolved_items,
+            )
+        )
     if resolved_count:
         resolved_items = [
-            item for item in decisions
-            if item["before"] != item["after"] and item["after"] != UNASSIGNED_TEACHER
+            item
+            for item in decisions
+            if item["before"] != item["after"]
+            and item["after"] != UNASSIGNED_TEACHER
         ]
-        issues.append(_issue(
-            code="teacher_conflicts_resolved",
-            severity="info",
-            priority=30,
-            message=f"Автоматически устранено конфликтов занятий: {resolved_count}.",
-            default_decision="Занятия переданы свободным допустимым преподавателям с учётом роли и нагрузки.",
-            impact="Двойная занятость устранена без удаления занятий.",
-            resolution="auto",
-            items=resolved_items,
-        ))
+        issues.append(
+            _issue(
+                code="teacher_conflicts_resolved",
+                severity="info",
+                priority=30,
+                message=(
+                    "Автоматически устранено конфликтов занятий: "
+                    f"{resolved_count}."
+                ),
+                default_decision=(
+                    "Занятия переданы свободным допустимым преподавателям "
+                    "с учётом роли и нагрузки."
+                ),
+                impact="Двойная занятость устранена без удаления занятий.",
+                resolution="auto",
+                items=resolved_items,
+            )
+        )
     if fallback_count:
-        fallback_items = [item for item in decisions if item["role_fallback"]]
-        issues.append(_issue(
-            code="teacher_role_fallback",
-            severity="attention",
-            priority=60,
-            message=f"Для устранения коллизий использовано резервных назначений: {fallback_count}.",
-            default_decision="Резервный преподаватель выбран только среди преподавателей этой дисциплины.",
-            impact="Роль преподавателя отклонена от предпочтительной, но конфликт устранён и занятие сохранено.",
-            resolution="default_with_override",
-            items=fallback_items,
-        ))
+        fallback_items = [
+            item
+            for item in decisions
+            if item["role_fallback"]
+        ]
+        issues.append(
+            _issue(
+                code="teacher_role_fallback",
+                severity="attention",
+                priority=60,
+                message=(
+                    "Для устранения коллизий использовано резервных "
+                    f"назначений: {fallback_count}."
+                ),
+                default_decision=(
+                    "Резервный преподаватель выбран только среди "
+                    "преподавателей этой дисциплины."
+                ),
+                impact=(
+                    "Роль преподавателя отклонена от предпочтительной, "
+                    "но конфликт устранён и занятие сохранено."
+                ),
+                resolution="default_with_override",
+                items=fallback_items,
+            )
+        )
 
-    balanced_load = dict(sorted(total_load.items(), key=lambda item: item[0].casefold()))
+    balanced_load = dict(
+        sorted(
+            total_load.items(),
+            key=lambda item: item[0].casefold(),
+        )
+    )
     load_values = list(balanced_load.values())
     return {
-        "algorithm": "slot-bipartite-matching-v1",
+        "algorithm": "slot-bipartite-matching-v2",
         "unit_count": len(units),
         "lesson_count": len(lessons),
         "original_conflict_count": original_count,
@@ -472,7 +574,11 @@ def resolve_teacher_collisions(
         "reassigned_unit_count": reassigned,
         "role_fallback_count": fallback_count,
         "load_by_teacher": balanced_load,
-        "load_spread": (max(load_values) - min(load_values)) if load_values else 0,
+        "load_spread": (
+            max(load_values) - min(load_values)
+            if load_values
+            else 0
+        ),
         "decisions": decisions,
         "issues": issues,
     }
