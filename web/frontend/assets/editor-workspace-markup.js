@@ -35,7 +35,7 @@ export function installEditorWorkspaceMarkup() {
         <template v-else>
           <button type="button" class="sheet-tool" :class="{active:filesPanelVisible}" @click="filesPanelVisible=!filesPanelVisible" title="Файлы">☰ <span>Файлы</span></button>
           <button type="button" class="sheet-tool" :class="{active:settingsPanelVisible}" @click="settingsPanelVisible=!settingsPanelVisible" title="Параметры">⚙ <span>Параметры</span></button>
-          <button type="button" class="sheet-tool" :class="{active:editorControlsVisible}" @click="editorControlsVisible=!editorControlsVisible" title="Инструменты выделения">⌗ <span>Разметка</span></button>
+          <button type="button" class="sheet-tool" :class="{active:editorControlsVisible}" @click="editorControlsVisible=!editorControlsVisible" title="Инструменты разметки">⌗ <span>Разметка</span></button>
           <span class="sheet-toolbar-separator"></span>
           <button type="button" class="sheet-tool icon-only" @click="zoomOutSheet" title="Уменьшить">−</button>
           <button type="button" class="sheet-zoom-value" @click="fitSheetToScreen" title="Подогнать под экран">{{ Math.round(sheetZoom*100) }}%</button>
@@ -64,9 +64,12 @@ export function installEditorWorkspaceMarkup() {
           <span class="sheet-file-save-state" :class="{dirty:layoutDirty}">
             {{ layoutDirty ? 'Изменения файла — в черновике' : 'Разметка файла сохранена' }}
           </span>
-          <button type="button" class="sheet-tool save" @click="requestTemplateSave" title="Сохранить текущую разметку как глобальный шаблон для будущих файлов">◆ <span>Сохранить как шаблон</span></button>
+          <button type="button" class="sheet-tool save" @click="requestTemplateSave" title="Сохранить текущую разметку как глобальный шаблон для будущих файлов">◆ <span>Шаблон</span></button>
+          <button type="button" class="sheet-tool generate" @click="generateFromEditor" :disabled="generating" title="Проверить все файлы и сформировать расписание">
+            ▶ <span>{{ generating ? 'Формируем…' : 'Сформировать' }}</span>
+          </button>
           <span class="sheet-recalc-status" :class="recalcState">{{ recalcLabel }}</span>
-          <button type="button" class="sheet-tool exit" @click="leaveSheetWorkspace">× <span>Выйти</span></button>
+          <button type="button" class="sheet-tool exit" @click="leaveSheetWorkspace" title="Вернуться к обычному виду, не закрывая сеанс">× <span>К обычному виду</span></button>
         </template>
       </div>`);
 
@@ -102,7 +105,47 @@ export function installEditorWorkspaceMarkup() {
     const rangeEditor = document.querySelector('.range-editor');
     const exactEditor = document.querySelector('.exact-layout-editor');
     rangeEditor?.setAttribute('v-show', 'editorControlsVisible || !sheetWorkspaceOpen');
-    exactEditor?.setAttribute('v-show', 'editorControlsVisible || !sheetWorkspaceOpen');
+    if (exactEditor) {
+        const details = document.createElement('details');
+        details.className = 'expert-layout-details';
+        details.setAttribute('v-show', 'editorControlsVisible || !sheetWorkspaceOpen');
+        details.innerHTML = '<summary><span>Точные координаты</span><small>Экспертный режим — открывайте только для нестандартной таблицы</small></summary>';
+        exactEditor.parentNode?.insertBefore(details, exactEditor);
+        details.appendChild(exactEditor);
+    }
+
+    const resultActions = document.querySelector('.result-actions');
+    resultActions?.insertAdjacentHTML('afterbegin', `
+      <button type="button" class="btn btn-primary" @click="returnToCorrections">
+        ← Вернуться к исправлениям
+      </button>
+      <button v-if="result.run_id" type="button" class="btn btn-secondary" @click="openCurrentRunHistory">
+        История этого формирования
+      </button>
+    `);
+
+    const warningList = document.querySelector('.result-card .warning-list');
+    warningList?.insertAdjacentHTML('beforebegin', `
+      <section v-if="result.issue_groups?.length" class="issue-group-list" aria-label="Замечания по смыслу">
+        <details
+          v-for="group in result.issue_groups"
+          :key="group.id"
+          class="issue-group"
+          :class="[group.category, group.severity]"
+          :open="group.requires_action"
+        >
+          <summary>
+            <span>{{ group.label }}</span>
+            <small>{{ group.summary }}</small>
+          </summary>
+          <article v-for="item in group.items" :key="item.code + item.message" class="issue-group-item">
+            <b>{{ item.message }}</b>
+            <p>{{ item.default_decision }}</p>
+            <small>{{ item.impact }}</small>
+          </article>
+        </details>
+      </section>
+    `);
 
     const app = document.querySelector('#app');
     app?.insertAdjacentHTML('beforeend', `
