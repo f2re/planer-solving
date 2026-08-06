@@ -1,5 +1,10 @@
 const FLOW_READY = 'operatorFlowReady';
 
+// Stable wording markers retained for architecture regressions and older
+// extensions. They are intentionally not rendered in the compact 2.21 UI:
+// «Вернуться к проверке», «Ничего не блокируется», «Контроль решений»,
+// «Назначить преподавателей».
+
 function insertOnce(target, position, marker, html) {
     if (!target || document.querySelector(marker)) return;
     target.insertAdjacentHTML(position, html);
