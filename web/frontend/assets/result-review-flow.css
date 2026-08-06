@@ -1,0 +1,113 @@
+/* Final review flow: illustrations remain visible but never occupy action space. */
+
+.planner-branded .upload-card .brand-hero-visual {
+    display: block !important;
+    visibility: visible !important;
+    min-width: 0;
+}
+
+.planner-branded .upload-card .brand-hero-visual > img {
+    display: block;
+    width: 100%;
+}
+
+.planner-branded .result-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+        "hero"
+        "art"
+        "files"
+        "actions"
+        "issues";
+    gap: 16px;
+    width: min(1040px, 100%);
+    overflow: visible;
+}
+
+.result-card .result-hero {
+    grid-area: hero;
+    align-self: start;
+}
+
+.result-card .result-brand-illustration {
+    grid-area: art;
+    align-self: start;
+    justify-self: center;
+    width: min(620px, 100%);
+    max-height: 230px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 18px;
+    background: transparent;
+    box-shadow: none;
+}
+
+.result-card .result-brand-illustration::after {
+    display: none;
+}
+
+.result-card .result-brand-illustration img {
+    display: block;
+    width: 100%;
+    height: 230px;
+    min-height: 0;
+    max-height: 230px;
+    object-fit: contain;
+    border-radius: 18px;
+}
+
+.result-card .result-files {
+    grid-area: files;
+    min-width: 0;
+    max-height: none;
+    overflow: visible;
+}
+
+.result-card .result-actions,
+.result-card > .button-row {
+    position: static;
+    z-index: auto;
+    grid-area: actions;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+}
+
+.result-card .warning-box,
+.result-card .issue-group-list {
+    grid-area: issues;
+}
+
+.result-card .return-to-editor {
+    order: -1;
+}
+
+@media (max-width: 720px) {
+    .planner-branded .result-card {
+        gap: 14px;
+    }
+
+    .result-card .result-brand-illustration {
+        width: 100%;
+        max-height: 190px;
+    }
+
+    .result-card .result-brand-illustration img {
+        height: 190px;
+        max-height: 190px;
+    }
+
+    .result-card .result-actions > *,
+    .result-card > .button-row > * {
+        flex: 1 1 100%;
+        justify-content: center;
+        text-align: center;
+    }
+}

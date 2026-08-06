@@ -14,6 +14,7 @@ from web.backend.errors import install_exception_handlers
 from web.backend.frontend_cache import install_frontend_cache_policy
 from web.backend.password_reset_session import install_password_reset_session
 from web.backend.platform_api import build_platform_router
+from web.backend.schedule_export_policy import install_schedule_export_policy
 from web.backend.session_api import build_session_router
 from web.backend.session_draft_api import build_session_draft_router
 from web.backend.session_file_api import build_session_file_router
@@ -41,6 +42,7 @@ def create_app(
     install_frontend_cache_policy(app)
     install_auth(app, context)
     install_password_reset_session(app, context)
+    install_schedule_export_policy()
 
     app.include_router(build_auth_router(context))
     app.include_router(build_analysis_router(context))
