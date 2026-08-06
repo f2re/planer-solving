@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_runtime_copy_contains_only_operational_documents(tmp_path: Path) -> None:
     destination = tmp_path / "app"
     destination.mkdir()
-    copy_application(ROOT, destination)
+    copy_application(ROOT, destination, validate=True)
 
     copied_docs = {
         path.relative_to(destination).as_posix()

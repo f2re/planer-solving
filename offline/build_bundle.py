@@ -102,7 +102,12 @@ def should_copy(relative: Path) -> bool:
     return True
 
 
-def copy_application(source: Path, destination: Path) -> None:
+def copy_application(
+    source: Path,
+    destination: Path,
+    *,
+    validate: bool = False,
+) -> None:
     for path in source.rglob("*"):
         relative = path.relative_to(source)
         if not should_copy(relative):
@@ -116,15 +121,17 @@ def copy_application(source: Path, destination: Path) -> None:
     for directory in ("data", "input", "output"):
         (destination / directory).mkdir(parents=True, exist_ok=True)
         (destination / directory / ".gitkeep").touch()
-    missing = sorted(
-        str(relative)
-        for relative in REQUIRED_APPLICATION_FILES
-        if not (destination / relative).is_file()
-    )
-    if missing:
-        raise RuntimeError(
-            "В runtime-копии отсутствуют обязательные файлы: " + ", ".join(missing)
+    if validate:
+        missing = sorted(
+            str(relative)
+            for relative in REQUIRED_APPLICATION_FILES
+            if not (destination / relative).is_file()
         )
+        if missing:
+            raise RuntimeError(
+                "В runtime-копии отсутствуют обязательные файлы: "
+                + ", ".join(missing)
+            )
     leaked = sorted(
         str(relative)
         for relative in BANNED_APPLICATION_FILES
@@ -223,7 +230,7 @@ def build(args: argparse.Namespace) -> Path:
         wheelhouse = stage / "wheelhouse"
         app_dir.mkdir(parents=True)
         wheelhouse.mkdir(parents=True)
-        copy_application(root, app_dir)
+        copy_application(root, app_dir, validate=True)
 
         requirements = root / "requirements-runtime.txt"
         if not requirements.exists():
