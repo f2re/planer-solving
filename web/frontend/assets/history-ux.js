@@ -12,12 +12,51 @@ export function installHistoryUxMarkup() {
 
     const runHero = document.querySelector('.run-hero');
     insertOnce(runHero, 'beforeend', '.run-repeat-action', `
-      <button
-        v-if="selectedRun"
-        type="button"
-        class="btn btn-secondary btn-small run-repeat-action"
-        @click="repeatRun(selectedRun)"
-      >Повторить с теми же решениями</button>`);
+      <div class="run-history-actions">
+        <button
+          v-if="selectedRun?.report?.session_id === sessionId"
+          type="button"
+          class="btn btn-primary btn-small run-return-action"
+          @click="returnToCorrections"
+        >Вернуться к исправлениям</button>
+        <button
+          v-if="selectedRun"
+          type="button"
+          class="btn btn-secondary btn-small run-repeat-action"
+          @click="repeatRun(selectedRun)"
+        >Повторить с теми же решениями</button>
+      </div>`);
+
+    const firstHistoryHeading = document.querySelector('.run-details > h4');
+    insertOnce(firstHistoryHeading, 'beforebegin', '.history-issue-groups', `
+      <section
+        v-if="selectedRun?.report?.issue_groups?.length"
+        class="history-issue-groups issue-group-list"
+        aria-label="Итоги разрешения замечаний"
+      >
+        <h4>Замечания и решения</h4>
+        <details
+          v-for="group in selectedRun.report.issue_groups"
+          :key="group.id"
+          class="issue-group"
+          :class="[group.category, group.severity]"
+          :open="group.requires_action"
+        >
+          <summary>
+            <span>{{ group.label }}</span>
+            <small>{{ group.summary }}</small>
+          </summary>
+          <article
+            v-for="item in group.items"
+            :key="item.code + item.message"
+            class="issue-group-item"
+          >
+            <b>{{ item.message }}</b>
+            <p>{{ item.default_decision }}</p>
+            <small>{{ item.impact }}</small>
+          </article>
+        </details>
+      </section>`);
 
     const fileRow = document.querySelector('.run-details .detail-list > div');
     insertOnce(fileRow, 'beforeend', '.history-file-decisions', `

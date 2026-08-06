@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from src.operator_issues import attach_operator_issues
+from src.operator_issues import attach_operator_issues, group_operator_issues
 from src.workspace_domain import default_semester_settings
 
 
@@ -140,14 +140,26 @@ class ScheduleUploadResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     reports: List[Dict[str, Any]] = Field(default_factory=list)
     corrections: List[Dict[str, Any]] = Field(default_factory=list)
+    teacher_assignment: Dict[str, Any] = Field(default_factory=dict)
+    issue_groups: List[Dict[str, Any]] = Field(default_factory=list)
 
     def __init__(self, **data: Any) -> None:
-        data["reports"] = [
+        reports = [
             attach_operator_issues(dict(report))
             if isinstance(report, dict)
             else report
             for report in data.get("reports") or []
         ]
+        data["reports"] = reports
+        if not data.get("issue_groups"):
+            issues = [
+                issue
+                for report in reports
+                if isinstance(report, dict)
+                for issue in report.get("issues") or []
+            ]
+            issues.extend((data.get("teacher_assignment") or {}).get("issues") or [])
+            data["issue_groups"] = group_operator_issues(issues)
         super().__init__(**data)
 
 

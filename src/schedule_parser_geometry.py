@@ -54,10 +54,13 @@ class ScheduleParserGeometry:
                     entire = " ".join(normalize_text(matrix.value(row, col)) for col in range(1, matrix.worksheet.max_column + 1))
                     lecturers = others = self._extract_teachers(entire)
             entry = {"lecturer": lecturers, "other": others}
+            register = getattr(self, "_register_subject_candidates", None)
             for key in (code, subject):
                 normalized = self._subject_key(key)
                 if normalized:
                     mapping[normalized] = entry
+                    if callable(register):
+                        register(key, lecturers=lecturers, others=others)
         report["legend_entries"] = len(mapping)
         if not mapping:
             report["warnings"].append("В заданном блоке дисциплин не найдено ни одной пригодной строки.")
