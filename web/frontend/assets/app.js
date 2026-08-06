@@ -114,7 +114,8 @@
         import('/assets/session-draft-runtime.js'),
         import('/assets/unified-operations.js'),
         import('/assets/failure-recovery.js'),
-        import('/assets/fetch-recovery.js')
+        import('/assets/fetch-recovery.js'),
+        import('/assets/result-review-flow.js')
     ])
         .then(results => {
             const brand = optionalModule(results[0], 'visual identity');
@@ -124,6 +125,7 @@
             const unifiedOperations = optionalModule(results[4], 'unified operations center');
             const failureRecovery = optionalModule(results[5], 'failure recovery center');
             const fetchRecovery = optionalModule(results[6], 'fetch recovery interceptor');
+            const resultReview = optionalModule(results[7], 'result review flow');
 
             if (applicationResult.status !== 'fulfilled') throw applicationResult.reason;
             const application = applicationResult.value;
@@ -136,6 +138,7 @@
             runOptional('brand metadata', () => brand.installBrandMetadata?.());
             runOptional('brand markup', () => brand.installBrandMarkup?.());
             runOptional('operator flow markup', () => operatorFlow.installOperatorFlowMarkup?.());
+            runOptional('result review markup', () => resultReview.installResultReviewMarkup?.());
             runOptional('failure recovery', () => failureRecovery.installFailureRecovery?.());
             runOptional('fetch recovery', () => fetchRecovery.installFetchRecovery?.());
 
@@ -148,6 +151,7 @@
             // включая unified-operations.js, записывается в диагностику, но не
             // скрывает уже смонтированное рабочее место оператора.
             runOptional('operator flow runtime', () => operatorFlow.installOperatorFlowRuntime?.());
+            runOptional('result review runtime', () => resultReview.installResultReviewRuntime?.());
             runOptional('server draft runtime', () => draftRuntime.installSessionDraftRuntime?.());
             runOptional('unified operations runtime', () => unifiedOperations.installUnifiedOperationsRuntime?.());
 
