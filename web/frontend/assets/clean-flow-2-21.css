@@ -1,0 +1,594 @@
+/* Planner Solving 2.21 — restrained operator surface. */
+
+.sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* Start screen: one purpose, one visual, one upload action. */
+.planner-branded .upload-card {
+    grid-template-columns: minmax(310px, .82fr) minmax(420px, 1.18fr);
+    grid-template-areas:
+        "copy hero"
+        "drop hero"
+        "note hero";
+    grid-template-rows: auto auto min-content;
+    align-items: center;
+    gap: 18px 34px;
+    width: min(1160px, 100%);
+    padding: clamp(22px, 3.2vw, 40px);
+}
+
+.planner-branded .upload-header .page-title {
+    margin-bottom: 12px;
+    font-size: clamp(34px, 4vw, 54px);
+    line-height: 1.01;
+}
+
+.planner-branded .upload-header .page-lead {
+    max-width: 520px;
+    font-size: 15px;
+    line-height: 1.52;
+}
+
+.planner-branded .brand-kicker,
+.planner-branded .brand-feature-list,
+.planner-branded .brand-hero-visual figcaption,
+.operator-principles {
+    display: none !important;
+}
+
+.planner-branded .brand-hero-visual {
+    align-self: stretch;
+    min-height: 0;
+    padding: 7px;
+    transform: none;
+}
+
+.planner-branded .brand-hero-visual > img {
+    height: 100%;
+    min-height: 350px;
+    max-height: 510px;
+    object-fit: cover;
+}
+
+.planner-branded .dropzone {
+    min-height: 150px;
+    padding: 18px;
+    border-radius: 18px;
+}
+
+.planner-branded .drop-icon img {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+}
+
+.planner-branded .dropzone h2 {
+    margin: 8px 0 3px;
+    font-size: 19px;
+}
+
+.planner-branded .dropzone p,
+.planner-branded .format-note {
+    font-size: 12px;
+}
+
+.planner-branded .format-note {
+    margin: 0;
+    padding-left: 3px;
+}
+
+/* Main action strip. */
+.operator-readiness {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 72px;
+    margin-bottom: 14px;
+    padding: 13px 16px;
+    border: 1px solid rgba(76, 98, 154, .14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .88);
+    box-shadow: 0 10px 28px rgba(42, 69, 137, .08);
+}
+
+.readiness-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.readiness-copy strong {
+    font-size: 16px;
+    letter-spacing: -.02em;
+}
+
+.readiness-copy small {
+    color: #6c7790;
+    font-size: 12px;
+}
+
+.operator-primary-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.operator-primary-actions .btn {
+    min-height: 38px;
+    padding: 8px 13px;
+    white-space: nowrap;
+}
+
+.teacher-settings-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.action-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    color: #fff;
+    background: #315efb;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+/* Only meaningful attention is expanded. */
+.attention-queue {
+    margin: 0 0 14px;
+    border-radius: 17px;
+}
+
+.attention-header {
+    min-height: 52px;
+    padding: 10px 14px;
+}
+
+.attention-header strong {
+    font-size: 14px;
+}
+
+.attention-list {
+    gap: 7px;
+    padding: 0 10px 10px;
+}
+
+.attention-item {
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    min-height: 58px;
+    padding: 9px 10px;
+}
+
+.attention-copy > strong {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.attention-meta {
+    margin-bottom: 2px;
+}
+
+.attention-copy p,
+.attention-copy > small {
+    display: none;
+}
+
+.attention-more {
+    margin: 3px 4px 0;
+    font-size: 11px;
+}
+
+.bottom-actions {
+    padding-top: 12px;
+}
+
+.bottom-actions > .button-row {
+    width: 100%;
+    justify-content: flex-end;
+}
+
+/* Assignment dialog. */
+.teacher-mapping-backdrop {
+    padding: clamp(10px, 2vw, 24px);
+}
+
+.teacher-mapping-dialog {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    width: min(1020px, 100%);
+    max-height: min(820px, calc(100vh - 28px));
+    overflow: hidden;
+    border: 1px solid rgba(77, 99, 157, .18);
+    border-radius: 24px;
+    background: #f8faff;
+    box-shadow: 0 32px 90px rgba(28, 47, 100, .26);
+}
+
+.teacher-mapping-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 22px 24px 15px;
+    border-bottom: 1px solid rgba(77, 99, 157, .1);
+    background: rgba(255, 255, 255, .94);
+}
+
+.teacher-mapping-header h2 {
+    margin: 0;
+    font-size: 24px;
+    letter-spacing: -.035em;
+}
+
+.teacher-mapping-header p {
+    margin: 5px 0 0;
+    color: #68748d;
+    font-size: 13px;
+}
+
+.teacher-mapping-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 24px;
+    border-bottom: 1px solid rgba(77, 99, 157, .1);
+    background: rgba(248, 250, 255, .96);
+}
+
+.teacher-mapping-search {
+    flex: 1 1 auto;
+}
+
+.teacher-mapping-search .control {
+    min-height: 40px;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.teacher-mapping-list {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    overflow: auto;
+    padding: 14px 24px 22px;
+}
+
+.teacher-mapping-row {
+    padding: 14px;
+    border: 1px solid rgba(78, 100, 157, .13);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 6px 18px rgba(45, 72, 137, .045);
+}
+
+.teacher-rule-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 11px;
+}
+
+.teacher-rule-heading > div {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.teacher-rule-heading strong {
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teacher-rule-heading small {
+    color: #78839a;
+    font-size: 11px;
+}
+
+.teacher-rule-clear {
+    padding: 3px 0;
+    border: 0;
+    color: #6d7890;
+    background: none;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.teacher-rule-clear:hover {
+    color: #d04444;
+}
+
+.teacher-rule-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.teacher-rule-grid label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.teacher-rule-grid label > span {
+    color: #5d6981;
+    font-size: 11px;
+    font-weight: 760;
+}
+
+.teacher-rule-grid .control {
+    width: 100%;
+    min-height: 40px;
+    overflow: hidden;
+    border-radius: 11px;
+    text-overflow: ellipsis;
+}
+
+.teacher-rule-summary {
+    margin-top: 9px;
+    overflow: hidden;
+    color: #56627a;
+    font-size: 10px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teacher-mapping-empty {
+    padding: 34px;
+    color: #778299;
+    text-align: center;
+}
+
+.teacher-mapping-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 14px 24px;
+    border-top: 1px solid rgba(77, 99, 157, .12);
+    background: #fff;
+}
+
+.teacher-mapping-footer > div {
+    display: flex;
+    gap: 8px;
+}
+
+.teacher-default-toggle {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #56627a;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.teacher-default-toggle input {
+    width: 17px;
+    height: 17px;
+    accent-color: #315efb;
+}
+
+/* Result screen: guaranteed local illustration with a compact action area. */
+.planner-branded .result-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, .68fr);
+    grid-template-areas:
+        "hero art"
+        "files art"
+        "actions art"
+        "issues issues";
+    gap: 18px 28px;
+    width: min(1160px, 100%);
+    margin-inline: auto;
+    padding: clamp(22px, 3vw, 38px);
+    overflow: hidden;
+}
+
+.result-card .result-hero {
+    grid-area: hero;
+    align-self: end;
+}
+
+.result-card .result-hero .page-lead {
+    display: none;
+}
+
+.result-compact-summary {
+    max-width: 600px;
+    margin: 8px 0 0;
+    color: #68748d;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.result-card .result-files {
+    grid-area: files;
+    align-self: start;
+    max-height: 330px;
+    overflow: auto;
+}
+
+.result-card .result-actions,
+.result-card > .button-row {
+    grid-area: actions;
+    align-self: start;
+    justify-content: flex-start;
+    margin: 0;
+}
+
+.result-card .result-brand-illustration {
+    grid-area: art;
+    align-self: stretch;
+    min-height: 330px;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid rgba(75, 99, 161, .14);
+    border-radius: 22px;
+    background: linear-gradient(145deg, #eef4ff, #eefbf9);
+    box-shadow: 0 18px 42px rgba(46, 75, 149, .12);
+}
+
+.result-card .result-brand-illustration img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 330px;
+    object-fit: cover;
+}
+
+.result-card .warning-box,
+.result-card .issue-group-list {
+    grid-area: issues;
+}
+
+.result-file {
+    gap: 10px;
+    min-height: 54px;
+    padding: 9px 11px;
+}
+
+.result-file .panel-subtitle {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+}
+
+@media (max-width: 980px) {
+    .planner-branded .upload-card {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "copy"
+            "drop"
+            "hero"
+            "note";
+    }
+
+    .planner-branded .brand-hero-visual > img {
+        min-height: 240px;
+        max-height: 360px;
+    }
+
+    .planner-branded .result-card {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "hero"
+            "art"
+            "files"
+            "actions"
+            "issues";
+    }
+
+    .result-card .result-brand-illustration,
+    .result-card .result-brand-illustration img {
+        min-height: 240px;
+        max-height: 340px;
+    }
+}
+
+@media (max-width: 720px) {
+    .operator-readiness,
+    .teacher-mapping-footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .operator-primary-actions,
+    .teacher-mapping-footer > div {
+        width: 100%;
+    }
+
+    .operator-primary-actions .btn,
+    .operator-primary-actions label,
+    .teacher-mapping-footer .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    .teacher-mapping-header,
+    .teacher-mapping-tools,
+    .teacher-mapping-list,
+    .teacher-mapping-footer {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .teacher-rule-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .teacher-rule-summary {
+        white-space: normal;
+    }
+}
+
+@media (min-width: 981px) and (max-height: 790px) {
+    .planner-branded .brand-shell {
+        margin-top: 14px;
+    }
+
+    .planner-branded .steps {
+        margin-bottom: 12px;
+    }
+
+    .planner-branded .upload-card {
+        gap: 12px 26px;
+        padding: 22px 28px;
+    }
+
+    .planner-branded .upload-header .page-title {
+        font-size: 40px;
+    }
+
+    .planner-branded .upload-header .page-lead {
+        font-size: 13px;
+        line-height: 1.42;
+    }
+
+    .planner-branded .dropzone {
+        min-height: 124px;
+        padding: 12px;
+    }
+
+    .planner-branded .drop-icon img {
+        width: 44px;
+        height: 44px;
+    }
+
+    .planner-branded .brand-hero-visual > img {
+        min-height: 300px;
+        max-height: 420px;
+    }
+}
+
+@media (min-resolution: 1.75dppx), (min-width: 600px) and (max-width: 900px) {
+    .teacher-mapping-dialog {
+        max-height: calc(100vh - 16px);
+        border-radius: 18px;
+    }
+}

@@ -19,20 +19,20 @@ def test_operator_flow_is_loaded_before_vue_mount() -> None:
 def test_operator_flow_keeps_result_editable() -> None:
     source = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
 
-    assert "Вернуться к проверке" in source
-    assert "Открыть и уточнить" in source
+    assert "К исправлениям" in source
+    assert ">Уточнить</button>" in source
     assert "step=2; selectFile(detail.file_id)" in source
-    assert "текущий сеанс и все ручные правки сохранены" in source
+    assert "Файлы готовы" in source
 
 
-def test_nonblocking_policy_lives_in_base_template() -> None:
+def test_nonblocking_policy_lives_in_base_template_without_duplicate_copy() -> None:
     base = INDEX.read_text(encoding="utf-8")
     enhancements = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
 
     assert "Результат создаётся из пригодных данных" in base
     assert "остаются доступными для исправления" in base
-    assert "Ничего не блокируется" in enhancements
-    assert "Ручная правка необязательна" in enhancements
+    assert "operator-principles')?.remove()" in enhancements
+    assert "brand-feature-list')?.remove()" in enhancements
     assert "function text(" not in enhancements
     assert "document.title =" not in enhancements
     assert "upload-header .page-title" not in enhancements
@@ -61,28 +61,30 @@ def test_active_session_supports_individual_file_actions() -> None:
     assert "Прежний исходник и все правки сохранены" in state
 
 
-def test_attention_queue_explains_default_and_impact() -> None:
+def test_attention_queue_is_compact_but_actionable() -> None:
     markup = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
     state = (ASSETS / "session-file-actions.js").read_text(encoding="utf-8")
 
-    assert "Контроль решений" in markup
-    assert "По умолчанию:" in markup
-    assert "issue.default_decision" in markup
-    assert "issue.impact" in markup
+    assert "Требуют внимания:" in markup
+    assert "attentionIssues.slice(0,5)" in markup
+    assert "issue.message" in markup
     assert "openAttentionIssue" in markup
     assert "defaultResolution" in state
     assert "attentionIssues" in state
 
 
-def test_unknown_teachers_can_be_assigned_without_leaving_flow() -> None:
+def test_teachers_can_be_configured_by_role_without_leaving_flow() -> None:
     markup = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
     state = (ASSETS / "teacher-mapping-state.js").read_text(encoding="utf-8")
     application = (ASSETS / "planner-app.js").read_text(encoding="utf-8")
 
-    assert "Назначить преподавателей" in markup
-    assert "Не назначен — безопасное значение" in markup
+    assert "Преподаватели по дисциплинам" in markup
+    assert "Пустое поле оставляет автоматическое распределение" in markup
     assert "openTeacherMapping(issue)" in markup
     assert "saveTeacherMapping" in markup
+    assert ">Лекции<" in markup
+    assert ">Практика<" in markup
+    assert ">Резерв<" in markup
     assert "teacher_overrides" in state
     assert "createTeacherMappingState" in application
     assert "...teacherMapping" in application

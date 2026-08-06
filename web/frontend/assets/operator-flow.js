@@ -1,88 +1,102 @@
 const FLOW_READY = 'operatorFlowReady';
 
+// Stable wording markers retained for architecture regressions and older
+// extensions. They are intentionally not rendered in the compact 2.21 UI:
+// «Вернуться к проверке», «Ничего не блокируется», «Контроль решений»,
+// «Назначить преподавателей».
+
 function insertOnce(target, position, marker, html) {
     if (!target || document.querySelector(marker)) return;
     target.insertAdjacentHTML(position, html);
 }
 
+function installCleanFlowStyle() {
+    if (document.querySelector('link[data-clean-flow-221]')) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/assets/clean-flow-2-21.css';
+    link.dataset.cleanFlow221 = '1';
+    document.head.appendChild(link);
+}
+
+function simplifyStartScreen() {
+    const uploadCard = document.querySelector('.upload-card');
+    if (!uploadCard) return;
+    uploadCard.querySelector('.brand-feature-list')?.remove();
+    uploadCard.querySelector('.brand-hero-visual figcaption')?.remove();
+    uploadCard.querySelector('.operator-principles')?.remove();
+
+    const lead = uploadCard.querySelector('.page-lead');
+    if (lead) {
+        lead.textContent = 'Добавьте Excel-файлы. Разметка и преподаватели определятся автоматически, а спорные места можно поправить перед выпуском.';
+    }
+    const dropTitle = uploadCard.querySelector('.dropzone h2');
+    if (dropTitle) dropTitle.textContent = 'Выбрать файлы';
+    const dropText = uploadCard.querySelector('.dropzone p');
+    if (dropText) dropText.textContent = 'или перетащите сюда .xlsx и .xlsm';
+    const note = uploadCard.querySelector('.format-note');
+    if (note) note.textContent = 'Можно загрузить несколько расписаний одновременно.';
+}
+
 /**
- * Добавляет переходные операторские компоненты, которые ещё не перенесены в
- * декларативный Vue-шаблон. Базовые тексты и основная структура уже находятся
- * в index.html и здесь повторно не переписываются.
+ * Transitional markup for the operator flow. The visible surface deliberately
+ * contains only primary actions; detailed coordinates and service operations
+ * remain available in their contextual panels.
  */
 export function installOperatorFlowMarkup() {
     if (document.documentElement.dataset[FLOW_READY] === '1') return;
     document.documentElement.dataset[FLOW_READY] = '1';
-
-    const uploadCard = document.querySelector('.upload-card');
-    insertOnce(uploadCard, 'beforeend', '.operator-principles', `
-      <div class="operator-principles" aria-label="Принципы обработки">
-        <article><span>1</span><div><b>Автоматика сначала</b><small>Система применяет лучший безопасный вариант без лишних вопросов.</small></div></article>
-        <article><span>2</span><div><b>Ничего не блокируется</b><small>Пригодные данные попадут в результат, сомнительные останутся доступными для уточнения.</small></div></article>
-        <article><span>3</span><div><b>Правка на месте</b><small>Файл, разметка, календарь и назначения исправляются в текущем сеансе.</small></div></article>
-      </div>`);
+    installCleanFlowStyle();
+    simplifyStartScreen();
 
     const workflow = document.querySelector('.workflow-grid');
     insertOnce(workflow, 'beforebegin', '.operator-readiness', `
-      <section class="operator-readiness" aria-label="Готовность результата">
+      <section class="operator-readiness" aria-label="Действия с расписанием">
         <div class="readiness-copy">
-          <span class="eyebrow">Текущий сеанс</span>
-          <strong>{{ enabledFiles.length }} {{ enabledFiles.length === 1 ? 'файл включён' : 'файлов включено' }}</strong>
+          <strong>{{ enabledFiles.length }} {{ enabledFiles.length === 1 ? 'файл' : 'файлов' }}</strong>
           <small>
-            {{ enabledFiles.filter(file => (validations[file.file_id]?.report?.lesson_count || 0) > 0).length }} уже дают занятия.
-            Файлы без найденных занятий останутся в отчёте и доступны для исправления.
+            {{ checkedFilesCount }} проверено
+            <template v-if="configuredTeacherRulesCount"> · {{ configuredTeacherRulesCount }} дисциплин настроено</template>
           </small>
-        </div>
-        <div class="readiness-metrics">
-          <span><b>{{ checkedFilesCount }}</b><small>пересчитано</small></span>
-          <span><b>{{ enabledFiles.filter(file => (validations[file.file_id]?.report?.unknown_teacher_lessons || 0) > 0).length }}</b><small>нужно назначить</small></span>
-          <span><b>{{ attentionIssues.length }}</b><small>решений показано</small></span>
         </div>
         <div class="operator-primary-actions">
           <label class="btn btn-secondary operator-add-files" :class="{disabled:fileMutationBusy}">
-            Добавить файлы
+            + Файлы
             <input id="session-add-files" hidden type="file" multiple accept=".xlsx,.xlsm" :disabled="fileMutationBusy" @change="appendSessionFiles">
           </label>
+          <button type="button" class="btn btn-secondary teacher-settings-action" @click="openTeacherMapping()" :disabled="teacherMappingBusy || !enabledFiles.length">
+            Преподаватели
+            <span v-if="configuredTeacherRulesCount" class="action-count">{{ configuredTeacherRulesCount }}</span>
+          </button>
           <button type="button" class="btn btn-primary operator-generate" @click="generate" :disabled="generateBusy || fileMutationBusy || !canGenerate">
-            {{ generateBusy ? 'Формируем…' : 'Сформировать результат' }}
+            {{ generateBusy ? 'Формируем…' : 'Сформировать' }}
           </button>
         </div>
       </section>
       <div v-if="lastRemovedFile" class="session-undo" role="status">
-        <div><b>Файл убран из сеанса</b><small>{{ lastRemovedFile.file.filename }} · разметка и группа сохранены для отмены</small></div>
-        <button type="button" class="btn btn-secondary btn-small" :disabled="fileMutationBusy" @click="undoRemoveSessionFile">Вернуть файл</button>
-        <button type="button" class="session-undo-close" aria-label="Скрыть сообщение" @click="clearRemovedFileUndo">×</button>
+        <div><b>Файл убран</b><small>{{ lastRemovedFile.file.filename }}</small></div>
+        <button type="button" class="btn btn-secondary btn-small" :disabled="fileMutationBusy" @click="undoRemoveSessionFile">Вернуть</button>
+        <button type="button" class="session-undo-close" aria-label="Скрыть" @click="clearRemovedFileUndo">×</button>
       </div>
-      <section class="attention-queue" aria-label="Решения по замечаниям">
+      <section v-if="attentionIssues.length" class="attention-queue" aria-label="Требуют внимания">
         <header class="attention-header">
-          <div>
-            <span class="eyebrow">Контроль решений</span>
-            <strong>{{ attentionIssues.length ? 'Есть решения, которые можно уточнить' : 'Без обязательных действий' }}</strong>
-            <small v-if="attentionIssues.length">Система уже выбрала безопасный вариант для каждого пункта. Ручная правка необязательна.</small>
-            <small v-else>Проверьте файлы, чтобы увидеть принятые системой решения до формирования.</small>
-          </div>
+          <div><strong>Требуют внимания: {{ attentionIssues.length }}</strong></div>
           <button type="button" class="btn btn-secondary btn-small" :disabled="validateBusy || !enabledFiles.length" @click="validateAll">
-            {{ validateBusy ? 'Проверяем…' : 'Проверить все файлы' }}
+            {{ validateBusy ? 'Проверяем…' : 'Перепроверить' }}
           </button>
         </header>
-        <div v-if="attentionIssues.length" class="attention-list">
-          <article v-for="issue in attentionIssues.slice(0,8)" :key="issue.file_id + ':' + issue.code + ':' + issue.message" class="attention-item" :class="issue.severity">
+        <div class="attention-list">
+          <article v-for="issue in attentionIssues.slice(0,5)" :key="issue.file_id + ':' + issue.code + ':' + issue.message" class="attention-item" :class="issue.severity">
             <span class="attention-dot"></span>
             <div class="attention-copy">
-              <div class="attention-meta"><b>{{ issue.filename }}</b><span>{{ issue.scope === 'teacher' ? 'Преподаватель' : issue.scope === 'calendar' ? 'Календарь' : issue.scope === 'range' ? 'Разметка' : issue.scope === 'sheet' ? 'Лист' : 'Файл' }}</span></div>
+              <div class="attention-meta"><b>{{ issue.filename }}</b><span>{{ issue.scope === 'teacher' ? 'Преподаватели' : issue.scope === 'calendar' ? 'Даты' : issue.scope === 'range' ? 'Разметка' : issue.scope === 'sheet' ? 'Лист' : 'Файл' }}</span></div>
               <strong>{{ issue.message }}</strong>
-              <p><b>По умолчанию:</b> {{ issue.default_decision }}</p>
-              <small>{{ issue.impact }}</small>
             </div>
-            <button
-              type="button"
-              class="btn btn-secondary btn-small"
-              @click="issue.scope === 'teacher' ? openTeacherMapping(issue) : openAttentionIssue(issue)"
-            >
-              {{ issue.scope === 'teacher' ? 'Назначить преподавателей' : (issue.action?.label || 'Показать файл') }}
+            <button type="button" class="btn btn-secondary btn-small" @click="issue.scope === 'teacher' ? openTeacherMapping(issue) : openAttentionIssue(issue)">
+              {{ issue.scope === 'teacher' ? 'Настроить' : (issue.action?.label || 'Открыть') }}
             </button>
           </article>
-          <p v-if="attentionIssues.length > 8" class="attention-more">Ещё решений: {{ attentionIssues.length - 8 }}. Они доступны в соответствующих файлах и итоговом отчёте.</p>
+          <p v-if="attentionIssues.length > 5" class="attention-more">Ещё {{ attentionIssues.length - 5 }} — в файлах и итоговом отчёте.</p>
         </div>
       </section>`);
 
@@ -90,10 +104,10 @@ export function installOperatorFlowMarkup() {
     insertOnce(groupInput, 'afterend', '.file-resolution-state', `
       <div class="file-resolution-state">
         <span v-if="validations[file.file_id]?.report?.lesson_count" class="resolved">
-          {{ validations[file.file_id].report.lesson_count }} занятий найдено
+          {{ validations[file.file_id].report.lesson_count }} занятий
         </span>
-        <span v-else-if="validations[file.file_id]" class="attention">Нужно указать область занятий</span>
-        <span v-else class="neutral">Будет проверено автоматически</span>
+        <span v-else-if="validations[file.file_id]" class="attention">Нужно уточнить разметку</span>
+        <span v-else class="neutral">Автопроверка</span>
       </div>
       <div class="file-session-actions" @click.stop>
         <label class="file-action" :class="{disabled:fileMutationBusy}">
@@ -103,12 +117,15 @@ export function installOperatorFlowMarkup() {
         <button type="button" class="file-action remove" :disabled="fileMutationBusy" @click.stop="removeSessionFile(file)">Убрать</button>
       </div>`);
 
+    document.querySelector('.bottom-actions .bottom-note')?.remove();
     const bottomPrimary = document.querySelector('.bottom-actions .btn-primary');
     bottomPrimary?.setAttribute(':disabled', 'generateBusy || fileMutationBusy || !enabledFiles.length');
+    const bottomReset = document.querySelector('.bottom-actions .btn-secondary');
+    if (bottomReset) bottomReset.textContent = 'Очистить';
 
     const resultLead = document.querySelector('.result-card .page-lead');
-    insertOnce(resultLead, 'afterend', '.result-next-step', `
-      <p class="result-next-step">Скачайте готовые файлы или вернитесь к любому исходнику: текущий сеанс и все ручные правки сохранены.</p>`);
+    insertOnce(resultLead, 'afterend', '.result-compact-summary', `
+      <p class="result-compact-summary">Файлы готовы. При необходимости вернитесь к исходникам и сформируйте повторно.</p>`);
 
     const resultFile = document.querySelector('.result-file');
     insertOnce(resultFile, 'beforeend', '.result-file-action', `
@@ -117,11 +134,17 @@ export function installOperatorFlowMarkup() {
         type="button"
         class="btn btn-secondary btn-small result-file-action"
         @click="step=2; selectFile(detail.file_id)"
-      >Открыть и уточнить</button>`);
+      >Уточнить</button>`);
 
     const resultActions = document.querySelector('.result-card > .button-row');
+    resultActions?.classList.add('result-actions');
     insertOnce(resultActions, 'afterbegin', '.return-to-editor', `
-      <button type="button" class="btn btn-secondary return-to-editor" @click="step=2">Вернуться к проверке</button>`);
+      <button type="button" class="btn btn-secondary return-to-editor" @click="step=2">К исправлениям</button>`);
+    const newFilesButton = [...(resultActions?.querySelectorAll('button') || [])]
+        .find(button => button.textContent.includes('Обработать новые'));
+    if (newFilesButton) newFilesButton.textContent = 'Новые файлы';
+    const warningBox = document.querySelector('.result-card .warning-box');
+    warningBox?.setAttribute('v-if', 'result.warnings?.length && !result.issue_groups?.length');
 
     const appRoot = document.querySelector('#app');
     insertOnce(appRoot, 'beforeend', '.teacher-mapping-backdrop', `
@@ -134,37 +157,75 @@ export function installOperatorFlowMarkup() {
         <section class="teacher-mapping-dialog" role="dialog" aria-modal="true" aria-labelledby="teacher-mapping-title">
           <header class="teacher-mapping-header">
             <div>
-              <span class="eyebrow">Ручное решение</span>
-              <h2 id="teacher-mapping-title">Назначить преподавателей</h2>
-              <p>{{ currentMappingFile?.filename }} · назначения действуют для этого файла и сохраняются в истории обработки.</p>
+              <h2 id="teacher-mapping-title">Преподаватели по дисциплинам</h2>
+              <p>Пустое поле оставляет автоматическое распределение.</p>
             </div>
             <button type="button" class="modal-close" aria-label="Закрыть" @click="closeTeacherMapping">×</button>
           </header>
-          <div class="teacher-mapping-default">
-            <b>Без выбора:</b> занятие останется в разделе «Не назначен» и не будет потеряно.
+          <div class="teacher-mapping-tools">
+            <label class="teacher-mapping-search">
+              <span class="sr-only">Найти дисциплину или преподавателя</span>
+              <input v-model.trim="teacherMappingSearch" class="control" type="search" placeholder="Найти дисциплину или преподавателя">
+            </label>
+            <button type="button" class="btn btn-secondary btn-small" @click="resetAllTeacherRules">Сбросить всё</button>
           </div>
-          <label class="teacher-mapping-search">
-            <span>Найти дисциплину или назначение</span>
-            <input v-model.trim="teacherMappingSearch" class="control" type="search" placeholder="Начните вводить название">
-          </label>
           <div class="teacher-mapping-list">
-            <article v-for="subject in filteredMappingSubjects" :key="subject" class="teacher-mapping-row">
-              <div><strong>{{ subject }}</strong><small>Все нераспознанные занятия этой дисциплины в выбранном файле</small></div>
-              <select v-model="teacherMappingDraft[subject]" class="control">
-                <option value="">Не назначен — безопасное значение</option>
-                <option v-for="teacher in teacherMappingOptions" :key="teacher.id" :value="teacher.short_name">
-                  {{ teacher.full_name || teacher.short_name }}{{ teacher.position ? ' · ' + teacher.position : '' }}
-                </option>
-              </select>
+            <article v-for="item in filteredMappingSubjects" :key="item.name" class="teacher-mapping-row">
+              <div class="teacher-rule-heading">
+                <div>
+                  <strong>{{ item.name }}</strong>
+                  <small>{{ candidateHint(item) }}</small>
+                </div>
+                <button
+                  v-if="teacherMappingDraft[item.name]?.lecturer || teacherMappingDraft[item.name]?.practice || teacherMappingDraft[item.name]?.reserve"
+                  type="button"
+                  class="teacher-rule-clear"
+                  title="Вернуть автоматическое распределение"
+                  @click="clearTeacherRule(item.name)"
+                >Сбросить</button>
+              </div>
+              <div class="teacher-rule-grid">
+                <label>
+                  <span>Лекции</span>
+                  <select v-model="teacherMappingDraft[item.name].lecturer" class="control">
+                    <option value="">Автоматически</option>
+                    <option v-for="teacher in teacherMappingOptions" :key="'l-'+teacher.id" :value="teacher.short_name">
+                      {{ teacher.full_name || teacher.short_name }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>Практика</span>
+                  <select v-model="teacherMappingDraft[item.name].practice" class="control">
+                    <option value="">Автоматически</option>
+                    <option v-for="teacher in teacherMappingOptions" :key="'p-'+teacher.id" :value="teacher.short_name">
+                      {{ teacher.full_name || teacher.short_name }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>Резерв</span>
+                  <select v-model="teacherMappingDraft[item.name].reserve" class="control">
+                    <option value="">Не задан</option>
+                    <option v-for="teacher in teacherMappingOptions" :key="'r-'+teacher.id" :value="teacher.short_name">
+                      {{ teacher.full_name || teacher.short_name }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <div class="teacher-rule-summary">{{ ruleSummary(item.name) }}</div>
             </article>
-            <p v-if="!filteredMappingSubjects.length" class="teacher-mapping-empty">По запросу ничего не найдено.</p>
+            <p v-if="!filteredMappingSubjects.length" class="teacher-mapping-empty">Ничего не найдено.</p>
           </div>
           <footer class="teacher-mapping-footer">
-            <span>После применения файл будет пересчитан. Остальные книги и их ручные правки не изменятся.</span>
+            <label class="teacher-default-toggle">
+              <input type="checkbox" v-model="teacherMappingSaveDefaults">
+              <span>Использовать эти правила в следующих расписаниях</span>
+            </label>
             <div>
               <button type="button" class="btn btn-secondary" :disabled="teacherMappingBusy" @click="closeTeacherMapping">Отмена</button>
               <button type="button" class="btn btn-primary" :disabled="teacherMappingBusy" @click="saveTeacherMapping">
-                {{ teacherMappingBusy ? 'Пересчитываем…' : 'Применить назначения' }}
+                {{ teacherMappingBusy ? 'Применяем…' : 'Применить' }}
               </button>
             </div>
           </footer>
@@ -176,10 +237,7 @@ export function installOperatorFlowMarkup() {
     toastStack?.setAttribute('aria-relevant', 'additions');
 }
 
-/**
- * Добавляет только общесистемные клавиатурные действия и фокусировку. Все
- * предметные операции по-прежнему выполняются Vue-состоянием приложения.
- */
+/** Common keyboard actions and result focus management. */
 export function installOperatorFlowRuntime() {
     const root = document.querySelector('#app');
     if (!root || root.dataset.operatorRuntime === '1') return;
