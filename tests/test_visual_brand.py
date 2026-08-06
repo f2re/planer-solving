@@ -59,10 +59,11 @@ def test_brand_module_is_offline_idempotent_and_accessible():
     assert "/assets/brand/hero-schedule.webp" in source
     assert "/assets/brand/organized-flow.webp" in source
     assert "alt=\"Интерфейс Planner Solving" in source
-    assert "alt=\"Разрозненные данные" in source
+    assert "alt=\"Готовое организованное расписание" in source
     assert "http://" not in source
     assert "https://" not in source
-    assert "MutationObserver" not in source
+    assert "decorateResultCard" in source
+    assert "MutationObserver" in source
 
 
 def test_brand_is_installed_before_vue_mount_and_css_is_last():
@@ -78,10 +79,10 @@ def test_brand_is_installed_before_vue_mount_and_css_is_last():
 
 def test_brand_styles_cover_start_result_and_accessibility():
     source = (ASSETS / "brand-refresh.css").read_text(encoding="utf-8")
+    clean = (ASSETS / "clean-flow-2-21.css").read_text(encoding="utf-8")
     required = (
         ".brand-mark-image",
         ".brand-hero-visual",
-        ".brand-feature-list",
         ".dropzone",
         ".result-brand-illustration",
         "@media (max-width: 1040px)",
@@ -90,8 +91,10 @@ def test_brand_styles_cover_start_result_and_accessibility():
     )
     for selector in required:
         assert selector in source
-    assert "url(http" not in source
-    assert "url(https" not in source
+    assert ".teacher-mapping-dialog" in clean
+    assert "@media (min-width: 981px) and (max-height: 790px)" in clean
+    assert "url(http" not in source + clean
+    assert "url(https" not in source + clean
 
 
 def test_visual_identity_release_and_documentation():
