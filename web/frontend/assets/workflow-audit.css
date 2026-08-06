@@ -1,0 +1,182 @@
+.sheet-command-bar.fullscreen {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 48px;
+    padding: 6px 10px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+}
+
+.sheet-command-bar.fullscreen .sheet-tool {
+    min-height: 34px;
+    white-space: nowrap;
+}
+
+.sheet-command-bar.fullscreen .sheet-tool.generate {
+    color: #fff;
+    background: linear-gradient(135deg, #2563eb, #1648c7);
+    border-color: #1648c7;
+    font-weight: 700;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, .24);
+}
+
+.sheet-command-bar.fullscreen .sheet-tool.generate:hover:not(:disabled) {
+    background: linear-gradient(135deg, #1648c7, #123b9f);
+}
+
+.sheet-command-bar.fullscreen .sheet-tool.exit {
+    margin-left: auto;
+}
+
+.sheet-workspace-open .editor-settings-panel {
+    min-width: min(440px, 44vw);
+    max-width: min(760px, 78vw);
+    resize: horizontal;
+    overflow: auto;
+}
+
+.sheet-workspace-open .editor-files-panel {
+    min-width: min(300px, 38vw);
+    resize: horizontal;
+    overflow: auto;
+}
+
+.range-editor {
+    min-width: 0;
+}
+
+.expert-layout-details {
+    margin-top: 12px;
+    border: 1px solid var(--border, #d9e0ec);
+    border-radius: 12px;
+    background: rgba(248, 250, 252, .92);
+    overflow: hidden;
+}
+
+.expert-layout-details > summary {
+    display: grid;
+    gap: 3px;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-weight: 700;
+    list-style-position: inside;
+}
+
+.expert-layout-details > summary small {
+    color: var(--muted, #64748b);
+    font-weight: 400;
+}
+
+.expert-layout-details[open] > summary {
+    border-bottom: 1px solid var(--border, #d9e0ec);
+}
+
+.expert-layout-details .exact-layout-editor {
+    margin: 0;
+    padding: 14px;
+    max-height: min(58vh, 720px);
+    overflow: auto;
+}
+
+.issue-group-list {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0;
+    text-align: left;
+}
+
+.issue-group {
+    border: 1px solid #d8e0eb;
+    border-left: 5px solid #64748b;
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.issue-group.conflict,
+.issue-group.problem {
+    border-left-color: #c2413b;
+}
+
+.issue-group.technical {
+    border-left-color: #b45309;
+}
+
+.issue-group.teacher,
+.issue-group.attention {
+    border-left-color: #ca8a04;
+}
+
+.issue-group.calendar,
+.issue-group.information,
+.issue-group.info {
+    border-left-color: #2f7d5c;
+}
+
+.issue-group > summary {
+    display: grid;
+    gap: 3px;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-weight: 750;
+}
+
+.issue-group > summary small,
+.issue-group-item small {
+    color: var(--muted, #64748b);
+    font-weight: 400;
+}
+
+.issue-group-item {
+    padding: 12px 14px;
+    border-top: 1px solid #e7ebf1;
+}
+
+.issue-group-item p {
+    margin: 5px 0;
+}
+
+.result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+@media (max-width: 1366px), (min-resolution: 1.5dppx) {
+    .sheet-command-bar.fullscreen {
+        gap: 4px;
+    }
+
+    .sheet-command-bar.fullscreen .sheet-tool span {
+        display: none;
+    }
+
+    .sheet-command-bar.fullscreen .sheet-tool.generate span,
+    .sheet-command-bar.fullscreen .sheet-tool.exit span {
+        display: inline;
+    }
+
+    .sheet-workspace-open .editor-settings-panel {
+        min-width: min(400px, 62vw);
+    }
+}
+
+@media (max-width: 900px) {
+    .sheet-workspace-open .editor-settings-panel,
+    .sheet-workspace-open .editor-files-panel {
+        left: 8px !important;
+        right: 8px !important;
+        width: auto !important;
+        min-width: 0;
+        max-width: none;
+        resize: none;
+    }
+
+    .sheet-command-bar.fullscreen .sheet-file-save-state,
+    .sheet-command-bar.fullscreen .sheet-toolbar-separator {
+        display: none;
+    }
+}
