@@ -126,7 +126,7 @@ export function installBrandMarkup() {
                     src="${BRAND_ASSETS.hero}"
                     width="1672"
                     height="941"
-                    alt="Рабочее пространство Planner Solving с расписанием"
+                    alt="Интерфейс Planner Solving: рабочее пространство с расписанием"
                     decoding="async"
                     fetchpriority="high"
                 >
