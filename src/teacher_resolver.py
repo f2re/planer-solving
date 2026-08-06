@@ -18,6 +18,7 @@ class TeacherResolver:
         "вых", "выходной", "отп", "отпуск", "экзс", "эпр", "ср", "упр",
         "пв", "умо", "овп", "н", "зис",
     }
+    PREFERENCE_ROLES = {"lecturer", "other", "reserve"}
 
     def __init__(self, teachers_config_path: str):
         try:
@@ -36,6 +37,7 @@ class TeacherResolver:
         self.teacher_identities: Dict[str, List[str]] = {}
         self.teacher_overrides: Dict[str, str] = {}
         self.teacher_candidate_catalog: Dict[str, Dict[str, List[str]]] = {}
+        self.teacher_assignment_preferences: Dict[str, Dict[str, List[str]]] = {}
         self._ambiguous_warnings: set[str] = set()
         self._index_teachers()
 
@@ -163,11 +165,60 @@ class TeacherResolver:
             self._ambiguous(raw, variants)
         return ""
 
+    @staticmethod
+    def _preference_key(value: Any) -> Tuple[str, str]:
+        raw = normalize_text(value)
+        if not raw.startswith("@") or "|" not in raw:
+            return "", ""
+        role, subject = raw[1:].split("|", 1)
+        role = role.strip().lower()
+        subject = subject.strip()
+        if role not in TeacherResolver.PREFERENCE_ROLES or not subject:
+            return "", ""
+        return role, subject
+
+    def _register_preference(self, role: str, subject: str, teacher: str) -> None:
+        key = self._subject_key(subject)
+        if not key or not teacher:
+            return
+        preference = self.teacher_assignment_preferences.setdefault(
+            key,
+            {"lecturer": [], "other": [], "reserve": []},
+        )
+        bucket = preference[role]
+        if teacher not in bucket:
+            bucket.append(teacher)
+        self._register_subject_candidates(
+            subject,
+            lecturers=[teacher] if role == "lecturer" else (),
+            others=[teacher] if role == "other" else (),
+            reserves=[teacher] if role == "reserve" else (),
+            prepend=True,
+        )
+
     def set_teacher_overrides(self, values: Mapping[str, Any] | None) -> Dict[str, str]:
-        """Set per-file subject assignments, accepting only unambiguous teachers."""
+        """Apply hard assignments and role preferences from one compatible map.
+
+        Ordinary keys remain hard, per-subject operator assignments. Keys in
+        the form ``@lecturer|Subject``, ``@other|Subject`` and
+        ``@reserve|Subject`` are preferences used by the global graph. This
+        preserves the existing request schema and old saved sessions.
+        """
 
         normalized: Dict[str, str] = {}
         for raw_subject, raw_teacher in dict(values or {}).items():
+            role, preference_subject = self._preference_key(raw_subject)
+            if role:
+                teacher = self._resolve_teacher_alias(raw_teacher, warn=True)
+                if teacher:
+                    self._register_preference(role, preference_subject, teacher)
+                elif normalize_text(raw_teacher):
+                    self.warnings.append(
+                        f"Настройка для «{preference_subject}» пропущена: "
+                        f"преподаватель «{normalize_text(raw_teacher)}» не найден однозначно."
+                    )
+                continue
+
             subject_key = self._subject_key(raw_subject)
             if not subject_key or not normalize_text(raw_teacher):
                 continue
@@ -211,29 +262,70 @@ class TeacherResolver:
             self._ambiguous(surname, variants)
         return list(dict.fromkeys(found))
 
+    @staticmethod
+    def _put_candidate(bucket: List[str], teacher: str, *, prepend: bool) -> None:
+        if teacher in bucket:
+            if prepend and bucket[0] != teacher:
+                bucket.remove(teacher)
+                bucket.insert(0, teacher)
+            return
+        if prepend:
+            bucket.insert(0, teacher)
+        else:
+            bucket.append(teacher)
+
     def _register_subject_candidates(
         self,
         subject: Any,
         *,
         lecturers: Sequence[str] = (),
         others: Sequence[str] = (),
+        reserves: Sequence[str] = (),
+        prepend: bool = False,
     ) -> None:
         key = self._subject_key(subject)
         if not key:
             return
         entry = self.teacher_candidate_catalog.setdefault(
             key,
-            {"lecturer": [], "other": [], "all": []},
+            {"lecturer": [], "other": [], "reserve": [], "all": []},
         )
-        for role, values in (("lecturer", lecturers), ("other", others)):
+        for role, values in (
+            ("lecturer", lecturers),
+            ("other", others),
+            ("reserve", reserves),
+        ):
             for raw in values:
                 teacher = self._resolve_teacher_alias(raw) or normalize_text(raw)
                 if not teacher:
                     continue
-                if teacher not in entry[role]:
-                    entry[role].append(teacher)
-                if teacher not in entry["all"]:
-                    entry["all"].append(teacher)
+                self._put_candidate(entry[role], teacher, prepend=prepend)
+                self._put_candidate(entry["all"], teacher, prepend=False)
+
+    def _record_report_subject(self, subject: str) -> None:
+        report = self.last_report
+        if not isinstance(report, dict):
+            return
+        normalized = normalize_text(subject)
+        if not normalized:
+            return
+        subjects = report.setdefault("subjects", [])
+        if normalized not in subjects:
+            subjects.append(normalized)
+        key = self._subject_key(normalized)
+        entry = self.teacher_candidate_catalog.get(key, {})
+        report.setdefault("teacher_candidates", {})[normalized] = {
+            "lecturer": list(entry.get("lecturer") or []),
+            "practice": list(entry.get("other") or []),
+            "reserve": list(entry.get("reserve") or []),
+        }
+        preference = self.teacher_assignment_preferences.get(key)
+        if preference:
+            report.setdefault("teacher_preferences", {})[normalized] = {
+                "lecturer": list(preference.get("lecturer") or []),
+                "practice": list(preference.get("other") or []),
+                "reserve": list(preference.get("reserve") or []),
+            }
 
     def _assign_teacher(
         self,
@@ -250,6 +342,7 @@ class TeacherResolver:
             lecturers=candidates if role == "lecturer" else (),
             others=candidates if role != "lecturer" else (),
         )
+        self._record_report_subject(subject)
 
         manual = self.teacher_overrides.get(self._subject_key(subject))
         if manual:
@@ -265,9 +358,12 @@ class TeacherResolver:
                 self.occupancy[key] = subject
             return manual
 
+        entry = self.teacher_candidate_catalog.get(self._subject_key(subject), {})
+        configured = entry.get(role, [])
+        reserve = entry.get("reserve", [])
         teachers = list(dict.fromkeys(
             self._resolve_teacher_alias(item) or normalize_text(item)
-            for item in candidates
+            for item in [*configured, *candidates, *reserve]
             if normalize_text(item)
         ))
         if not teachers:
