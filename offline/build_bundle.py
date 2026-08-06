@@ -215,6 +215,7 @@ def build(args: argparse.Namespace) -> Path:
     runtime_python = getattr(args, "runtime_python", None) or args.python
     include_runtime = bool(getattr(args, "include_python_runtime", True))
     supplied_runtime = getattr(args, "use_python_runtime", None)
+    validate_application = bool(getattr(args, "validate_application", False))
 
     output_dir = args.output.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -230,7 +231,7 @@ def build(args: argparse.Namespace) -> Path:
         wheelhouse = stage / "wheelhouse"
         app_dir.mkdir(parents=True)
         wheelhouse.mkdir(parents=True)
-        copy_application(root, app_dir, validate=True)
+        copy_application(root, app_dir, validate=validate_application)
 
         requirements = root / "requirements-runtime.txt"
         if not requirements.exists():
@@ -375,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
         dest="include_python_runtime",
         help="создать облегчённый пакет без встроенного Python",
     )
-    parser.set_defaults(include_python_runtime=True)
+    parser.set_defaults(include_python_runtime=True, validate_application=True)
     args = parser.parse_args(argv)
     try:
         build(args)
