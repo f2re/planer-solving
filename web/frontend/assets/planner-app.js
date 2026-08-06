@@ -12,7 +12,7 @@ import { createEditorHistoryState } from './editor-history-state.js';
 import { createSessionFileActions } from './session-file-actions.js';
 import { createTeacherMappingState } from './teacher-mapping-state.js';
 
-const { createApp, ref, onMounted } = Vue;
+const { createApp, ref, onMounted, nextTick } = Vue;
 
 export function mount() {
     installWorkspaceMarkup();
@@ -26,6 +26,7 @@ export function mount() {
     createApp({
         setup() {
             const toasts = ref([]);
+            const generatedFromEditor = ref(false);
             const addToast = (title, message, type = 'info') => {
                 const id = `${Date.now()}-${Math.random()}`;
                 toasts.value.push({ id, title, message, type });
@@ -189,6 +190,57 @@ export function mount() {
                     'Изменения остались в текущем серверном черновике. Глобальный шаблон не изменён.',
                     'success'
                 );
+            };
+
+            const refreshCurrentRun = async runId => {
+                if (!runId || !workspace.activeWorkspaceId.value) return null;
+                await platform.selectOperationsTab('history');
+                const run = platform.processingRuns.value.find(item => item.id === runId);
+                if (run) await platform.selectRun(run);
+                return run || null;
+            };
+
+            const generate = async () => {
+                await window.__plannerSessionDraft?.flush?.();
+                await schedule.generate();
+                const runId = schedule.result.value?.run_id;
+                if (runId) await refreshCurrentRun(runId);
+            };
+
+            const generateFromEditor = async () => {
+                generatedFromEditor.value = Boolean(editor.sheetWorkspaceOpen.value);
+                editor.templateSaveOpen.value = false;
+                editor.pendingEditorExit.value = false;
+                editor.sheetWorkspaceOpen.value = false;
+                document.documentElement.classList.remove('sheet-workspace-open');
+                await generate();
+            };
+
+            const returnToCorrections = async () => {
+                if (!schedule.sessionId.value || !schedule.analyzedFiles.value.length) {
+                    addToast('Сеанс недоступен', 'Исходные файлы уже очищены; загрузите их повторно.', 'warning');
+                    return;
+                }
+                schedule.step.value = 2;
+                await nextTick();
+                if (schedule.currentFile.value?.analysis) {
+                    await schedule.loadPreview();
+                }
+                if (generatedFromEditor.value && schedule.currentFile.value?.analysis) {
+                    await editor.enterSheetWorkspace(true);
+                }
+                addToast(
+                    'Возврат к исправлениям',
+                    'Файлы, разметка, даты и ручные назначения сохранены в текущем сеансе.',
+                    'info'
+                );
+            };
+
+            const openCurrentRunHistory = async () => {
+                const runId = schedule.result.value?.run_id;
+                platform.operationsOpen.value = true;
+                await platform.selectOperationsTab('history');
+                if (runId) await refreshCurrentRun(runId);
             };
 
             const saveCurrentProfile = async () => {
@@ -364,6 +416,10 @@ export function mount() {
                 removeToast,
                 switchWorkspace,
                 leaveSheetWorkspace,
+                generate,
+                generateFromEditor,
+                returnToCorrections,
+                openCurrentRunHistory,
                 saveTeacher,
                 deleteTeacher,
                 importTeachers,
