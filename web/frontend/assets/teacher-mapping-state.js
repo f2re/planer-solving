@@ -19,6 +19,14 @@ function emptyRule(subject = '') {
     return { subject, lecturer: '', practice: '', reserve: '' };
 }
 
+function subjectKey(value) {
+    return String(value || '')
+        .trim()
+        .toLocaleLowerCase('ru')
+        .replaceAll('ё', 'е')
+        .replace(/[^0-9a-zа-я]+/gi, '');
+}
+
 function overrideKey(role, subject) {
     return `${RULE_PREFIX}${role}|${subject}`;
 }
@@ -89,12 +97,25 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         const result = {};
         for (const file of schedule.analyzedFiles.value) {
             const overrides = schedule.periodOverrides[file.file_id]?.teacher_overrides || {};
-            for (const [key, teacher] of Object.entries(overrides)) {
+            for (const [key, rawTeacher] of Object.entries(overrides)) {
+                const teacher = String(rawTeacher || '').trim();
+                if (!teacher) continue;
                 const parsed = parseOverrideKey(key);
-                if (!parsed || !String(teacher || '').trim()) continue;
-                const rule = result[parsed.subject] ||= emptyRule(parsed.subject);
-                const field = parsed.role === 'other' ? 'practice' : parsed.role;
-                rule[field] = String(teacher).trim();
+                if (parsed) {
+                    const rule = result[parsed.subject] ||= emptyRule(parsed.subject);
+                    const field = parsed.role === 'other' ? 'practice' : parsed.role;
+                    rule[field] = teacher;
+                    continue;
+                }
+
+                // 2.17–2.20 stored one hard teacher for the whole subject.
+                // Expose it as lecture + practice so the operator sees and can
+                // refine the old decision instead of leaving a hidden override.
+                const subject = String(key || '').trim();
+                if (!subject) continue;
+                const rule = result[subject] ||= emptyRule(subject);
+                rule.lecturer ||= teacher;
+                rule.practice ||= teacher;
             }
         }
         return result;
@@ -103,8 +124,12 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
     function applyRulesToFile(fileId, rules, { replace = false } = {}) {
         const overrides = ensureOverrides(fileId);
         if (replace) {
+            const displayedSubjects = new Set(
+                rules.map(rule => subjectKey(rule.subject)).filter(Boolean)
+            );
             for (const key of Object.keys(overrides)) {
-                if (parseOverrideKey(key)) delete overrides[key];
+                const parsed = parseOverrideKey(key);
+                if (parsed || displayedSubjects.has(subjectKey(key))) delete overrides[key];
             }
         }
         for (const rule of rules) {
@@ -299,7 +324,9 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
 
         teacherMappingBusy.value = true;
         try {
-            applyRulesToSession(activeRules, { replace: true });
+            // Pass every displayed subject so replace=true also removes a
+            // cleared legacy or role rule. Empty subjects are not re-added.
+            applyRulesToSession(rules, { replace: true });
             schedule.invalidateAll();
             if (teacherMappingSaveDefaults.value) {
                 const workspaceId = String(activeWorkspaceId.value || '');
