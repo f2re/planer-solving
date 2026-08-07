@@ -318,29 +318,97 @@ export function mount() {
 
             const migrateLocalTemplates = async () => {
                 const key = 'planner-solving-layout-profiles-v1';
-                if (workspace.layoutProfiles.value.length || localStorage.getItem(`${key}-migrated`)) return;
+                const migrationKey = `${key}-main-workspace-v2`;
+                const oldDescription = 'Перенесён из локального хранилища браузера';
+                if (localStorage.getItem(migrationKey)) return;
                 try {
-                    const oldTemplates = JSON.parse(localStorage.getItem(key) || '[]');
-                    for (const item of Array.isArray(oldTemplates) ? oldTemplates : []) {
-                        if (item?.name && item?.layout) {
-                            await axios.post(
-                                `/api/workspaces/${workspace.activeWorkspaceId.value}/templates`,
-                                {
-                                    name: item.name,
-                                    description: 'Перенесён из локального хранилища браузера',
-                                    layout: item.layout,
-                                    comment: 'Автоматический перенос локального шаблона'
-                                }
-                            );
+                    const legacyWorkspace = (
+                        workspace.workspaces.value.find(
+                            item => String(item.name || '').trim().toLocaleLowerCase('ru') === 'основное пространство'
+                        )
+                        || workspace.workspaces.value.find(item => item.is_default)
+                        || workspace.workspaces.value[0]
+                    );
+                    if (!legacyWorkspace?.id) return;
+
+                    const templatesByWorkspace = new Map();
+                    for (const space of workspace.workspaces.value) {
+                        const { data } = await axios.get(`/api/workspaces/${space.id}/templates`);
+                        templatesByWorkspace.set(space.id, Array.isArray(data) ? data : []);
+                    }
+
+                    const rawLocal = JSON.parse(localStorage.getItem(key) || '[]');
+                    const candidates = [];
+                    for (const item of Array.isArray(rawLocal) ? rawLocal : []) {
+                        if (item?.name && item?.layout) candidates.push(item);
+                    }
+                    for (const templates of templatesByWorkspace.values()) {
+                        for (const item of templates) {
+                            if (item?.description === oldDescription && item?.name && item?.layout) {
+                                candidates.push(item);
+                            }
                         }
                     }
-                    if (oldTemplates.length) {
-                        await reactiveWorkspace.refreshWorkspace(workspace.activeWorkspaceId.value, { silent: true });
-                        addToast('Шаблоны перенесены', `На сервер перенесено: ${oldTemplates.length}.`, 'success');
+
+                    const uniqueCandidates = new Map();
+                    for (const item of candidates) {
+                        const normalizedName = String(item.name || '').trim().toLocaleLowerCase('ru');
+                        if (normalizedName && !uniqueCandidates.has(normalizedName)) {
+                            uniqueCandidates.set(normalizedName, item);
+                        }
                     }
-                    localStorage.setItem(`${key}-migrated`, '1');
-                } catch (_) {
-                    localStorage.setItem(`${key}-migrated`, '1');
+
+                    const mainTemplates = templatesByWorkspace.get(legacyWorkspace.id) || [];
+                    const mainNames = new Set(
+                        mainTemplates
+                            .map(item => String(item.name || '').trim().toLocaleLowerCase('ru'))
+                            .filter(Boolean)
+                    );
+                    let imported = 0;
+                    for (const [normalizedName, item] of uniqueCandidates.entries()) {
+                        if (mainNames.has(normalizedName)) continue;
+                        await axios.post(
+                            `/api/workspaces/${legacyWorkspace.id}/templates`,
+                            {
+                                name: item.name,
+                                description: 'Перенесён из данных, созданных до введения пространств',
+                                layout: item.layout,
+                                comment: 'Legacy-данные закреплены за Основным пространством'
+                            }
+                        );
+                        mainNames.add(normalizedName);
+                        imported += 1;
+                    }
+
+                    let removed = 0;
+                    for (const space of workspace.workspaces.value) {
+                        if (space.id === legacyWorkspace.id) continue;
+                        for (const item of templatesByWorkspace.get(space.id) || []) {
+                            const normalizedName = String(item.name || '').trim().toLocaleLowerCase('ru');
+                            if (
+                                item.description === oldDescription
+                                && uniqueCandidates.has(normalizedName)
+                            ) {
+                                await axios.delete(`/api/workspaces/${space.id}/templates/${item.id}`);
+                                removed += 1;
+                            }
+                        }
+                    }
+
+                    localStorage.setItem(migrationKey, '1');
+                    await reactiveWorkspace.refreshWorkspace(
+                        workspace.activeWorkspaceId.value,
+                        { silent: true }
+                    );
+                    if (imported || removed) {
+                        addToast(
+                            'Старые шаблоны закреплены',
+                            `Основное пространство: добавлено ${imported}; из других пространств удалено автоматических копий: ${removed}.`,
+                            'success'
+                        );
+                    }
+                } catch (error) {
+                    console.warn('[planner] legacy template migration failed', error);
                 }
             };
 

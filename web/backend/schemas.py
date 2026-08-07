@@ -181,7 +181,7 @@ class ValidateLayoutRequest(BaseModel):
     file_id: str
     group_name: str
     layout: Dict[str, Any]
-    workspace_id: Optional[str] = None
+    workspace_id: str = Field(min_length=1)
     period_overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -206,6 +206,6 @@ class GenerateFileSpec(BaseModel):
 
 class GenerateScheduleRequest(BaseModel):
     files: List[GenerateFileSpec] = Field(default_factory=list)
-    workspace_id: Optional[str] = None
+    workspace_id: str = Field(min_length=1)
     calendar_overrides: Dict[str, Any] = Field(default_factory=dict)
     allow_partial: bool = True

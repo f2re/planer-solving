@@ -27,6 +27,37 @@ function ensureLink(rel, href, attributes = {}) {
     return node;
 }
 
+function decorateStartCard(root = document) {
+    const uploadCard = root.matches?.('.upload-card')
+        ? root
+        : root.querySelector?.('.upload-card');
+    if (!uploadCard) return false;
+
+    const uploadHeader = uploadCard.querySelector('.upload-header');
+    uploadHeader?.querySelector('.brand-kicker')?.remove();
+    uploadHeader?.querySelector('.brand-feature-list')?.remove();
+
+    if (uploadHeader && !uploadCard.querySelector('.brand-hero-visual')) {
+        uploadHeader.insertAdjacentHTML('afterend', `
+            <figure class="brand-hero-visual">
+                <img
+                    src="${BRAND_ASSETS.hero}"
+                    width="1672"
+                    height="941"
+                    alt="Интерфейс «Борис по парам»: рабочее пространство с расписанием"
+                    decoding="async"
+                    fetchpriority="high"
+                >
+            </figure>`);
+    }
+
+    const dropIcon = uploadCard.querySelector('.drop-icon');
+    if (dropIcon && !dropIcon.querySelector('img')) {
+        dropIcon.innerHTML = `<img src="${BRAND_ASSETS.icon}" width="72" height="72" alt="" aria-hidden="true">`;
+    }
+    return Boolean(uploadCard.querySelector('.brand-hero-visual'));
+}
+
 function decorateResultCard(root = document) {
     const resultCard = root.matches?.('.result-card')
         ? root
@@ -47,18 +78,19 @@ function decorateResultCard(root = document) {
     return true;
 }
 
-function observeResultScreen(root) {
-    if (window.__plannerBrandResultObserver) return;
+function observeBrandScreens(root) {
+    if (window.__plannerBrandScreenObserver) return;
     const observer = new MutationObserver(records => {
         for (const record of records) {
             for (const node of record.addedNodes) {
                 if (!(node instanceof HTMLElement)) continue;
-                if (decorateResultCard(node)) return;
+                decorateStartCard(node);
+                decorateResultCard(node);
             }
         }
     });
     observer.observe(root, { childList: true, subtree: true });
-    window.__plannerBrandResultObserver = observer;
+    window.__plannerBrandScreenObserver = observer;
 }
 
 export function installBrandMetadata() {
@@ -114,32 +146,14 @@ export function installBrandMarkup() {
     const version = topbar?.querySelector('.version');
     if (version) version.textContent = 'Рабочее место оператора';
 
-    const uploadCard = root.querySelector('.upload-card');
-    const uploadHeader = uploadCard?.querySelector('.upload-header');
-    uploadHeader?.querySelector('.brand-kicker')?.remove();
-    uploadHeader?.querySelector('.brand-feature-list')?.remove();
-
-    if (uploadHeader && !uploadCard.querySelector('.brand-hero-visual')) {
-        uploadHeader.insertAdjacentHTML('afterend', `
-            <figure class="brand-hero-visual">
-                <img
-                    src="${BRAND_ASSETS.hero}"
-                    width="1672"
-                    height="941"
-                    alt="Интерфейс «Борис по парам»: рабочее пространство с расписанием"
-                    decoding="async"
-                    fetchpriority="high"
-                >
-            </figure>`);
-    }
-
-    const dropIcon = uploadCard?.querySelector('.drop-icon');
-    if (dropIcon) {
-        dropIcon.innerHTML = `<img src="${BRAND_ASSETS.icon}" width="72" height="72" alt="" aria-hidden="true">`;
-    }
-
+    decorateStartCard(root);
     decorateResultCard(root);
-    observeResultScreen(root);
+    observeBrandScreens(root);
+
+    // Vue монтируется сразу после этого вызова и заменяет узлы внутри #app.
+    // Повтор после текущего стека гарантирует, что стартовая иллюстрация и
+    // декоративная иконка добавятся уже в фактически смонтированный DOM.
+    queueMicrotask(() => decorateStartCard(root));
 
     const shell = root.querySelector('.shell');
     shell?.classList.add('brand-shell');
