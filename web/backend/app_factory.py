@@ -33,8 +33,8 @@ def create_app(
         workspace_repository=workspace_repository,
     )
     app = FastAPI(
-        title="Planner Solving",
-        description="Операторский разбор разнородных расписаний Excel",
+        title="Борис по парам",
+        description="Борис по парам — операторский разбор разнородных расписаний Excel",
         version=context.application_version(),
     )
     app.state.context = context

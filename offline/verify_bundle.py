@@ -44,7 +44,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise VerificationError(f"Не удалось прочитать manifest.json: {exc}") from exc
     if not isinstance(payload, dict) or payload.get("format") != "planner-solving-offline":
-        raise VerificationError("Файл manifest.json не относится к Planner Solving.")
+        raise VerificationError("Файл manifest.json не относится к «Борис по парам».")
     if not isinstance(payload.get("files"), dict) or not payload["files"]:
         raise VerificationError("В manifest.json отсутствует перечень файлов.")
     return payload
@@ -186,7 +186,7 @@ def verify_bundle(root: Path, manifest_path: Path | None = None) -> dict[str, An
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Проверка офлайн-пакета Planner Solving")
+    parser = argparse.ArgumentParser(description="Проверка офлайн-пакета «Борис по парам»")
     parser.add_argument("root", nargs="?", type=Path, default=Path.cwd())
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--json", action="store_true", dest="as_json")

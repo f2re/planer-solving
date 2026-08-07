@@ -65,17 +65,17 @@ export function installBrandMetadata() {
     if (document.documentElement.dataset.plannerBrandMetadata === 'ready') return;
     document.documentElement.dataset.plannerBrandMetadata = 'ready';
 
-    document.title = 'Planner Solving — разбор расписаний';
+    document.title = 'Борис по парам — разбор расписаний';
     ensureMeta('meta[name="description"]', {
         name: 'description',
-        content: 'Planner Solving разбирает расписания Excel и формирует сводный и недельный результат.'
+        content: 'Борис по парам разбирает расписания Excel и формирует сводный и недельный результат.'
     });
     ensureMeta('meta[name="theme-color"]', { name: 'theme-color', content: '#315efb' });
     ensureMeta('meta[name="color-scheme"]', { name: 'color-scheme', content: 'light' });
-    ensureMeta('meta[name="application-name"]', { name: 'application-name', content: 'Planner Solving' });
+    ensureMeta('meta[name="application-name"]', { name: 'application-name', content: 'Борис по парам' });
     ensureMeta('meta[name="apple-mobile-web-app-capable"]', { name: 'apple-mobile-web-app-capable', content: 'yes' });
-    ensureMeta('meta[name="apple-mobile-web-app-title"]', { name: 'apple-mobile-web-app-title', content: 'Planner Solving' });
-    ensureMeta('meta[property="og:title"]', { property: 'og:title', content: 'Planner Solving — разбор расписаний' });
+    ensureMeta('meta[name="apple-mobile-web-app-title"]', { name: 'apple-mobile-web-app-title', content: 'Борис по парам' });
+    ensureMeta('meta[property="og:title"]', { property: 'og:title', content: 'Борис по парам — разбор расписаний' });
     ensureMeta('meta[property="og:description"]', {
         property: 'og:description',
         content: 'Из Excel-файлов в проверенное сводное расписание.'
@@ -107,7 +107,7 @@ export function installBrandMarkup() {
                 <img src="${BRAND_ASSETS.icon}" width="44" height="44" alt="">
             </span>
             <span class="brand-copy">
-                <span class="brand-title">Planner Solving</span>
+                <span class="brand-title">Борис по парам</span>
                 <span class="brand-subtitle">Работа с расписаниями</span>
             </span>`;
     }
@@ -126,7 +126,7 @@ export function installBrandMarkup() {
                     src="${BRAND_ASSETS.hero}"
                     width="1672"
                     height="941"
-                    alt="Интерфейс Planner Solving: рабочее пространство с расписанием"
+                    alt="Интерфейс «Борис по парам»: рабочее пространство с расписанием"
                     decoding="async"
                     fetchpriority="high"
                 >

@@ -1,6 +1,6 @@
-# Gemini Project: Schedule Planner (OR-Tools)
+# Gemini Project: Борис по парам
 
-This project aims to develop an automated educational scheduling system using Google OR-Tools CP-SAT Solver.
+This project develops **«Борис по парам»**, an automated educational scheduling system using Google OR-Tools CP-SAT Solver.
 
 ## Project Overview
 The system processes various input data (teachers, disciplines, rooms, etc.) in CSV format and generates an optimized schedule exported to Excel, considering both hard and soft constraints.

@@ -30,7 +30,7 @@ INVOKING_PATH="${PLANNER_INVOKING_PATH:-$PATH}"
 
 usage() {
     cat <<'EOF_HELP'
-Установка или обновление Planner Solving одним сценарием.
+Установка или обновление «Борис по парам» одним сценарием.
 
   sudo ./install-planner-solving.sh [параметры]
 
@@ -215,7 +215,7 @@ if [[ $NO_SYSTEMD -eq 0 && -x "$INSTALL_ROOT/state/doctor.sh" ]]; then
 fi
 
 echo
-echo "Planner Solving установлен в $INSTALL_ROOT"
+echo "«Борис по парам» установлен в $INSTALL_ROOT"
 echo "Активный выпуск: $INSTALL_ROOT/current"
 echo "Рабочий venv: $INSTALL_ROOT/current/.venv"
 echo "Управляемый Python: $(cat "$INSTALL_ROOT/current/.planner-runtime" 2>/dev/null || echo не определён)"

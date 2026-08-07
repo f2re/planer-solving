@@ -32,7 +32,7 @@ run() {
 collect_report() {
     local status=0 current="" runtime="" managed="" python="" service_user="planner-solving"
 
-    echo "Отчёт диагностики Planner Solving"
+    echo "Отчёт диагностики «Борис по парам»"
     echo "Дата: $(date -Is 2>/dev/null || date)"
     echo "Узел: $(hostname 2>/dev/null || echo unknown)"
     echo "Пользователь: $(id 2>/dev/null || true)"

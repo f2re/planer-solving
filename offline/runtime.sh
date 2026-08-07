@@ -9,7 +9,7 @@ MODE="start"
 
 usage() {
     cat <<'EOF_HELP'
-Стабильный запуск Planner Solving.
+Стабильный запуск «Борис по парам».
 
   run-service.sh [--check|--print]
 EOF_HELP

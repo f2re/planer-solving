@@ -19,7 +19,8 @@ def test_favicon_and_manifest_are_valid_local_assets():
     assert ico.stat().st_size > 1_000
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["name"].startswith("Planner Solving")
+    assert manifest["name"].startswith("Борис по парам")
+    assert manifest["short_name"] == "Борис по парам"
     assert manifest["display"] == "standalone"
     assert manifest["theme_color"] == "#315efb"
     icon_paths = {item["src"] for item in manifest["icons"]}
@@ -54,7 +55,7 @@ def test_brand_module_is_offline_idempotent_and_accessible():
     assert "/site.webmanifest" in source
     assert "/assets/brand/hero-schedule.webp" in source
     assert "/assets/brand/organized-flow.webp" in source
-    assert "alt=\"Интерфейс Planner Solving" in source
+    assert "alt=\"Интерфейс «Борис по парам»" in source
     assert "alt=\"Готовое организованное расписание" in source
     assert "http://" not in source
     assert "https://" not in source
@@ -96,9 +97,10 @@ def test_brand_styles_cover_start_result_and_accessibility():
 def test_visual_identity_release_and_documentation():
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     parts = tuple(int(item) for item in version.split(".")[:3])
-    assert parts >= (2, 18, 0)
+    assert parts >= (2, 24, 0)
 
     documentation = (ROOT / "docs" / "VISUAL_IDENTITY.md").read_text(encoding="utf-8")
+    assert "Борис по парам" in documentation
     assert "hero-schedule.webp" in documentation
     assert "favicon.svg" in documentation
     assert "полностью офлайн" in documentation.lower() or "автоном" in documentation.lower()

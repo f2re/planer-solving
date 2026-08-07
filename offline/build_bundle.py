@@ -1,4 +1,4 @@
-"""Build a self-contained, integrity-checked Planner Solving offline bundle."""
+"""Build a self-contained, integrity-checked «Борис по парам» offline bundle."""
 from __future__ import annotations
 
 import argparse
@@ -363,7 +363,7 @@ def build(args: argparse.Namespace) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Сборка автономного пакета Planner Solving")
+    parser = argparse.ArgumentParser(description="Сборка автономного пакета «Борис по парам»")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output", type=Path, default=Path("dist"))
     parser.add_argument("--python", default=sys.executable, help="Python для wheelhouse")

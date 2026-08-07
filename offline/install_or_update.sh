@@ -26,7 +26,7 @@ WORKERS_SET=0
 
 usage() {
     cat <<'EOF_HELP'
-Установка, обновление или восстановление Planner Solving.
+Установка, обновление или восстановление «Борис по парам».
 
   sudo ./install_or_update.sh [параметры]
 
@@ -445,7 +445,7 @@ if [[ $NO_SYSTEMD -eq 0 ]]; then
 fi
 
 if [[ $ASSUME_YES -eq 0 ]]; then
-    echo "Будет установлен Planner Solving $VERSION"
+    echo "Будет установлен «Борис по парам» $VERSION"
     echo "Каталог: $INSTALL_ROOT"
     echo "Новый venv: $RELEASE/.venv"
     echo "Python runtime: $MANAGED_RUNTIME"
@@ -535,7 +535,7 @@ EOF_ENV
 
     cat > /etc/systemd/system/planner-solving.service <<EOF_UNIT
 [Unit]
-Description=Planner Solving
+Description=Борис по парам
 Documentation=file://$INSTALL_ROOT/current/docs/TROUBLESHOOTING.md
 Wants=network-online.target
 After=network-online.target local-fs.target

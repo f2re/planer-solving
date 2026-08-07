@@ -23,7 +23,7 @@ mkdir -p "$OUTPUT"
 cp "$ROOT/offline/install_from_archive.sh" "$OUTPUT/install-planner-solving.sh"
 chmod 0755 "$OUTPUT/install-planner-solving.sh"
 cat > "$OUTPUT/README-INSTALL.txt" <<'EOF_README'
-PLANNER SOLVING — АВТОНОМНАЯ УСТАНОВКА
+БОРИС ПО ПАРАМ — АВТОНОМНАЯ УСТАНОВКА
 
 Скопируйте на целевой компьютер все файлы из каталога dist:
 
@@ -31,6 +31,9 @@ PLANNER SOLVING — АВТОНОМНАЯ УСТАНОВКА
   planner-solving-offline-*.tar.gz.sha256
   install-planner-solving.sh
   README-INSTALL.txt
+
+Имена planner-solving в путях, службах и файлах пакета сохранены как
+технические идентификаторы для совместимости существующих установок.
 
 Обычная установка или безопасное обновление:
 
@@ -41,7 +44,7 @@ PLANNER SOLVING — АВТОНОМНАЯ УСТАНОВКА
 целевой Astra Linux не требуется заранее устанавливать Python 3.11/3.12.
 Если встроенный runtime несовместим с glibc машины, установщик проверит:
 
-  * текущий venv Planner Solving;
+  * текущий venv «Борис по парам»;
   * предыдущие выпуски и управляемые runtime;
   * активный VIRTUAL_ENV;
   * pyenv исходного пользователя, root и других пользователей;
