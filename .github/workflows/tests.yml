@@ -183,7 +183,7 @@ jobs:
               raise SystemExit(f"server did not start: {last_error}")
 
           expectations = {
-              "/": "Planner Solving",
+              "/": "Борис по парам",
               "/assets/app.js": "__plannerSolvingBoot",
               "/assets/planner-app.js": "export function mount",
               "/assets/unified-operations.js": "installUnifiedOperationsRuntime",
