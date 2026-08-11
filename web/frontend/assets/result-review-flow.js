@@ -1,8 +1,8 @@
 const RESULT_REVIEW_READY = 'resultReviewReady';
 const RESULT_REVIEW_RUNTIME_READY = 'resultReviewRuntimeReady';
 const BRAND_ASSETS = {
-    start: '/assets/brand/hero-schedule.webp',
-    result: '/assets/brand/organized-flow.webp'
+    start: '/assets/brand/hero-schedule.png',
+    result: '/assets/brand/organized-flow.png'
 };
 
 function ensureStylesheet() {
@@ -55,9 +55,9 @@ function decorateStartScreen(root = document) {
         header,
         'brand-hero-visual',
         BRAND_ASSETS.start,
-        'Рабочее пространство Planner Solving с расписанием',
-        1672,
-        941
+        'Рабочее пространство «Борис по парам» с расписанием',
+        600,
+        338
     );
 }
 
@@ -73,8 +73,8 @@ function decorateResultScreen(root = document) {
         'result-brand-illustration',
         BRAND_ASSETS.result,
         'Сформированное и проверенное расписание',
-        1448,
-        1086
+        560,
+        350
     );
 }
 
@@ -104,8 +104,8 @@ export function installResultReviewMarkup() {
     const summary = document.querySelector('.result-compact-summary');
     if (summary) {
         summary.textContent = (
-            'Проверьте файлы. При недостатках вернитесь к исправлениям: '
-            + 'исходники, разметка и назначения сохранятся.'
+            'Готовые файлы можно скачать сразу. Если нужно что-то изменить, '
+            + 'вернитесь к исправлениям — исходники и все настройки сохранятся.'
         );
     }
 }

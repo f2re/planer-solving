@@ -39,7 +39,8 @@ def test_frontend_has_no_unreachable_static_files() -> None:
     errors, checked = frontend_asset_errors(ROOT / "web/frontend")
     assert errors == []
     assert "assets/interface-clean.css" in checked
-    assert "assets/brand/organized-flow.webp" in checked
+    assert "assets/ux-flow-2-26.css" in checked
+    assert "assets/brand/organized-flow.png" in checked
     assert "favicon.svg" in checked
     assert "site.webmanifest" in checked
 

@@ -1,0 +1,219 @@
+/* 2.26 UX corrections: contained progress and one obvious next action. */
+
+/* Upload: the progress indicator belongs to the drop zone column, never viewport width. */
+.planner-branded .dropzone > div {
+    width: 100%;
+    min-width: 0;
+}
+
+.planner-branded .upload-stream-progress {
+    width: 100% !important;
+    max-width: 440px;
+    min-width: 0;
+    margin: 16px auto 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.planner-branded .upload-stream-track {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.planner-branded .upload-stream-progress > span {
+    display: block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+/* Review: the readiness strip owns the one primary action. The old sticky
+   footer keeps only recovery/service actions, so two blue "Сформировать"
+   buttons no longer compete for attention. */
+.bottom-actions .bottom-duplicate-primary {
+    display: none !important;
+}
+
+.bottom-actions {
+    min-height: 54px;
+    padding: 8px 12px;
+    justify-content: flex-end;
+}
+
+.bottom-actions > .button-row {
+    width: auto !important;
+    margin-left: auto;
+    justify-content: flex-end;
+}
+
+.bottom-actions .secondary-validate-action {
+    color: var(--text);
+    background: #fff;
+    border-color: var(--line-strong);
+}
+
+.bottom-actions .session-clear-action {
+    color: #717b90;
+    background: transparent;
+    border-color: transparent;
+    font-weight: 650;
+}
+
+.bottom-actions .session-clear-action:hover:not(:disabled) {
+    color: var(--danger);
+    background: #fff7f7;
+    border-color: #f1d0d0;
+}
+
+/* Result: navigation is navigation, downloads are the task, history/reset are
+   tertiary service actions. Hidden legacy buttons remain only as Vue event
+   triggers for the separate top-left back control. */
+.planner-branded .result-card {
+    grid-template-areas:
+        "nav"
+        "hero"
+        "art"
+        "files"
+        "actions"
+        "issues" !important;
+    gap: 14px !important;
+}
+
+.result-card .result-back-nav {
+    grid-area: nav;
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    margin: -4px 0 0;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: 8px;
+    color: #5f6b84;
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 720;
+    cursor: pointer;
+}
+
+.result-card .result-back-nav:hover {
+    color: var(--primary);
+    background: rgba(49, 94, 251, .05);
+}
+
+.result-card .result-back-nav:focus-visible {
+    outline: 3px solid rgba(49, 94, 251, .2);
+    outline-offset: 2px;
+}
+
+.result-card .result-back-trigger,
+.result-card .result-actions > button.btn-primary {
+    display: none !important;
+}
+
+.result-card .result-action-hierarchy {
+    grid-area: actions;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100%;
+    margin: 0 !important;
+    padding-top: 4px;
+}
+
+.result-card .result-download-primary {
+    min-height: 44px;
+    padding-left: 18px;
+    padding-right: 18px;
+    box-shadow: 0 8px 18px rgba(49, 94, 251, .18);
+}
+
+.result-card .result-download-secondary {
+    min-height: 44px;
+}
+
+.result-card .result-tertiary-action,
+.result-card .result-action-hierarchy > button.btn-secondary:not(.return-to-editor) {
+    min-height: 36px;
+    padding: 5px 7px;
+    border-color: transparent;
+    color: #657089;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 680;
+    box-shadow: none;
+}
+
+.result-card .result-history-action {
+    margin-left: 8px;
+}
+
+.result-card .result-tertiary-action:hover:not(:disabled),
+.result-card .result-action-hierarchy > button.btn-secondary:not(.return-to-editor):hover:not(:disabled) {
+    color: var(--primary);
+    background: #f3f6ff;
+}
+
+.result-card .result-new-files-action {
+    color: #707b90;
+}
+
+.result-card .result-files {
+    margin: 6px 0 2px;
+}
+
+.result-card .result-compact-summary {
+    margin-top: 5px;
+}
+
+@media (max-width: 720px) {
+    .planner-branded .upload-stream-progress {
+        max-width: 100%;
+    }
+
+    .bottom-actions {
+        position: static;
+    }
+
+    .bottom-actions > .button-row {
+        width: 100% !important;
+    }
+
+    .bottom-actions .secondary-validate-action,
+    .bottom-actions .session-clear-action {
+        flex: 1 1 auto;
+    }
+
+    .result-card .result-action-hierarchy {
+        align-items: stretch !important;
+    }
+
+    .result-card .result-download-primary,
+    .result-card .result-download-secondary {
+        flex: 1 1 100% !important;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .result-card .result-history-action {
+        margin-left: 0;
+    }
+
+    .result-card .result-tertiary-action,
+    .result-card .result-action-hierarchy > button.btn-secondary:not(.return-to-editor) {
+        flex: 0 1 auto !important;
+        text-align: left;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .result-card .result-download-primary {
+        box-shadow: none;
+    }
+}

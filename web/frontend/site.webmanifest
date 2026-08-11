@@ -18,9 +18,9 @@
       "purpose": "any maskable"
     },
     {
-      "src": "/assets/brand/app-icon-128.webp",
+      "src": "/assets/brand/app-icon-128.png",
       "sizes": "128x128",
-      "type": "image/webp",
+      "type": "image/png",
       "purpose": "any"
     }
   ]
