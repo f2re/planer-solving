@@ -150,7 +150,9 @@ def test_browser_legacy_templates_target_and_repair_main_workspace_only():
 def test_start_hero_is_reapplied_after_vue_mount_and_future_rerenders():
     source = (ROOT / "web" / "frontend" / "assets" / "brand-refresh.js").read_text(encoding="utf-8")
     assert "decorateStartCard" in source
-    assert "queueMicrotask(() => decorateStartCard(root))" in source
+    assert "decorateVisibleScreens" in source
+    assert "queueMicrotask(() => decorateVisibleScreens(root))" in source
     assert "observeBrandScreens" in source
     assert "MutationObserver" in source
-    assert "hero-schedule.webp" in source
+    assert "hero-schedule.png" in source
+    assert ".webp" not in source

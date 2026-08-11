@@ -30,7 +30,8 @@ def test_start_and_result_screens_are_compact_and_result_image_is_reactive() -> 
     assert "/assets/interface-clean.css" in flow
     assert "decorateResultCard" in brand
     assert "MutationObserver" in brand
-    assert "organized-flow.webp" in brand
+    assert "organized-flow.png" in brand
+    assert ".webp" not in brand
     assert "grid-template-areas" in styles
     assert "max-height: 790px" in styles
     assert "result-brand-illustration" in styles
