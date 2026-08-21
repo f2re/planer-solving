@@ -112,3 +112,12 @@ When you need an agent to work on something, immediately call the appropriate fu
 - **frontend-developer** — For Vue.js interface and UI UX frontend develop, styles and etc.
 
 The Orchestrator does not write code itself but coordinates the team's efforts.
+
+## Mandatory Release & Versioning Contract (Обязательное версионирование)
+- **Каждое изменение функционала, исправление UI/UX, оптимизация или обновление ассетов ОБЯЗАНЫ сопровождаться актуализацией версии:**
+  1. **Инкремент версии в файле `VERSION`** (SemVer: `MAJOR.MINOR.PATCH`).
+  2. **Актуализация документации** (`docs/RELEASE_*.md`, `docs/UX_*.md`, `docs/VISUAL_IDENTITY.md` и др.).
+  3. **Прохождение всех регрессионных тестов** (`pytest -v`).
+  4. **Пересборка и верификация автономного бандла** (`./offline/build_offline_bundle.sh`).
+  5. **Фиксация коммита и пуш в ветку `main`** (`git push origin main`).
+

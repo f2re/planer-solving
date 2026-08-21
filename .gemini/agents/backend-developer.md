@@ -32,3 +32,10 @@ Specializes in building robust RESTful APIs using FastAPI. Manages the integrati
 3. Implements the FastAPI routes and logic.
 4. Ensures integration with core `src/` modules.
 5. Returns status report with endpoints created.
+
+## Mandatory Release & Versioning Contract (Обязательное версионирование)
+- Любое изменение серверных контрактов, роутеров или моделей API требует:
+  1. Синхронизации `VERSION`.
+  2. Проверки регрессионных API-тестов (`pytest tests/test_api_workflow.py tests/test_platform_api.py`).
+  3. Проверки контрактов здоровья системы и схем данных.
+

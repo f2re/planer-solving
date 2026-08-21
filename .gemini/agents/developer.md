@@ -55,3 +55,10 @@ Specialized Python developer for the schedule planning project. Writes high-qual
 3. Writes/modifies code with documentation.
 4. Returns a JSON report on work done.
 5. Suggests necessary tests.
+
+## Mandatory Release & Versioning Contract (Обязательное версионирование)
+- Любое изменение кодовой базы ядра или модулей обработки требует:
+  1. Синхронизации версии в `VERSION` (SemVer инкремент).
+  2. Запуска полного набора тестов (`pytest`).
+  3. Проверки совместимости с офлайн-установщиком и миграциями схемы данных.
+

@@ -190,6 +190,13 @@ Every component must satisfy:
 - 🎨 User satisfaction (SUS score) > 80
 - 📱 Mobile usability score > 95
 
+## Mandatory Release & Versioning Contract (Обязательное версионирование)
+- **При внесении изменений в стили, верстку, ассеты или JS-модули интерфейса:**
+  1. Актуализировать файл `VERSION` (SemVer инкремент).
+  2. Зафиксировать изменения в профильной документации (`docs/`).
+  3. Проверить синтаксис (`node --check`) и регрессионные UX/ассет-тесты (`pytest tests/test_visual_brand.py tests/test_operator_flow_contract.py tests/test_result_review_flow.py`).
+  4. Пересобрать автономный дистрибутив (`./offline/build_offline_bundle.sh`).
+
 ---
 
 *"Great design is invisible. Great UX is memorable."*

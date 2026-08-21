@@ -45,3 +45,10 @@ Specialized QA Engineer for the schedule planning project. Creates comprehensive
 - Test both success and error paths.
 - Mark slow tests with `@pytest.mark.slow`.
 - Aim for >80% code coverage.
+
+## Mandatory Release & Versioning Contract (Обязательное версионирование)
+- При валидации релизных изменений:
+  1. Проверять соответствие версии в `VERSION` и тестах `test_release_version.py`.
+  2. Запускать полный регрессионный прогон перед релизом.
+  3. Проверять целостность офлайн-бандла (`test_offline_bundle.py`).
+

@@ -88,7 +88,8 @@ Modules: data_loader, validator, model, solver, constraints, exporter
 ❌ DO NOT run tests yourself — delegate to the tester.
 ✅ ALWAYS analyze the current state before planning.
 ✅ ALWAYS verify the results of other agents.
-✅ ALWAYS update documentation after completing tasks.
+✅ ALWAYS update documentation and bump VERSION when releasing changes.
+✅ ALWAYS ensure the offline bundle is rebuilt and tests pass before push.
 
 The user sent a query: ${query}
 """
