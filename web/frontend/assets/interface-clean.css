@@ -46,16 +46,19 @@
 }
 
 .planner-branded .brand-hero-visual {
-    align-self: stretch;
+    align-self: center;
     min-height: 0;
     padding: 7px;
     transform: none;
 }
 
 .planner-branded .brand-hero-visual > img {
-    height: 100%;
-    min-height: 350px;
-    max-height: 510px;
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    aspect-ratio: 16 / 9;
     object-fit: cover;
 }
 
@@ -490,8 +493,8 @@
     }
 
     .planner-branded .brand-hero-visual > img {
-        min-height: 240px;
-        max-height: 360px;
+        min-height: 0;
+        max-height: none;
     }
 
     .planner-branded .result-card {
@@ -581,8 +584,8 @@
     }
 
     .planner-branded .brand-hero-visual > img {
-        min-height: 300px;
-        max-height: 420px;
+        min-height: 0;
+        max-height: none;
     }
 }
 

@@ -87,8 +87,8 @@ body.planner-branded::before {
 
 .planner-branded .brand-subtitle {
     overflow: hidden;
-    color: var(--brand-muted);
-    font-size: 10px;
+    color: #4a5568;
+    font-size: 11px;
     font-weight: 650;
     letter-spacing: .01em;
     text-overflow: ellipsis;
@@ -96,12 +96,12 @@ body.planner-branded::before {
 }
 
 .planner-branded .version {
-    padding: 7px 11px;
-    border: 1px solid rgba(49, 94, 251, .12);
+    padding: 7px 12px;
+    border: 1px solid rgba(49, 94, 251, .16);
     border-radius: 999px;
-    color: #465575;
-    background: rgba(255, 255, 255, .72);
-    font-size: 11px;
+    color: #334155;
+    background: rgba(255, 255, 255, .85);
+    font-size: 12px;
     font-weight: 720;
 }
 
@@ -292,9 +292,8 @@ body.planner-branded::before {
     border-radius: 26px;
     background: rgba(255, 255, 255, .74);
     box-shadow:
-        0 30px 70px rgba(52, 83, 164, .18),
+        0 24px 60px rgba(52, 83, 164, .14),
         inset 0 0 0 1px rgba(255, 255, 255, .8);
-    transform: perspective(1200px) rotateY(-2deg) rotateX(1deg);
 }
 
 .planner-branded .brand-hero-visual::before {
@@ -718,8 +717,8 @@ body.planner-branded::before {
     }
 
     @keyframes brand-hero-in {
-        from { opacity: 0; transform: perspective(1200px) rotateY(-3deg) translateY(12px) scale(.985); }
-        to { opacity: 1; transform: perspective(1200px) rotateY(-2deg) rotateX(1deg); }
+        from { opacity: 0; transform: translateY(12px) scale(.985); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
     }
 
     @keyframes brand-copy-in {
