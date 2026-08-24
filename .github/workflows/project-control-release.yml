@@ -1,0 +1,115 @@
+name: Project Control release
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-control-release-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact verified commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Validate Project Control release scripts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n offline/build_project_control_bundle.sh
+          python -m py_compile offline/project_control_package.py
+
+      - name: Build Project Control update package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash offline/build_project_control_bundle.sh \
+            --output dist \
+            --python "$(command -v python)"
+
+      - name: Verify Project Control contract and native payload
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          PACKAGE="dist/planer-solving-${VERSION}-project-control.f2re.zip"
+          NATIVE="$(find dist -maxdepth 1 -type f -name "planner-solving-offline-${VERSION}-*-runtime.tar.gz" -print -quit)"
+          [[ -f "$PACKAGE" && -f "$PACKAGE.sha256" && -f "$NATIVE" ]]
+          (cd dist && sha256sum -c --strict "$(basename "$PACKAGE.sha256")")
+          python - "$PACKAGE" "$NATIVE" "$VERSION" "$SOURCE_SHA" <<'PY'
+          import hashlib, json, sys, tarfile, zipfile
+          from pathlib import Path
+
+          package, native = map(Path, sys.argv[1:3])
+          version, source_sha = sys.argv[3:5]
+
+          def sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          with zipfile.ZipFile(package) as archive:
+              manifest = json.loads(archive.read("f2re-service.json"))
+              payload = manifest["payload"]["path"]
+              assert set(archive.namelist()) == {"f2re-service.json", payload}
+              assert manifest["schema"] == "f2re-managed-service/v1"
+              assert manifest["controllerApi"] == 1
+              assert manifest["projectId"] == "planer-solving"
+              assert manifest["adapter"] == "planer-solving-v1"
+              assert manifest["nativeBundleFormat"] == "planner-solving-offline-v3"
+              assert manifest["version"] == version
+              assert manifest["sourceCommit"] == source_sha
+              digest = hashlib.sha256()
+              size = 0
+              with archive.open(payload) as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      size += len(chunk)
+                      digest.update(chunk)
+              assert digest.hexdigest() == manifest["payload"]["sha256"] == sha256(native)
+              assert size == manifest["payload"]["size"] == native.stat().st_size
+
+          with tarfile.open(native, "r:gz") as archive:
+              names = {member.name.rstrip("/") for member in archive if member.name}
+          roots = {name.split("/", 1)[0] for name in names}
+          assert len(roots) == 1
+          root = next(iter(roots))
+          for required in ("VERSION", "verify_bundle.sh", "install_or_update.sh"):
+              assert f"{root}/{required}" in names, required
+          PY
+
+      - name: Publish Project Control update
+        uses: actions/upload-artifact@v4
+        with:
+          name: planner-solving-project-control-${{ github.event.workflow_run.head_sha }}
+          path: |
+            dist/*-project-control.f2re.zip
+            dist/*-project-control.f2re.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
