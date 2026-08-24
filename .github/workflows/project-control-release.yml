@@ -1,6 +1,7 @@
 name: Project Control release
 
 on:
+  pull_request:
   workflow_run:
     workflows: ["Tests"]
     types: [completed]
@@ -9,22 +10,23 @@ permissions:
   contents: read
 
 concurrency:
-  group: project-control-release-${{ github.event.workflow_run.head_branch }}
+  group: project-control-release-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   package:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main'
+      github.event_name == 'pull_request' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - name: Checkout exact verified commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -52,7 +54,7 @@ jobs:
 
       - name: Verify Project Control contract and native payload
         env:
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -105,6 +107,7 @@ jobs:
           PY
 
       - name: Publish Project Control update
+        if: github.event_name == 'workflow_run'
         uses: actions/upload-artifact@v4
         with:
           name: planner-solving-project-control-${{ github.event.workflow_run.head_sha }}
