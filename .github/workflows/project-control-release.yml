@@ -102,7 +102,7 @@ jobs:
           roots = {name.split("/", 1)[0] for name in names}
           assert len(roots) == 1
           root = next(iter(roots))
-          for required in ("VERSION", "verify_bundle.sh", "install_or_update.sh"):
+          for required in ("app/VERSION", "verify_bundle.sh", "install_or_update.sh"):
               assert f"{root}/{required}" in names, required
           PY
 
