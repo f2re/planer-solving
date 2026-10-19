@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from .teacher_resolver import format_teacher_initials
 from .workspace_domain import normalize_teacher, teacher_key, text
 
 TEACHER_FIELDS = (
@@ -68,7 +69,10 @@ def parse_rows(payload: bytes, filename: str) -> Dict[str, Any]:
             rows = document
         if not isinstance(rows, list):
             raise ValueError("JSON должен содержать список записей.")
-        normalized_rows = [dict(item) for item in rows if isinstance(item, Mapping)]
+        normalized_rows = [
+            dict(item) for item in rows
+            if isinstance(item, Mapping) and any(str(v).strip() for v in item.values())
+        ]
         headers: List[str] = []
         for row in normalized_rows:
             for key in row:
@@ -110,6 +114,8 @@ def parse_rows(payload: bytes, filename: str) -> Dict[str, Any]:
     headers = [str(cell).strip() or f"Столбец {index + 1}" for index, cell in enumerate(raw[header_index])]
     rows = []
     for source in raw[header_index + 1:]:
+        if not any(str(cell).strip() for cell in source):
+            continue
         padded = list(source) + [""] * max(0, len(headers) - len(source))
         rows.append({headers[index]: padded[index] for index in range(len(headers))})
     return {
@@ -144,12 +150,7 @@ def suggest_teacher_mapping(headers: Sequence[str]) -> Dict[str, str]:
 
 
 def _initials(full_name: str) -> str:
-    parts = [part for part in re.split(r"\s+", full_name.strip()) if part]
-    if not parts:
-        return ""
-    surname = parts[0]
-    initials = "".join(f"{part[0].upper()}." for part in parts[1:3] if part)
-    return f"{surname} {initials}".strip()
+    return format_teacher_initials(full_name)
 
 
 def teacher_from_row(row: Mapping[str, Any], mapping: Mapping[str, str], teacher_id: int) -> Dict[str, Any]:
@@ -180,13 +181,29 @@ def classify_teachers(
     mapping: Mapping[str, str],
     existing: Sequence[Mapping[str, Any]],
 ) -> Dict[str, Any]:
-    existing_by_key = {teacher_key(dict(item)): dict(item) for item in existing}
+    existing_by_key = {
+        teacher_key(dict(item)): dict(item)
+        for item in existing
+        if isinstance(item, Mapping) and any(str(v).strip() for v in item.values())
+    }
     seen: set[str] = set()
     preview: List[Dict[str, Any]] = []
     counts = {"add": 0, "update": 0, "duplicate": 0, "conflict": 0, "invalid": 0}
-    next_id = max((int(item.get("id", 0)) for item in existing), default=0) + 1
+    next_id = max(
+        (int(item.get("id", 0)) for item in existing if isinstance(item, Mapping)),
+        default=0,
+    ) + 1
 
     for row_index, row in enumerate(rows, 1):
+        if not isinstance(row, Mapping) or not any(str(v).strip() for v in row.values()):
+            continue
+        has_mapped_data = any(
+            str(row.get(source)).strip()
+            for target, source in mapping.items()
+            if source and target in TEACHER_FIELDS
+        )
+        if not has_mapped_data:
+            continue
         try:
             teacher = teacher_from_row(row, mapping, next_id)
         except Exception as exc:

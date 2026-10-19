@@ -12,6 +12,8 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from .teacher_resolver import TeacherLookup
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -53,33 +55,17 @@ def ensure_teacher_assignment_schema(repository: Any) -> None:
         _ensure_schema(connection)
 
 
-def _teacher_aliases(teachers: Sequence[Mapping[str, Any]]) -> Dict[str, str]:
-    result: Dict[str, str] = {}
-    ambiguous: set[str] = set()
-    for teacher in teachers:
-        short = str(teacher.get("short_name") or teacher.get("full_name") or "").strip()
-        full = str(teacher.get("full_name") or short).strip()
-        if not short:
-            continue
-        for alias in (short, full):
-            key = _teacher_key(alias)
-            if not key:
-                continue
-            previous = result.get(key)
-            if previous and previous != short:
-                ambiguous.add(key)
-            else:
-                result[key] = short
-    for key in ambiguous:
-        result.pop(key, None)
-    return result
+def _teacher_aliases(teachers: Sequence[Mapping[str, Any]]) -> TeacherLookup:
+    return TeacherLookup(teachers)
 
 
 def _canonical_teacher(value: Any, aliases: Mapping[str, str]) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    return aliases.get(_teacher_key(raw), "")
+    if isinstance(aliases, TeacherLookup):
+        return aliases.get(raw, "")
+    return aliases.get(_teacher_key(raw), "") or aliases.get(raw, "")
 
 
 def normalize_rule(

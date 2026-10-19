@@ -13,6 +13,177 @@ from .schedule_period import canonical_month, extract_date_parts
 logger = logging.getLogger(__name__)
 
 
+def parse_name_identity(value: Any) -> Tuple[str, str, str]:
+    text = normalize_text(value)
+    if not text:
+        return "", "", ""
+    text_clean = text.lower().replace("ё", "е")
+
+    # 1) Initials at start with dots: 'И.И. Иванов', 'И. И. Иванов', 'И. Иванов', 'И.И Иванов'
+    m = re.match(r"^([a-zа-я])\.\s*(?:([a-zа-я])\.?)?\s+([a-zа-я-]+)$", text_clean)
+    if m:
+        first = m.group(1)
+        middle = m.group(2) if m.group(2) else ""
+        surname = m.group(3)
+        return surname, first, middle
+
+    # 2) Initials at end with dots: 'Иванов И.И.', 'Иванов И. И.', 'Иванов И.', 'Иванов И.И'
+    m = re.match(r"^([a-zа-я-]+)\s+([a-zа-я])\.\s*(?:([a-zа-я])\.?)?$", text_clean)
+    if m:
+        surname = m.group(1)
+        first = m.group(2)
+        middle = m.group(3) if m.group(3) else ""
+        return surname, first, middle
+
+    cleaned = re.sub(r"[.,;:()]+", " ", text_clean).strip()
+    tokens = [t for t in cleaned.split() if t]
+    if not tokens:
+        return "", "", ""
+    if len(tokens) == 1:
+        return tokens[0], "", ""
+
+    if len(tokens) == 2:
+        t0, t1 = tokens[0], tokens[1]
+        if len(t0) == 1 or (len(t0) == 2 and (len(t1) > 2 or len(t0) < len(t1))):
+            surname = t1
+            first = t0[0]
+            middle = t0[1] if len(t0) > 1 else ""
+            return surname, first, middle
+        if len(t1) in (1, 2):
+            surname = t0
+            first = t1[0]
+            middle = t1[1] if len(t1) > 1 else ""
+            return surname, first, middle
+        surname = t0
+        first = t1[0]
+        return surname, first, ""
+
+    if len(tokens[0]) == 1 and len(tokens[1]) == 1:
+        surname = tokens[-1]
+        first = tokens[0][0]
+        middle = tokens[1][0]
+        return surname, first, middle
+    if len(tokens[-2]) == 1 and len(tokens[-1]) == 1:
+        surname = tokens[0]
+        first = tokens[-2][0]
+        middle = tokens[-1][0]
+        return surname, first, middle
+
+    surname = tokens[0]
+    first = tokens[1][0]
+    middle = tokens[2][0]
+    return surname, first, middle
+
+
+def format_teacher_initials(value: Any) -> str:
+    raw = normalize_text(value)
+    if not raw:
+        return ""
+    surname, first, middle = parse_name_identity(raw)
+    if not surname:
+        return raw
+
+    tokens = [t for t in re.sub(r"[.,;:()]+", " ", raw).strip().split() if t]
+    orig_surname = surname.capitalize()
+    for t in tokens:
+        if t.lower().replace("ё", "е") == surname:
+            orig_surname = t
+            break
+
+    inits = []
+    if first:
+        inits.append(f"{first.upper()}.")
+    if middle:
+        inits.append(f"{middle.upper()}.")
+    init_str = "".join(inits)
+    return f"{orig_surname} {init_str}".strip() if init_str else orig_surname
+
+
+class TeacherLookup(Mapping[str, str]):
+    def __init__(self, teachers_config: Sequence[Mapping[str, Any]] | None):
+        self._exact: Dict[str, str] = {}
+        self._by_surname: Dict[str, List[Dict[str, Any]]] = {}
+        self._all_short: set[str] = set()
+        for teacher in teachers_config or []:
+            if not isinstance(teacher, Mapping):
+                continue
+            short = normalize_text(teacher.get("short_name") or teacher.get("full_name"))
+            full = normalize_text(teacher.get("full_name") or short)
+            if not short:
+                continue
+            self._all_short.add(short)
+            for alias in (short, full):
+                if alias:
+                    self._exact[alias.casefold().replace("ё", "е")] = short
+                    self._exact[TeacherResolver._teacher_key(alias)] = short
+            surname, first, middle = parse_name_identity(full or short)
+            if surname:
+                self._by_surname.setdefault(surname, []).append({
+                    "short": short,
+                    "first": first,
+                    "middle": middle,
+                })
+
+    def get(self, key: Any, default: Any = "") -> Any:
+        raw = normalize_text(key)
+        if not raw:
+            return default
+        normalized = raw.casefold().replace("ё", "е")
+        if normalized in self._exact:
+            return self._exact[normalized]
+        teacher_k = TeacherResolver._teacher_key(raw)
+        if teacher_k in self._exact:
+            return self._exact[teacher_k]
+
+        surname, first, middle = parse_name_identity(raw)
+        if not surname:
+            return default
+        variants = self._by_surname.get(surname, [])
+        if not variants:
+            parts = [p for p in re.sub(r"[.,;:()]+", " ", normalized).split() if p]
+            if len(parts) == 2 and parts[1] in self._by_surname:
+                surname = parts[1]
+                first = parts[0][0]
+                middle = ""
+                variants = self._by_surname.get(surname, [])
+        if not variants:
+            return default
+
+        if first and middle:
+            matches = [
+                item["short"] for item in variants
+                if item["first"] == first and (not item["middle"] or item["middle"] == middle)
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            return default
+        if first and not middle:
+            matches = [item["short"] for item in variants if item["first"] == first]
+            if len(matches) == 1:
+                return matches[0]
+            return default
+        if not first:
+            if len(variants) == 1:
+                return variants[0]["short"]
+            return default
+        return default
+
+    def __getitem__(self, key: Any) -> str:
+        res = self.get(key)
+        if not res:
+            raise KeyError(key)
+        return res
+
+    def __contains__(self, key: Any) -> bool:
+        return bool(self.get(key))
+
+    def __iter__(self):
+        return iter(self._exact)
+
+    def __len__(self):
+        return len(self._exact)
+
+
 class TeacherResolver:
     NON_LESSON_SUBJECTS = {
         "вых", "выходной", "отп", "отпуск", "экзс", "эпр", "ср", "упр",
@@ -23,7 +194,11 @@ class TeacherResolver:
     def __init__(self, teachers_config_path: str):
         try:
             data = json.loads(Path(teachers_config_path).read_text(encoding="utf-8"))
-            self.teachers_config = data if isinstance(data, list) else []
+            raw_list = data if isinstance(data, list) else []
+            self.teachers_config = [
+                item for item in raw_list
+                if isinstance(item, dict) and any(str(v).strip() for v in item.values())
+            ]
         except Exception as exc:
             logger.error("Cannot load teachers config %s: %s", teachers_config_path, exc)
             self.teachers_config = []
@@ -49,20 +224,7 @@ class TeacherResolver:
 
     @classmethod
     def _name_identity(cls, value: Any) -> Tuple[str, str, str]:
-        tokens = re.findall(r"[0-9a-zа-я-]+", cls._teacher_key(value), flags=re.I)
-        if not tokens:
-            return "", "", ""
-        if len(tokens) == 1:
-            return tokens[0], "", ""
-        if len(tokens[0].replace("-", "")) == 1:
-            surname = tokens[-1]
-            initials = tokens[:-1]
-        else:
-            surname = tokens[0]
-            initials = tokens[1:]
-        first = initials[0][0] if initials and initials[0] else ""
-        middle = initials[1][0] if len(initials) > 1 and initials[1] else ""
-        return surname, first, middle
+        return parse_name_identity(value)
 
     @classmethod
     def _identity_key(cls, value: Any) -> str:
@@ -76,6 +238,18 @@ class TeacherResolver:
         bucket = mapping.setdefault(key, [])
         if value not in bucket:
             bucket.append(value)
+
+    @staticmethod
+    def _single_initial_patterns(surname: str, first: str) -> List[re.Pattern[str]]:
+        patterns: List[re.Pattern[str]] = []
+        if surname and first:
+            s = re.escape(surname)
+            f = re.escape(first)
+            patterns.extend([
+                re.compile(rf"(?<![\w-]){s}\s+{f}(?:\.|\b)(?!\.?\s*[a-zа-я])", re.I),
+                re.compile(rf"(?<!\b[a-zа-я]\.)(?<!\b[a-zа-я]\.\s)(?<![\w-]){f}(?:\.|\b)\s+{s}(?![\w-])", re.I),
+            ])
+        return patterns
 
     @staticmethod
     def _name_patterns(surname: str, first: str, middle: str, full: str, short: str) -> List[re.Pattern[str]]:
@@ -97,13 +271,15 @@ class TeacherResolver:
                 ])
             else:
                 patterns.extend([
-                    re.compile(rf"(?<![\w-]){s}\s+{f}\.?(?![\w-])", re.I),
-                    re.compile(rf"(?<![\w-]){f}\.?\s+{s}(?![\w-])", re.I),
+                    re.compile(rf"(?<![\w-]){s}\s+{f}(?:\.|\b)(?!\.?\s*[a-zа-я])", re.I),
+                    re.compile(rf"(?<!\b[a-zа-я]\.)(?<!\b[a-zа-я]\.\s)(?<![\w-]){f}(?:\.|\b)\s+{s}(?![\w-])", re.I),
                 ])
         return patterns
 
     def _index_teachers(self) -> None:
         for teacher in self.teachers_config:
+            if not isinstance(teacher, dict):
+                continue
             full = normalize_text(teacher.get("full_name"))
             short = normalize_text(teacher.get("short_name")) or full
             source = full or short
@@ -120,9 +296,12 @@ class TeacherResolver:
             self.teachers_by_surname.setdefault(surname, []).append({
                 "short": short,
                 "full": full,
+                "first": first,
+                "middle": middle,
                 "identity": identity,
                 "initials": "".join([first, middle]),
                 "patterns": self._name_patterns(surname, first, middle, full, short),
+                "single_patterns": self._single_initial_patterns(surname, first),
             })
 
     def _ambiguous(self, label: str, variants: Sequence[str]) -> None:
@@ -131,9 +310,10 @@ class TeacherResolver:
         if key in self._ambiguous_warnings:
             return
         self._ambiguous_warnings.add(key)
+        variants_str = ", ".join(variants).rstrip(".")
         self.warnings.append(
             f"Преподаватель «{normalized}» неоднозначен: "
-            f"{', '.join(variants)}. Укажите фамилию и инициалы."
+            f"{variants_str}. Укажите фамилию и инициалы."
         )
 
     def _resolve_teacher_alias(self, value: Any, *, warn: bool = False) -> str:
@@ -148,21 +328,52 @@ class TeacherResolver:
                 self._ambiguous(raw, exact)
             return ""
 
-        identity = self._identity_key(raw)
-        matches = self.teacher_identities.get(identity, [])
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            if warn:
-                self._ambiguous(raw, matches)
+        surname, first, middle = self._name_identity(raw)
+        if not surname:
             return ""
 
-        surname, first, middle = self._name_identity(raw)
-        variants = [item["short"] for item in self.teachers_by_surname.get(surname, [])]
-        if not first and len(variants) == 1:
-            return variants[0]
-        if warn and variants:
-            self._ambiguous(raw, variants)
+        variants = self.teachers_by_surname.get(surname, [])
+        if not variants:
+            parts = [p for p in re.sub(r"[.,;:()]+", " ", raw.lower().replace("ё", "е")).split() if p]
+            if len(parts) == 2 and parts[1] in self.teachers_by_surname:
+                surname = parts[1]
+                first = parts[0][0]
+                middle = ""
+                variants = self.teachers_by_surname.get(surname, [])
+
+        if not variants:
+            return ""
+
+        if first and middle:
+            matches = [
+                item["short"] for item in variants
+                if item["first"] == first and (not item["middle"] or item["middle"] == middle)
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                if warn:
+                    self._ambiguous(raw, matches)
+                return ""
+
+        if first and not middle:
+            matches = [item["short"] for item in variants if item["first"] == first]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                if warn:
+                    self._ambiguous(raw, matches)
+                return ""
+            return ""
+
+        if not first:
+            if len(variants) == 1:
+                return variants[0]["short"]
+            if len(variants) > 1:
+                if warn:
+                    self._ambiguous(raw, [item["short"] for item in variants])
+                return ""
+
         return ""
 
     @staticmethod
@@ -250,14 +461,35 @@ class TeacherResolver:
                 if any(pattern.search(text) for pattern in item["patterns"])
             ]
             precise = list(dict.fromkeys(precise))
-            if len(precise) == 1:
-                found.extend(precise)
-            elif len(precise) > 1:
-                ambiguous.append((surname, precise))
-            elif len(variants) == 1:
+            if precise:
+                if len(precise) == 1:
+                    found.extend(precise)
+                else:
+                    occurrences = len(re.findall(rf"(?<![\w-]){re.escape(surname)}(?![\w-])", searchable, re.I))
+                    if occurrences >= len(precise):
+                        found.extend(precise)
+                    else:
+                        ambiguous.append((surname, precise))
+                continue
+
+            single_matches = [
+                item["short"]
+                for item in variants
+                if any(p.search(text) for p in item.get("single_patterns", []))
+            ]
+            single_matches = list(dict.fromkeys(single_matches))
+            if single_matches:
+                if len(single_matches) == 1:
+                    found.extend(single_matches)
+                else:
+                    ambiguous.append((surname, single_matches))
+                continue
+
+            if len(variants) == 1:
                 found.append(variants[0]["short"])
             else:
                 ambiguous.append((surname, [item["short"] for item in variants]))
+
         for surname, variants in ambiguous:
             self._ambiguous(surname, variants)
         return list(dict.fromkeys(found))

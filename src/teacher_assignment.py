@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
+from .teacher_resolver import TeacherLookup
+
 UNASSIGNED_TEACHER = "Не назначен"
 
 
@@ -396,13 +398,7 @@ def resolve_teacher_collisions(
 ) -> Dict[str, Any]:
     """Resolve teacher collisions globally after every source file was parsed."""
 
-    valid_teachers: Dict[str, str] = {}
-    for teacher in teachers_config:
-        short = _text(teacher.get("short_name") or teacher.get("full_name"))
-        full = _text(teacher.get("full_name") or short)
-        for alias in (short, full):
-            if alias:
-                valid_teachers[alias.casefold().replace("ё", "е")] = short
+    valid_teachers = TeacherLookup(teachers_config)
 
     units = _build_units(
         list(lessons),

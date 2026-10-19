@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional
 import uuid
 
 from .workspace_store import (
@@ -553,7 +553,9 @@ class SQLiteWorkspaceStore:
                     settings["schedule_start_date"], settings["schedule_end_date"],
                 ),
             )
-            for teacher in source["teachers"]:
+            for teacher in source.get("teachers") or []:
+                if not isinstance(teacher, Mapping) or not any(str(v).strip() for v in teacher.values()):
+                    continue
                 self._insert_teacher(connection, new_id, teacher)
             for template in source["templates"]:
                 duplicated = deepcopy(template)
@@ -597,7 +599,7 @@ class SQLiteWorkspaceStore:
             seen_teachers: set[str] = set()
             next_id = 1
             for raw in source.get("teachers") or []:
-                if not isinstance(raw, dict):
+                if not isinstance(raw, Mapping) or not any(str(v).strip() for v in raw.values()):
                     continue
                 try:
                     teacher = normalize_teacher(raw, next_id)
@@ -709,6 +711,8 @@ class SQLiteWorkspaceStore:
             ).fetchone()[0])
             added = skipped = 0
             for raw in records:
+                if not isinstance(raw, Mapping) or not any(str(v).strip() for v in raw.values()):
+                    continue
                 try:
                     teacher = normalize_teacher(raw, next_id)
                 except (WorkspaceError, AttributeError):

@@ -31,18 +31,13 @@ class ScheduleParserGeometry:
         start = layout.legend_data_start_row or (layout.legend_start_row + layout.legend_data_start_offset)
         end = min(layout.legend_end_row or matrix.worksheet.max_row, matrix.worksheet.max_row)
         mapping: Dict[str, Dict[str, List[str]]] = {}
-        blanks = 0
         for row in range(start, end + 1):
             code = normalize_text(matrix.row_value(row, layout.legend_code_col)) if layout.legend_code_col else ""
             subject = normalize_text(matrix.row_value(row, layout.legend_subject_col)) if layout.legend_subject_col else ""
             lecturer_text = normalize_text(matrix.row_value(row, layout.legend_lecturer_col)) if layout.legend_lecturer_col else ""
             other_text = normalize_text(matrix.row_value(row, layout.legend_other_col)) if layout.legend_other_col else ""
             if not is_legend_record(code, subject, lecturer_text, other_text):
-                blanks += 1
-                if blanks >= 2:
-                    break
                 continue
-            blanks = 0
             lecturers = self._extract_teachers(lecturer_text)
             others = self._extract_teachers(other_text)
             if layout.teacher_role_fallback == "any":

@@ -45,6 +45,7 @@ export function installOperatorFlowMarkup() {
     insertOnce(workflow, 'beforebegin', '.operator-readiness', `
       <section class="operator-readiness" aria-label="Действия с расписанием">
         <div class="readiness-copy">
+          <button type="button" class="btn btn-secondary btn-small back-to-files-action" @click="goToStep(1)">← К исходным файлам</button>
           <strong>{{ enabledFiles.length }} {{ enabledFiles.length === 1 ? 'файл' : 'файлов' }}</strong>
           <small>
             {{ checkedFilesCount }} проверено

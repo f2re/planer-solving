@@ -246,7 +246,6 @@ class ScheduleStructureDetector:
         if data_start is None:
             data_start = header + 1
         last = data_start - 1
-        blanks = 0
         for row in range(data_start, sheet.max_row + 1):
             code = normalize_text(matrix.row_value(row, columns.get("code")))
             subject = normalize_text(matrix.row_value(row, columns.get("subject")))
@@ -254,11 +253,6 @@ class ScheduleStructureDetector:
             other = normalize_text(matrix.row_value(row, columns.get("other")))
             if is_legend_record(code, subject, lecturer, other):
                 last = row
-                blanks = 0
-            else:
-                blanks += 1
-                if blanks >= 2:
-                    break
         return {
             "score": min(1.0, best["score"] / 18.0),
             "start_row": header,

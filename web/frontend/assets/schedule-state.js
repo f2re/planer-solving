@@ -1,6 +1,6 @@
 import { buildPreviewBounds, copyLayout, numericLayoutValue, normalizeScheduleLayout, columnLetter, confidenceLabel, confidenceClass, scheduleCellClass } from './schedule-layout-utils.js';
 
-const { ref, reactive, computed, nextTick } = Vue;
+const { ref, reactive, computed, watch, nextTick } = Vue;
 const DAY_ORDER = { 'Пн': 0, 'Вт': 1, 'Ср': 2, 'Чт': 3, 'Пт': 4, 'Сб': 5 };
 const MONTH_OPTIONS = [
     'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
@@ -45,6 +45,77 @@ export function createScheduleState(addToast, activeWorkspaceId) {
         enabledFiles.value.filter(item => validations[item.file_id]).length
     );
     const canGenerate = computed(() => enabledFiles.value.length > 0);
+
+    const canGoToStep = targetStep => {
+        const s = Number(targetStep);
+        if (s === 1) return true;
+        if (s === 2) return Boolean(analyzedFiles.value.length > 0 || sessionId.value);
+        if (s === 3) return Boolean(result.value);
+        return false;
+    };
+
+    let isNavigatingFromPopstate = false;
+
+    const goToStep = async (targetStep, { push = true } = {}) => {
+        const s = Number(targetStep);
+        if (!canGoToStep(s)) return false;
+        if (step.value === s) return true;
+        step.value = s;
+        if (push && typeof history !== 'undefined' && typeof window !== 'undefined') {
+            const hash = '#step-' + targetStep;
+            if (window.location.hash !== hash) {
+                history.pushState({ step: targetStep }, '', '#step-' + targetStep);
+            }
+        }
+        if (s === 2) {
+            await nextTick();
+            if (currentFile.value?.analysis && !preview.value) {
+                await loadPreview();
+            }
+        }
+        return true;
+    };
+
+    watch(step, targetStep => {
+        if (isNavigatingFromPopstate) return;
+        if (typeof history !== 'undefined' && typeof window !== 'undefined') {
+            const hash = '#step-' + targetStep;
+            if (window.location.hash !== hash) {
+                history.pushState({ step: targetStep }, '', '#step-' + targetStep);
+            }
+        }
+    });
+
+    if (typeof window !== 'undefined') {
+        window.addEventListener('popstate', async event => {
+            const hashStep = window.location.hash ? Number(window.location.hash.replace(/^#step-/, '')) : null;
+            const stateStep = event.state?.step;
+            const targetStep = Number(stateStep || hashStep || 1);
+            if (canGoToStep(targetStep)) {
+                isNavigatingFromPopstate = true;
+                step.value = targetStep;
+                if (targetStep === 2 && currentFile.value?.analysis) {
+                    await nextTick();
+                    if (!preview.value) await loadPreview();
+                }
+                await nextTick();
+                isNavigatingFromPopstate = false;
+            } else {
+                if (typeof history !== 'undefined') {
+                    history.replaceState({ step: step.value }, '', '#step-' + step.value);
+                }
+            }
+        });
+
+        if (typeof history !== 'undefined') {
+            const initialHashStep = window.location.hash ? Number(window.location.hash.replace(/^#step-/, '')) : null;
+            if (initialHashStep && canGoToStep(initialHashStep)) {
+                step.value = initialHashStep;
+            } else if (!window.location.hash) {
+                history.replaceState({ step: step.value }, '', '#step-' + step.value);
+            }
+        }
+    }
 
     const currentIssues = computed(() => {
         const report = currentValidation.value?.report || {};
@@ -132,6 +203,51 @@ export function createScheduleState(addToast, activeWorkspaceId) {
         if (!files?.length) return;
         uploadBusy.value = true;
         result.value = null;
+
+        if (sessionId.value && analyzedFiles.value.length) {
+            const form = new FormData();
+            Array.from(files).forEach(file => form.append('files', file));
+            try {
+                const { data } = await axios.post(
+                    `/api/analysis/${sessionId.value}/files`,
+                    form,
+                    { headers: { 'Content-Type': 'multipart/form-data' } }
+                );
+                const added = (data.files || []).map(item => ({
+                    ...item,
+                    enabled: Boolean(item.analysis)
+                }));
+                for (const file of added) {
+                    analyzedFiles.value.push(file);
+                    if (file.analysis) {
+                        layouts[file.file_id] = copy(file.analysis.layout);
+                        ensurePeriodOverrides(file.file_id);
+                    }
+                }
+                const first = added.find(item => item.analysis);
+                if (first) {
+                    selectedFileId.value = first.file_id;
+                }
+                await goToStep(2);
+                previewRegion.value = 'schedule';
+                if (selectedFileId.value) await loadPreview();
+                addToast(
+                    'Файлы добавлены',
+                    `Добавлено файлов: ${added.length}. Предыдущие файлы и настройки сохранены.`,
+                    added.some(item => !item.analysis) ? 'warning' : 'success'
+                );
+            } catch (error) {
+                addToast(
+                    'Файлы не добавлены',
+                    error.response?.data?.detail || 'Не удалось передать файлы на сервер.',
+                    'error'
+                );
+            } finally {
+                uploadBusy.value = false;
+            }
+            return;
+        }
+
         const form = new FormData();
         Array.from(files).forEach(file => form.append('files', file));
         try {
@@ -158,7 +274,7 @@ export function createScheduleState(addToast, activeWorkspaceId) {
                 return;
             }
             selectedFileId.value = first.file_id;
-            step.value = 2;
+            await goToStep(2);
             previewRegion.value = 'schedule';
             await loadPreview();
             const problems = analyzedFiles.value.filter(item => item.status !== 'success').length;
@@ -440,7 +556,7 @@ export function createScheduleState(addToast, activeWorkspaceId) {
             );
             result.value = data;
             if (data.filename) {
-                step.value = 3;
+                await goToStep(3);
                 addToast(
                     'Результат готов',
                     data.message,
@@ -476,7 +592,7 @@ export function createScheduleState(addToast, activeWorkspaceId) {
                 // The server may already have cleaned an expired session.
             }
         }
-        step.value = 1;
+        await goToStep(1);
         sessionId.value = null;
         analyzedFiles.value = [];
         selectedFileId.value = null;
@@ -493,6 +609,8 @@ export function createScheduleState(addToast, activeWorkspaceId) {
 
     return {
         step,
+        canGoToStep,
+        goToStep,
         sessionId,
         analyzedFiles,
         layouts,

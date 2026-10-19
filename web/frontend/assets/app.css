@@ -52,15 +52,90 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .shell { width: min(1760px, calc(100% - 32px)); margin: 22px auto 56px; }
 .steps {
-    display: flex; gap: 8px; align-items: center; margin-bottom: 18px;
+    display: flex; gap: 8px; align-items: center; margin-bottom: 18px; flex-wrap: wrap;
 }
 .step-chip {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 8px 12px; border-radius: 999px;
     color: var(--muted); background: #e8ecf2; font-size: 13px; font-weight: 650;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    transition: all .15s ease;
+}
+button.step-chip {
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+    transition: all .15s ease;
+}
+button.step-chip:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+button.step-chip:not(:disabled):hover {
+    filter: brightness(0.96);
 }
 .step-chip.active { color: #fff; background: var(--primary); }
 .step-chip.done { color: var(--success); background: #e5f5ee; }
+.steps-history-button {
+    margin-left: auto;
+}
+.topbar-history-button {
+    margin-left: auto;
+    margin-right: 8px;
+}
+
+.session-active-banner {
+    max-width: 900px;
+    margin: 0 auto 20px;
+    padding: 16px 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    background: #eef4ff;
+    border: 1px solid #c7d7fe;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(49, 94, 251, .08);
+}
+.session-active-banner .banner-content {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.session-active-banner .banner-icon {
+    font-size: 28px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.session-active-banner .banner-text strong {
+    display: block;
+    font-size: 15px;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+.session-active-banner .banner-text p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+}
+.session-active-banner .banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+@media (max-width: 680px) {
+    .session-active-banner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .session-active-banner .banner-actions {
+        justify-content: flex-end;
+    }
+}
 
 .card {
     background: var(--surface);

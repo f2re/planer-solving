@@ -14,16 +14,54 @@
             <span>Борис по парам</span>
         </div>
         <span class="version">Рабочее место оператора</span>
+        <button type="button" class="btn btn-secondary btn-small topbar-history-button" @click="openOperations('history')">История</button>
     </header>
 
     <main class="shell">
         <div class="steps" aria-label="Этапы работы">
-            <span class="step-chip" :class="{ active: step === 1, done: step > 1 }">1  Исходные файлы</span>
-            <span class="step-chip" :class="{ active: step === 2, done: step > 2 }">2  Проверка и исправление</span>
-            <span class="step-chip" :class="{ active: step === 3 }">3  Готовый результат</span>
+            <button
+                type="button"
+                class="step-chip"
+                :class="{ active: step === 1, done: step > 1 }"
+                @click="goToStep(1)"
+            >1  Исходные файлы</button>
+            <button
+                type="button"
+                class="step-chip"
+                :class="{ active: step === 2, done: step > 2 }"
+                :disabled="!canGoToStep(2)"
+                @click="goToStep(2)"
+            >2  Проверка и исправление</button>
+            <button
+                type="button"
+                class="step-chip"
+                :class="{ active: step === 3 }"
+                :disabled="!canGoToStep(3)"
+                @click="goToStep(3)"
+            >3  Готовый результат</button>
+            <button
+                type="button"
+                class="btn btn-secondary btn-small steps-history-button"
+                @click="openOperations('history')"
+            >История</button>
         </div>
 
         <section v-if="step === 1">
+            <div v-if="analyzedFiles.length > 0" class="card session-active-banner" role="status">
+                <div class="banner-content">
+                    <div class="banner-icon" aria-hidden="true">📂</div>
+                    <div class="banner-text">
+                        <strong>Загружено файлов: {{ analyzedFiles.length }}. Можно добавить ещё файлы или вернуться к проверке</strong>
+                        <p>Текущие разметки, группы и настройки сохранены в активной сессии.</p>
+                    </div>
+                </div>
+                <div class="banner-actions">
+                    <button type="button" class="btn btn-primary continue-to-step2-btn" @click="goToStep(2)">
+                        Продолжить исправление (Шаг 2) →
+                    </button>
+                </div>
+            </div>
+
             <div class="card upload-card">
                 <div class="upload-header">
                     <h1 class="page-title">Сформировать расписание</h1>
@@ -73,6 +111,9 @@
                             <h2 class="panel-title">Файлы</h2>
                             <div class="panel-subtitle">{{ checkedFilesCount }} из {{ enabledFiles.length }} проверено</div>
                         </div>
+                        <button type="button" class="btn btn-secondary btn-small back-to-files-btn" @click="goToStep(1)">
+                            ← К исходным файлам
+                        </button>
                     </div>
                     <div class="panel-body">
                         <div class="file-list">
@@ -443,6 +484,7 @@
                     Результат создаётся из пригодных данных. Спорные решения сохраняются в отчёте и остаются доступными для исправления.
                 </div>
                 <div class="button-row">
+                    <button type="button" class="btn btn-secondary back-to-step1-btn" @click="goToStep(1)">← К исходным файлам</button>
                     <button class="btn btn-secondary" @click="resetWorkflow">Начать заново</button>
                     <button class="btn btn-secondary" @click="validateAll" :disabled="validateBusy">
                         Проверить все
@@ -476,6 +518,7 @@
                 </div>
 
                 <div class="button-row">
+                    <button type="button" class="btn btn-secondary return-to-editor" @click="returnToCorrections">← К исправлениям</button>
                     <a
                         v-if="result.filename"
                         class="btn btn-primary"
@@ -488,6 +531,7 @@
                         :href="`/api/download/${result.weekly_filename}`"
                         download
                     >Скачать недельное расписание</a>
+                    <button type="button" class="btn btn-secondary result-history-action" @click="openOperations('history')">История</button>
                     <button class="btn btn-secondary" @click="resetWorkflow">Обработать новые файлы</button>
                 </div>
 
