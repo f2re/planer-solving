@@ -408,12 +408,31 @@ class DataLoader(TeacherResolver, ScheduleParserGeometry):
                 "blocking": False,
             })
             report["status"] = "needs_operator"
-        elif report["unknown_teacher_lessons"]:
-            report["warnings"].append(
-                f"Для {report['unknown_teacher_lessons']} занятий преподаватель не определён; они попадут в раздел «Не назначен».")
+        elif report["unknown_teacher_lessons"] > 0 or unknown:
+            count = report["unknown_teacher_lessons"]
+            if count > 0:
+                report["warnings"].append(
+                    f"Для {count} занятий преподаватель не определён; они попадут в раздел «Не назначен»."
+                )
+            elif not report["warnings"]:
+                report["warnings"].append(
+                    "Для некоторых дисциплин преподаватель не определён."
+                )
+            sorted_unknown = sorted(unknown)
+            label = (
+                f"Уточнить преподавателей ({count} не назначено)"
+                if count > 0
+                else "Уточнить преподавателей"
+            )
             report["actions"].append({
                 "type": "open_teacher_mapping",
-                "label": "Уточнить преподавателей",
+                "label": label,
+                "unknown_subjects": sorted_unknown,
+                "subject": sorted_unknown[0] if len(sorted_unknown) == 1 else "",
+                "candidates": {
+                    subj: report.get("teacher_candidates", {}).get(subj, {})
+                    for subj in sorted_unknown
+                },
                 "blocking": False,
             })
             report["status"] = "ready_with_warnings"

@@ -218,7 +218,7 @@
 
 .teacher-mapping-dialog {
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
     width: min(1020px, 100%);
     max-height: min(820px, calc(100vh - 28px));
     overflow: hidden;
@@ -250,6 +250,60 @@
     font-size: 13px;
 }
 
+.teacher-mapping-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 10px 24px;
+    border-bottom: 1px solid rgba(77, 99, 157, .1);
+    background: rgba(248, 250, 255, .96);
+    flex-wrap: wrap;
+}
+
+.teacher-mapping-tabs .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border: 1px solid rgba(77, 99, 157, .18);
+    border-radius: 999px;
+    background: #fff;
+    color: #4b5563;
+    font-size: 13px;
+    font-weight: 550;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.teacher-mapping-tabs .tab:hover {
+    border-color: rgba(49, 94, 251, 0.4);
+    background: rgba(49, 94, 251, 0.04);
+    color: #1e3a8a;
+}
+
+.teacher-mapping-tabs .tab.active {
+    background: #315efb;
+    border-color: #315efb;
+    color: #fff;
+    font-weight: 650;
+}
+
+.teacher-mapping-tabs .badge-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    background: rgba(220, 38, 38, 0.12);
+    color: #dc2626;
+}
+
+.teacher-mapping-tabs .tab.active .badge-dot {
+    background: rgba(255, 255, 255, 0.25);
+    color: #fff;
+}
+
 .teacher-mapping-tools {
     display: flex;
     align-items: center;
@@ -257,6 +311,19 @@
     padding: 12px 24px;
     border-bottom: 1px solid rgba(77, 99, 157, .1);
     background: rgba(248, 250, 255, .96);
+}
+
+.teacher-autofill-btn {
+    white-space: nowrap;
+    color: #1e40af;
+    background: rgba(49, 94, 251, 0.08);
+    border-color: rgba(49, 94, 251, 0.25);
+    font-weight: 600;
+}
+
+.teacher-autofill-btn:hover {
+    background: rgba(49, 94, 251, 0.16);
+    border-color: rgba(49, 94, 251, 0.45);
 }
 
 .teacher-mapping-search {
@@ -324,6 +391,63 @@
     color: #d04444;
 }
 
+.teacher-candidate-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 11px;
+    padding: 6px 10px;
+    background: rgba(241, 245, 249, 0.7);
+    border-radius: 10px;
+    border: 1px dashed rgba(148, 163, 184, 0.35);
+}
+
+.teacher-candidate-chips .chips-label {
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 600;
+    margin-right: 2px;
+}
+
+.chip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease-in-out;
+    line-height: 1.25;
+}
+
+.chip-lecturer {
+    background: rgba(49, 94, 251, 0.08);
+    color: #1e40af;
+    border-color: rgba(49, 94, 251, 0.25);
+}
+
+.chip-lecturer:hover {
+    background: rgba(49, 94, 251, 0.18);
+    border-color: #315efb;
+    transform: translateY(-1px);
+}
+
+.chip-practice {
+    background: rgba(16, 185, 129, 0.09);
+    color: #065f46;
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.chip-practice:hover {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+    transform: translateY(-1px);
+}
+
 .teacher-rule-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -358,6 +482,78 @@
     line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.teacher-select-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.teacher-select-wrap select.control {
+    width: 100%;
+    padding-right: 28px;
+}
+
+.teacher-select-wrap .field-clear-btn {
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    border: 0;
+    background: rgba(100, 116, 139, 0.15);
+    color: #475569;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0;
+    transition: background 0.15s ease-in-out;
+}
+
+.teacher-select-wrap .field-clear-btn:hover {
+    background: rgba(220, 38, 38, 0.2);
+    color: #dc2626;
+}
+
+.teacher-mapping-trigger-row {
+    margin: 10px 0 14px;
+    display: flex;
+    align-items: center;
+}
+
+.teacher-flow-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    font-weight: 600;
+}
+
+.badge-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.badge-count.warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+}
+
+.badge-count.success {
+    background: rgba(16, 185, 129, 0.15);
+    color: #047857;
 }
 
 .teacher-mapping-empty {

@@ -77,6 +77,7 @@ export function mount() {
                 schedule,
                 workspace.activeWorkspaceId
             );
+            schedule.openTeacherMapping = teacherMapping.openTeacherMapping;
 
             const rawRefreshSpaces = reactiveWorkspace.refreshSpaces;
             workspace.loadSpaces = async preferred => {

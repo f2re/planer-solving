@@ -155,11 +155,17 @@ export function installOperatorFlowMarkup() {
             </div>
             <button type="button" class="modal-close" aria-label="Закрыть" @click="closeTeacherMapping">×</button>
           </header>
+          <div class="teacher-mapping-tabs" role="tablist">
+            <button type="button" class="tab" :class="{active: teacherMappingTab === 'all'}" @click="teacherMappingTab = 'all'">Все ({{ teacherMappingSubjects.length }})</button>
+            <button type="button" class="tab" :class="{active: teacherMappingTab === 'unassigned'}" @click="teacherMappingTab = 'unassigned'">Требуют назначения <span v-if="unassignedCount" class="badge-dot">({{ unassignedCount }})</span></button>
+            <button type="button" class="tab" :class="{active: teacherMappingTab === 'configured'}" @click="teacherMappingTab = 'configured'">Назначенные ({{ configuredCount }})</button>
+          </div>
           <div class="teacher-mapping-tools">
             <label class="teacher-mapping-search">
               <span class="sr-only">Найти дисциплину или преподавателя</span>
               <input v-model.trim="teacherMappingSearch" class="control" type="search" placeholder="Найти дисциплину или преподавателя">
             </label>
+            <button type="button" class="btn btn-secondary btn-small teacher-autofill-btn" @click="autoFillAllRecommendations" title="Автоматически заполнить незаполненные поля наиболее подходящими преподавателями">⚡ Применить рекомендации</button>
             <button type="button" class="btn btn-secondary btn-small" @click="resetAllTeacherRules">Сбросить всё</button>
           </div>
           <div class="teacher-mapping-list">
@@ -177,33 +183,93 @@ export function installOperatorFlowMarkup() {
                   @click="clearTeacherRule(item.name)"
                 >Сбросить</button>
               </div>
+              <div v-if="(item.candidates?.lecturer?.length || item.candidates?.practice?.length)" class="teacher-candidate-chips">
+                <span class="chips-label">Рекомендовано:</span>
+                <button v-for="cand in (item.candidates.lecturer || []).slice(0, 3)" :key="'chip-l-'+cand" type="button" class="chip-btn chip-lecturer" @click="assignCandidate(item.name, 'lecturer', cand)" :title="'Назначить на лекции: ' + cand">
+                  ⚡ Лек: {{ cand }}
+                </button>
+                <button v-for="cand in (item.candidates.practice || []).slice(0, 3)" :key="'chip-p-'+cand" type="button" class="chip-btn chip-practice" @click="assignCandidate(item.name, 'practice', cand)" :title="'Назначить на практику: ' + cand">
+                  ⚡ Прак: {{ cand }}
+                </button>
+              </div>
               <div class="teacher-rule-grid">
                 <label>
                   <span>Лекции</span>
-                  <select v-model="teacherMappingDraft[item.name].lecturer" class="control">
-                    <option value="">Автоматически</option>
-                    <option v-for="teacher in teacherMappingOptions" :key="'l-'+teacher.id" :value="teacher.short_name">
-                      {{ teacher.full_name || teacher.short_name }}
-                    </option>
-                  </select>
+                  <div class="teacher-select-wrap">
+                    <select v-model="teacherMappingDraft[item.name].lecturer" class="control">
+                      <option value="">Автоматически</option>
+                      <optgroup v-if="item.candidates?.lecturer?.length" label="⭐ Рекомендованные">
+                        <option v-for="cand in item.candidates.lecturer" :key="'opt-l-'+cand" :value="cand">
+                          {{ cand }}
+                        </option>
+                      </optgroup>
+                      <optgroup label="Все преподаватели">
+                        <option v-for="teacher in teacherMappingOptions" :key="'l-'+teacher.id" :value="teacher.short_name">
+                          {{ teacher.full_name || teacher.short_name }}
+                        </option>
+                      </optgroup>
+                    </select>
+                    <button
+                      v-if="teacherMappingDraft[item.name]?.lecturer"
+                      type="button"
+                      class="field-clear-btn"
+                      title="Очистить"
+                      aria-label="Очистить выбор лектора"
+                      @click="teacherMappingDraft[item.name].lecturer = ''"
+                    >×</button>
+                  </div>
                 </label>
                 <label>
                   <span>Практика</span>
-                  <select v-model="teacherMappingDraft[item.name].practice" class="control">
-                    <option value="">Автоматически</option>
-                    <option v-for="teacher in teacherMappingOptions" :key="'p-'+teacher.id" :value="teacher.short_name">
-                      {{ teacher.full_name || teacher.short_name }}
-                    </option>
-                  </select>
+                  <div class="teacher-select-wrap">
+                    <select v-model="teacherMappingDraft[item.name].practice" class="control">
+                      <option value="">Автоматически</option>
+                      <optgroup v-if="item.candidates?.practice?.length" label="⭐ Рекомендованные">
+                        <option v-for="cand in item.candidates.practice" :key="'opt-p-'+cand" :value="cand">
+                          {{ cand }}
+                        </option>
+                      </optgroup>
+                      <optgroup label="Все преподаватели">
+                        <option v-for="teacher in teacherMappingOptions" :key="'p-'+teacher.id" :value="teacher.short_name">
+                          {{ teacher.full_name || teacher.short_name }}
+                        </option>
+                      </optgroup>
+                    </select>
+                    <button
+                      v-if="teacherMappingDraft[item.name]?.practice"
+                      type="button"
+                      class="field-clear-btn"
+                      title="Очистить"
+                      aria-label="Очистить выбор практика"
+                      @click="teacherMappingDraft[item.name].practice = ''"
+                    >×</button>
+                  </div>
                 </label>
                 <label>
                   <span>Резерв</span>
-                  <select v-model="teacherMappingDraft[item.name].reserve" class="control">
-                    <option value="">Не задан</option>
-                    <option v-for="teacher in teacherMappingOptions" :key="'r-'+teacher.id" :value="teacher.short_name">
-                      {{ teacher.full_name || teacher.short_name }}
-                    </option>
-                  </select>
+                  <div class="teacher-select-wrap">
+                    <select v-model="teacherMappingDraft[item.name].reserve" class="control">
+                      <option value="">Не задан</option>
+                      <optgroup v-if="item.candidates?.reserve?.length" label="⭐ Рекомендованные">
+                        <option v-for="cand in item.candidates.reserve" :key="'opt-r-'+cand" :value="cand">
+                          {{ cand }}
+                        </option>
+                      </optgroup>
+                      <optgroup label="Все преподаватели">
+                        <option v-for="teacher in teacherMappingOptions" :key="'r-'+teacher.id" :value="teacher.short_name">
+                          {{ teacher.full_name || teacher.short_name }}
+                        </option>
+                      </optgroup>
+                    </select>
+                    <button
+                      v-if="teacherMappingDraft[item.name]?.reserve"
+                      type="button"
+                      class="field-clear-btn"
+                      title="Очистить"
+                      aria-label="Очистить выбор резерва"
+                      @click="teacherMappingDraft[item.name].reserve = ''"
+                    >×</button>
+                  </div>
                 </label>
               </div>
               <div class="teacher-rule-summary">{{ ruleSummary(item.name) }}</div>

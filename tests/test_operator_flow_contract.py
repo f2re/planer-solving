@@ -81,6 +81,8 @@ def test_teachers_can_be_configured_by_role_without_leaving_flow() -> None:
     markup = (ASSETS / "operator-flow.js").read_text(encoding="utf-8")
     state = (ASSETS / "teacher-mapping-state.js").read_text(encoding="utf-8")
     application = (ASSETS / "planner-app.js").read_text(encoding="utf-8")
+    schedule_state = (ASSETS / "schedule-state.js").read_text(encoding="utf-8")
+    interaction = (ASSETS / "interaction-markup.js").read_text(encoding="utf-8")
 
     assert "Преподаватели по дисциплинам" in markup
     assert "Пустое поле оставляет автоматическое распределение" in markup
@@ -92,6 +94,18 @@ def test_teachers_can_be_configured_by_role_without_leaving_flow() -> None:
     assert "teacher_overrides" in state
     assert "createTeacherMappingState" in application
     assert "...teacherMapping" in application
+    assert "schedule.openTeacherMapping = teacherMapping.openTeacherMapping" in application
+    assert "action.type === 'open_teacher_mapping'" in schedule_state
+    assert "teacher-mapping-tabs" in markup
+    assert "autoFillAllRecommendations" in markup
+    assert "teacher-candidate-chips" in markup
+    assert "optgroup" in markup
+    assert "teacher-mapping-trigger-row" in interaction
+    assert "teacherMappingTab" in state
+    assert "autoFillAllRecommendations" in state
+    assert "assignCandidate" in state
+    assert "unassignedCount" in state
+    assert "configuredCount" in state
 
 
 def test_ux_audit_defines_issue_resolution_contract() -> None:

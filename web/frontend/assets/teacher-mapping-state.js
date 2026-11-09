@@ -49,6 +49,8 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
     const teacherMappingOptions = ref([]);
     const teacherMappingDraft = ref({});
     const teacherMappingSearch = ref('');
+    const teacherMappingTargetSubject = ref('');
+    const teacherMappingTab = ref('all');
     const teacherMappingSaveDefaults = ref(false);
     const storedTeacherRules = ref([]);
 
@@ -68,10 +70,40 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         file => file.file_id === teacherMappingFileId.value
     ) || null);
 
+    function isItemConfigured(item) {
+        const draft = teacherMappingDraft.value[item.name] || {};
+        return Boolean(draft.lecturer || draft.practice || draft.reserve);
+    }
+
+    function isItemUnassigned(item) {
+        const draft = teacherMappingDraft.value[item.name] || {};
+        if (draft.lecturer || draft.practice) return false;
+        const hasCandidates = Boolean(
+            item.candidates?.lecturer?.length ||
+            item.candidates?.practice?.length ||
+            item.candidates?.reserve?.length
+        );
+        return Boolean(item.isUnknown || item.requiresAssignment || hasCandidates);
+    }
+
+    const unassignedCount = computed(() =>
+        teacherMappingSubjects.value.filter(isItemUnassigned).length
+    );
+
+    const configuredCount = computed(() =>
+        teacherMappingSubjects.value.filter(isItemConfigured).length
+    );
+
     const filteredMappingSubjects = computed(() => {
+        let list = teacherMappingSubjects.value;
+        if (teacherMappingTab.value === 'unassigned') {
+            list = list.filter(isItemUnassigned);
+        } else if (teacherMappingTab.value === 'configured') {
+            list = list.filter(isItemConfigured);
+        }
         const query = teacherMappingSearch.value.trim().toLocaleLowerCase('ru');
-        if (!query) return teacherMappingSubjects.value;
-        return teacherMappingSubjects.value.filter(item => {
+        if (!query) return list;
+        return list.filter(item => {
             const rule = teacherMappingDraft.value[item.name] || {};
             return [item.name, rule.lecturer, rule.practice, rule.reserve]
                 .some(value => String(value || '').toLocaleLowerCase('ru').includes(query));
@@ -186,15 +218,19 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         appliedDefaultsSignature = signature;
     }
 
-    function collectSubjects(defaults = []) {
+    function collectSubjects(defaults = [], extraIssue = null) {
         const subjects = new Map();
-        const include = (name, candidates = {}) => {
+        const include = (name, candidates = {}, flags = {}) => {
             const normalized = String(name || '').trim();
             if (!normalized) return;
             const current = subjects.get(normalized) || {
                 name: normalized,
-                candidates: { lecturer: [], practice: [], reserve: [] }
+                candidates: { lecturer: [], practice: [], reserve: [] },
+                isUnknown: false,
+                requiresAssignment: false
             };
+            if (flags.isUnknown) current.isUnknown = true;
+            if (flags.requiresAssignment) current.requiresAssignment = true;
             for (const field of ['lecturer', 'practice', 'reserve']) {
                 const values = Array.isArray(candidates[field]) ? candidates[field] : [];
                 current.candidates[field] = Array.from(new Set([
@@ -210,10 +246,41 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
             for (const subject of report.subjects || []) {
                 include(subject, report.teacher_candidates?.[subject] || {});
             }
-            for (const subject of report.unknown_subjects || []) include(subject);
+            for (const subject of report.unknown_subjects || []) {
+                include(subject, {}, { isUnknown: true, requiresAssignment: true });
+            }
             for (const sample of report.samples || []) include(sample?.subject);
             for (const [subject, candidates] of Object.entries(report.teacher_candidates || {})) {
                 include(subject, candidates);
+            }
+            for (const action of report.actions || []) {
+                const actCandidates = action.candidates || {};
+                if (action.subject) {
+                    include(action.subject, actCandidates, { requiresAssignment: true });
+                }
+                for (const subj of action.unknown_subjects || []) {
+                    include(subj, actCandidates, { isUnknown: true, requiresAssignment: true });
+                }
+            }
+            for (const issue of report.issues || []) {
+                const issueCandidates = issue.candidates || {};
+                const subj = issue.subject || issue.target_subject;
+                if (subj) {
+                    include(subj, issueCandidates, {
+                        isUnknown: issue.code === 'unknown_teacher_mapping',
+                        requiresAssignment: true
+                    });
+                }
+            }
+        }
+        if (extraIssue) {
+            const extraCandidates = extraIssue.candidates || extraIssue.action?.candidates || {};
+            const extraSubj = extraIssue.subject || extraIssue.target_subject || extraIssue.action?.subject;
+            if (extraSubj) {
+                include(extraSubj, extraCandidates, { requiresAssignment: true });
+            }
+            for (const s of extraIssue.unknown_subjects || extraIssue.action?.unknown_subjects || []) {
+                include(s, extraCandidates, { isUnknown: true, requiresAssignment: true });
             }
         }
         for (const rule of defaults) include(rule.subject);
@@ -253,9 +320,66 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         );
     }
 
+    function assignCandidate(subjectName, role, teacherName) {
+        if (!subjectName || !role) return;
+        if (!teacherMappingDraft.value[subjectName]) {
+            teacherMappingDraft.value[subjectName] = emptyRule(subjectName);
+        }
+        teacherMappingDraft.value[subjectName][role] = teacherName || '';
+    }
+
+    function autoFillAllRecommendations() {
+        let count = 0;
+        for (const item of teacherMappingSubjects.value) {
+            if (!teacherMappingDraft.value[item.name]) {
+                teacherMappingDraft.value[item.name] = emptyRule(item.name);
+            }
+            const rule = teacherMappingDraft.value[item.name];
+            const lecturerCandidates = item.candidates?.lecturer || [];
+            const practiceCandidates = item.candidates?.practice || [];
+            const allCandidates = [
+                ...lecturerCandidates,
+                ...practiceCandidates,
+                ...(item.candidates?.reserve || [])
+            ].filter(Boolean);
+
+            let changed = false;
+            if (!rule.lecturer) {
+                const cand = lecturerCandidates[0] || allCandidates[0];
+                if (cand) {
+                    rule.lecturer = cand;
+                    changed = true;
+                }
+            }
+            if (!rule.practice) {
+                const cand = practiceCandidates[0] || allCandidates[0];
+                if (cand) {
+                    rule.practice = cand;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                count++;
+            }
+        }
+        if (count > 0) {
+            addToast('Рекомендации применены', `Заполнено дисциплин: ${count}`, 'success');
+        } else {
+            addToast('Рекомендации', 'Все доступные рекомендации уже применены или кандидаты не найдены.', 'info');
+        }
+    }
+
     async function openTeacherMapping(issue = null) {
         teacherMappingBusy.value = true;
         teacherMappingFileId.value = issue?.file_id || schedule.selectedFileId.value;
+        const targetSubject = String(issue?.subject || issue?.target_subject || issue?.action?.subject || '').trim();
+        if (targetSubject) {
+            teacherMappingSearch.value = targetSubject;
+            teacherMappingTargetSubject.value = targetSubject;
+        } else {
+            teacherMappingSearch.value = '';
+            teacherMappingTargetSubject.value = '';
+        }
         try {
             if (!Object.keys(schedule.validations).length && schedule.enabledFiles.value.length) {
                 await schedule.validateAll();
@@ -271,7 +395,7 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
                     'ru'
                 )
             );
-            const subjects = collectSubjects(defaults);
+            const subjects = collectSubjects(defaults, issue);
             if (!subjects.length) {
                 addToast(
                     'Преподаватели',
@@ -294,7 +418,6 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
                     ...(current[item.name] || {})
                 }
             ]));
-            teacherMappingSearch.value = '';
             teacherMappingSaveDefaults.value = false;
             teacherMappingOpen.value = true;
         } catch (error) {
@@ -311,6 +434,7 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
     function closeTeacherMapping() {
         teacherMappingOpen.value = false;
         teacherMappingSearch.value = '';
+        teacherMappingTargetSubject.value = '';
     }
 
     async function saveTeacherMapping() {
@@ -366,6 +490,8 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         teacherMappingOptions.value = [];
         teacherMappingDraft.value = {};
         teacherMappingSearch.value = '';
+        teacherMappingTargetSubject.value = '';
+        teacherMappingTab.value = 'all';
         teacherMappingSaveDefaults.value = false;
     }
 
@@ -387,11 +513,15 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         teacherMappingOptions,
         teacherMappingDraft,
         teacherMappingSearch,
+        teacherMappingTargetSubject,
+        teacherMappingTab,
         teacherMappingSaveDefaults,
         storedTeacherRules,
         currentMappingFile,
         filteredMappingSubjects,
         configuredTeacherRulesCount,
+        unassignedCount,
+        configuredCount,
         candidateHint,
         ruleSummary,
         openTeacherMapping,
@@ -399,6 +529,8 @@ export function createTeacherMappingState(addToast, schedule, activeWorkspaceId)
         saveTeacherMapping,
         clearTeacherRule,
         resetAllTeacherRules,
-        clearTeacherMappingState
+        clearTeacherMappingState,
+        autoFillAllRecommendations,
+        assignCandidate
     };
 }

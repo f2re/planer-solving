@@ -8,6 +8,7 @@ const MONTH_OPTIONS = [
 ];
 
 export function createScheduleState(addToast, activeWorkspaceId) {
+    let schedule;
     const step = ref(1);
     const sessionId = ref(null);
     const analyzedFiles = ref([]);
@@ -127,6 +128,19 @@ export function createScheduleState(addToast, activeWorkspaceId) {
             blocking: false,
             action: { type: 'edit_layout', label: 'Проверить этот файл на месте' }
         }));
+        const rawIssues = report.issues || [];
+        if (rawIssues.length) {
+            return rawIssues.map(issue => {
+                let action = issue.action || (Array.isArray(issue.actions) && issue.actions[0] ? issue.actions[0] : null);
+                if (!action && (issue.scope === 'teacher' || issue.code === 'unknown_teacher_mapping')) {
+                    action = { type: 'open_teacher_mapping', label: 'Уточнить преподавателей' };
+                }
+                return {
+                    ...issue,
+                    action: action ? { file_id: currentFile.value?.file_id, subject: issue.subject || issue.target_subject, ...action } : null
+                };
+            });
+        }
         return [...technical, ...periodIssues];
     });
     const currentAutoRepairs = computed(() => currentValidation.value?.report?.auto_repairs || []);
@@ -443,6 +457,19 @@ export function createScheduleState(addToast, activeWorkspaceId) {
 
     const applyParserAction = async action => {
         if (!action) return;
+        if (action.type === 'open_teacher_mapping') {
+            const fileId = action.file_id || selectedFileId.value || currentFile.value?.file_id;
+            if (fileId && selectedFileId.value !== fileId) {
+                await selectFile(fileId);
+            }
+            const subject = action.subject || action.unknown_subjects?.[0] || '';
+            if (typeof openTeacherMapping === 'function') {
+                await openTeacherMapping({ file_id: fileId, subject, action });
+            } else if (typeof schedule?.openTeacherMapping === 'function') {
+                await schedule.openTeacherMapping({ file_id: fileId, subject, action });
+            }
+            return;
+        }
         if (action.type === 'calendar_policy') {
             setCalendarPolicy(action.value);
             addToast('Способ календаря выбран', action.label || 'Настройка применится при формировании.', 'success');
@@ -607,7 +634,7 @@ export function createScheduleState(addToast, activeWorkspaceId) {
         invalidateAll();
     };
 
-    return {
+    schedule = {
         step,
         canGoToStep,
         goToStep,
@@ -666,6 +693,8 @@ export function createScheduleState(addToast, activeWorkspaceId) {
         generate,
         fileStatus,
         cellClass,
+        openTeacherMapping: null,
         resetWorkflow
     };
+    return schedule;
 }

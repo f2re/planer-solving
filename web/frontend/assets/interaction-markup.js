@@ -123,6 +123,14 @@ export function installInteractionMarkup() {
               <span class="recovery-ready">Формирование разрешено</span>
             </div>
 
+            <div class="teacher-mapping-trigger-row" v-if="currentValidation?.report">
+              <button type="button" class="btn btn-secondary btn-small teacher-flow-btn" @click="openTeacherMapping({ file_id: currentFile?.file_id })">
+                👥 Преподаватели по дисциплинам
+                <span v-if="currentValidation.report.unknown_teacher_lessons" class="badge-count warning">({{ currentValidation.report.unknown_teacher_lessons }} не назначено)</span>
+                <span v-else-if="currentValidation.report.mapped_lessons" class="badge-count success">({{ currentValidation.report.mapped_lessons }} назначено)</span>
+              </button>
+            </div>
+
             <div v-if="currentAutoRepairs.length" class="repair-card">
               <div><b>Автоматически исправлено: {{ currentAutoRepairs.length }}</b><small>Результат проверки рассчитан по исправленной разметке.</small></div>
               <button type="button" class="btn btn-secondary btn-small" @click="applyRecoveredLayout">Показать исправленную разметку</button>

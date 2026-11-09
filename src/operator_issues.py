@@ -98,6 +98,38 @@ def _priority(category: str, severity: str) -> int:
     }.get(str(severity), 0)
 
 
+def _enrich_teacher_action(
+    action: Mapping[str, Any],
+    *,
+    unknown_subjects: Sequence[str],
+    teacher_candidates: Mapping[str, Any],
+) -> Dict[str, Any]:
+    a = dict(action)
+    if a.get("type") == "open_teacher_mapping":
+        if "unknown_subjects" not in a or not a.get("unknown_subjects"):
+            a["unknown_subjects"] = sorted(unknown_subjects)
+        if "subject" not in a or not a.get("subject"):
+            a["subject"] = a["unknown_subjects"][0] if len(a["unknown_subjects"]) == 1 else ""
+        if "candidates" not in a or not a.get("candidates"):
+            a["candidates"] = {
+                subj: teacher_candidates.get(subj, {})
+                for subj in a.get("unknown_subjects", [])
+            }
+        a["blocking"] = False
+    return a
+
+
+def _discipline_action(subj: str, teacher_candidates: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "open_teacher_mapping",
+        "label": f"Уточнить: {subj}",
+        "subject": subj,
+        "unknown_subjects": [subj],
+        "candidates": {subj: teacher_candidates.get(subj, {})},
+        "blocking": False,
+    }
+
+
 def _issue(
     *,
     code: str,
@@ -119,6 +151,16 @@ def _issue(
     normalized_priority = int(
         priority if priority is not None else _priority(normalized_category, severity)
     )
+    if scope == "teacher" or code == "unknown_teacher_mapping":
+        for a in normalized_actions:
+            if a.get("type") == "open_teacher_mapping":
+                if "unknown_subjects" not in a:
+                    a["unknown_subjects"] = []
+                if "subject" not in a:
+                    a["subject"] = a["unknown_subjects"][0] if len(a["unknown_subjects"]) == 1 else ""
+                if "candidates" not in a:
+                    a["candidates"] = {}
+                a["blocking"] = False
     return {
         "code": code,
         "scope": scope,
@@ -273,7 +315,19 @@ def build_operator_issues(report: Mapping[str, Any]) -> List[Dict[str, Any]]:
 
     result: List[Dict[str, Any]] = []
     used_messages: set[str] = set()
-    report_actions = _actions(report.get("actions") or [])
+    unknown_subjects = list(report.get("unknown_subjects") or [])
+    teacher_candidates = report.get("teacher_candidates") or {}
+    candidates_map = {subj: teacher_candidates.get(subj, {}) for subj in unknown_subjects}
+    unknown_count = int(report.get("unknown_teacher_lessons") or 0)
+
+    report_actions = [
+        _enrich_teacher_action(
+            action,
+            unknown_subjects=unknown_subjects,
+            teacher_candidates=teacher_candidates,
+        )
+        for action in _actions(report.get("actions") or [])
+    ]
 
     for raw in report.get("assignment_issues") or []:
         if isinstance(raw, Mapping) and raw.get("message"):
@@ -383,12 +437,41 @@ def build_operator_issues(report: Mapping[str, Any]) -> List[Dict[str, Any]]:
             if category == "calendar" or "предварительная коллизия" in message.casefold()
             else "attention"
         )
+        issue_code = (
+            "unknown_teacher_mapping"
+            if scope == "teacher" and category != "conflict"
+            else _code(category, message)
+        )
+        if scope == "teacher" or issue_code == "unknown_teacher_mapping":
+            teacher_actions = [
+                dict(a) for a in actions if a.get("type") == "open_teacher_mapping"
+            ]
+            if not teacher_actions:
+                label = (
+                    f"Уточнить преподавателей ({unknown_count} не назначено)"
+                    if unknown_count > 0
+                    else "Уточнить преподавателей"
+                )
+                teacher_actions.append({
+                    "type": "open_teacher_mapping",
+                    "label": label,
+                    "unknown_subjects": sorted(unknown_subjects),
+                    "subject": unknown_subjects[0] if len(unknown_subjects) == 1 else "",
+                    "candidates": candidates_map,
+                    "blocking": False,
+                })
+            for subj in unknown_subjects:
+                disc_act = _discipline_action(subj, teacher_candidates)
+                if not any(
+                    a.get("subject") == subj and a.get("label") == disc_act["label"]
+                    for a in teacher_actions
+                ):
+                    teacher_actions.append(disc_act)
+            actions = teacher_actions
+        else:
+            actions = actions[:2]
         result.append(_issue(
-            code=(
-                "unknown_teacher_mapping"
-                if scope == "teacher" and category != "conflict"
-                else _code(category, message)
-            ),
+            code=issue_code,
             scope=scope,
             category=category,
             severity=severity,
@@ -396,7 +479,7 @@ def build_operator_issues(report: Mapping[str, Any]) -> List[Dict[str, Any]]:
             default_decision=default_decision,
             impact=impact,
             resolution="auto" if severity == "info" else "default_with_override",
-            actions=actions[:2],
+            actions=actions,
             source="parser",
         ))
         used_messages.add(message)
@@ -411,16 +494,69 @@ def build_operator_issues(report: Mapping[str, Any]) -> List[Dict[str, Any]]:
         if action_type in represented_actions:
             continue
         label = str(action.get("label") or "Уточнить решение")
+        scope = "teacher" if action_type == "open_teacher_mapping" else "file"
+        action_list = [action]
+        if scope == "teacher":
+            for subj in unknown_subjects:
+                disc_act = _discipline_action(subj, teacher_candidates)
+                if not any(
+                    a.get("subject") == subj and a.get("label") == disc_act["label"]
+                    for a in action_list
+                ):
+                    action_list.append(disc_act)
         result.append(_issue(
             code=f"action_{action_type}",
-            scope="teacher" if action_type == "open_teacher_mapping" else "file",
+            scope=scope,
             severity="attention",
             message=label,
             default_decision="Система уже использует безопасный вариант; это действие позволяет его изменить.",
             impact="Без ручного действия результат всё равно формируется и содержит принятое решение.",
             resolution="default_with_override",
-            actions=[action],
+            actions=action_list,
             source="operator_action",
+        ))
+
+    if (unknown_count > 0 or unknown_subjects) and not any(
+        i.get("code") == "unknown_teacher_mapping" or (i.get("scope") == "teacher" and i.get("category") != "conflict")
+        for i in result
+    ):
+        label = (
+            f"Уточнить преподавателей ({unknown_count} не назначено)"
+            if unknown_count > 0
+            else "Уточнить преподавателей"
+        )
+        actions = [{
+            "type": "open_teacher_mapping",
+            "label": label,
+            "unknown_subjects": sorted(unknown_subjects),
+            "subject": unknown_subjects[0] if len(unknown_subjects) == 1 else "",
+            "candidates": candidates_map,
+            "blocking": False,
+        }]
+        for subj in unknown_subjects:
+            disc_act = _discipline_action(subj, teacher_candidates)
+            if not any(
+                a.get("subject") == subj and a.get("label") == disc_act["label"]
+                for a in actions
+            ):
+                actions.append(disc_act)
+        message = (
+            f"Для {unknown_count} занятий преподаватель не определён; они попадут в раздел «Не назначен»."
+            if unknown_count > 0
+            else "Для некоторых дисциплин преподаватель не определён."
+        )
+        default_decision, impact = _warning_decision(message, "teacher")
+        result.append(_issue(
+            code="unknown_teacher_mapping",
+            scope="teacher",
+            category="teacher",
+            severity="attention",
+            message=message,
+            default_decision=default_decision,
+            impact=impact,
+            resolution="default_with_override",
+            actions=actions,
+            source="parser",
         ))
 
     deduplicated: List[Dict[str, Any]] = []
