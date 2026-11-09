@@ -60,12 +60,27 @@ def _teacher_aliases(teachers: Sequence[Mapping[str, Any]]) -> TeacherLookup:
 
 
 def _canonical_teacher(value: Any, aliases: Mapping[str, str]) -> str:
-    raw = str(value or "").strip()
-    if not raw:
+    if value is None:
         return ""
-    if isinstance(aliases, TeacherLookup):
-        return aliases.get(raw, "")
-    return aliases.get(_teacher_key(raw), "") or aliases.get(raw, "")
+
+    if hasattr(aliases, "resolve_all"):
+        resolved = aliases.resolve_all(value)
+        return ", ".join(resolved)
+
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        items = [p.strip() for p in re.split(r"(?:[\n,;/\\\\]+|\s+[иИ]\s+)", raw) if p.strip()]
+
+    resolved = []
+    for item in items:
+        canonical = aliases.get(_teacher_key(item), "") or aliases.get(item, "")
+        if canonical and canonical not in resolved:
+            resolved.append(canonical)
+    return ", ".join(resolved)
 
 
 def normalize_rule(
@@ -80,9 +95,9 @@ def normalize_rule(
     return {
         "subject_key": key,
         "subject": subject,
-        "lecturer": _canonical_teacher(raw.get("lecturer"), aliases),
-        "practice": _canonical_teacher(raw.get("practice"), aliases),
-        "reserve": _canonical_teacher(raw.get("reserve"), aliases),
+        "lecturer": _canonical_teacher(raw.get("lecturer") or raw.get("lecturer_name"), aliases),
+        "practice": _canonical_teacher(raw.get("practice") or raw.get("practice_name"), aliases),
+        "reserve": _canonical_teacher(raw.get("reserve") or raw.get("reserve_name"), aliases),
     }
 
 
@@ -174,11 +189,24 @@ def encoded_preference_overrides(
 
     result: Dict[str, str] = {}
     for raw in rules:
-        subject = str(raw.get("subject") or "").strip()
+        subject = str(raw.get("subject") or raw.get("subject_name") or "").strip()
         if not subject:
             continue
-        for role, field in (("lecturer", "lecturer"), ("other", "practice"), ("reserve", "reserve")):
-            teacher = str(raw.get(field) or "").strip()
+        for role, fields in (
+            ("lecturer", ("lecturer", "lecturer_name")),
+            ("other", ("practice", "practice_name")),
+            ("reserve", ("reserve", "reserve_name")),
+        ):
+            teacher = ""
+            for field in fields:
+                val = raw.get(field)
+                if val is not None:
+                    if isinstance(val, (list, tuple)):
+                        teacher = ", ".join(str(x).strip() for x in val if str(x).strip())
+                    else:
+                        teacher = str(val).strip()
+                    if teacher:
+                        break
             if teacher:
                 result[f"@{role}|{subject}"] = teacher
     return result

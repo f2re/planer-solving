@@ -55,11 +55,13 @@ def _slot(lesson: Any) -> Tuple[int, str, int]:
 
 def _unit_signature(lesson: Any) -> Tuple[str, str, str]:
     """Parallel groups form one unit only for the same actual lesson."""
-
+    role = _role(getattr(lesson, "lesson_type_code", ""))
+    room_k = _key(getattr(lesson, "room", ""))
+    group_k = _key(getattr(lesson, "group", "")) if role != "lecturer" and not room_k else ""
     return (
         _key(getattr(lesson, "subject", "")),
         _lesson_type(getattr(lesson, "lesson_type_code", "")),
-        _key(getattr(lesson, "room", "")),
+        room_k or group_k,
     )
 
 
@@ -67,7 +69,19 @@ def _unique(values: Iterable[Any], valid: Mapping[str, str]) -> List[str]:
     result: List[str] = []
     for value in values:
         raw = _text(value)
-        canonical = valid.get(raw.casefold().replace("ё", "е"))
+        if hasattr(valid, "resolve_all"):
+            resolved_list = valid.resolve_all(raw)
+            for canonical in resolved_list:
+                if canonical and canonical not in result:
+                    result.append(canonical)
+            if resolved_list:
+                continue
+        canonical = (
+            valid.get(raw)
+            or valid.get(raw.casefold())
+            or valid.get(raw.casefold().replace("ё", "е"))
+            or ""
+        )
         if canonical and canonical not in result:
             result.append(canonical)
     return result
@@ -164,10 +178,18 @@ def _build_units(
         ]
 
         current_raw = _text(getattr(sample, "teacher", ""))
-        current = valid_teachers.get(
-            current_raw.casefold().replace("ё", "е"),
-            "",
-        )
+        current = ""
+        if hasattr(valid_teachers, "resolve_all"):
+            resolved_current = valid_teachers.resolve_all(current_raw)
+            if resolved_current:
+                current = resolved_current[0]
+        if not current:
+            current = (
+                valid_teachers.get(current_raw)
+                or valid_teachers.get(current_raw.casefold())
+                or valid_teachers.get(current_raw.casefold().replace("ё", "е"))
+                or ""
+            )
         if (
             current
             and current not in primary
@@ -182,10 +204,29 @@ def _build_units(
                 primary.append(current)
 
         manual_raw = _text(manual_overrides.get(subject_key))
-        manual = valid_teachers.get(
-            manual_raw.casefold().replace("ё", "е"),
-            "",
-        )
+        manual_list: List[str] = []
+        if hasattr(valid_teachers, "resolve_all"):
+            manual_list = valid_teachers.resolve_all(manual_raw)
+        if not manual_list and manual_raw:
+            parts = [p.strip() for p in re.split(r"[,;/\n\\]|\s+и\s+", manual_raw) if p.strip()]
+            for p in parts:
+                m = (
+                    valid_teachers.get(p)
+                    or valid_teachers.get(p.casefold())
+                    or valid_teachers.get(p.casefold().replace("ё", "е"))
+                    or ""
+                )
+                if m and m not in manual_list:
+                    manual_list.append(m)
+        if len(manual_list) == 1:
+            manual = manual_list[0]
+        else:
+            manual = ""
+            if manual_list:
+                for m in reversed(manual_list):
+                    if m in primary:
+                        primary.remove(m)
+                    primary.insert(0, m)
 
         units.append(
             AssignmentUnit(
@@ -243,12 +284,12 @@ def _candidate_cost(
         preference_penalty = 25
     else:
         preference_penalty = 50
-    current_penalty = 0 if teacher == unit.current_teacher else 8
+    current_penalty = 0 if teacher == unit.current_teacher else 1
     return (
         preference_penalty,
-        current_penalty,
         int(subject_load[(teacher, unit.subject_key)]),
         int(total_load[teacher]),
+        current_penalty,
         teacher.casefold(),
     )
 

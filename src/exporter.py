@@ -51,11 +51,44 @@ def _unique_sheet_title(workbook: openpyxl.Workbook, desired: str) -> str:
     return f"Лист {len(workbook.worksheets) + 1}"[:31]
 
 
+def _get_grid_item(grid: Mapping[Any, Any], key: Tuple[Any, ...]) -> Any:
+    item = grid.get(key)
+    if item is not None:
+        return item
+    teacher_name = key[0]
+    if isinstance(teacher_name, str):
+        variants = [
+            teacher_name.replace("ё", "е").replace("Ё", "Е"),
+            teacher_name.replace("е", "ё").replace("Е", "Ё"),
+        ]
+        for v in variants:
+            if v != teacher_name:
+                alt_key = (v,) + key[1:]
+                item = grid.get(alt_key)
+                if item is not None:
+                    return item
+        norm_t = teacher_name.casefold().replace("ё", "е")
+        for g_key, g_val in grid.items():
+            if (
+                isinstance(g_key, tuple)
+                and len(g_key) == len(key)
+                and g_key[1:] == key[1:]
+                and isinstance(g_key[0], str)
+                and g_key[0].casefold().replace("ё", "е") == norm_t
+            ):
+                return g_val
+    return None
+
+
 def _teacher_sheet_title(item: Mapping[str, Any]) -> str:
-    parts = _teacher_full_name(item).split()
+    full = _teacher_value(item, "full_name")
+    short = _teacher_value(item, "short_name")
+    parts = (full or short or UNASSIGNED_TEACHER).split()
     if len(parts) >= 3:
         return f"{parts[0]} {parts[1][0]}.{parts[2][0]}."
     if len(parts) == 2:
+        if "." in parts[1]:
+            return f"{parts[0]} {parts[1]}"
         return f"{parts[0]} {parts[1][0]}."
     return parts[0] if parts else UNASSIGNED_TEACHER
 
@@ -178,7 +211,7 @@ def _fill_summary_rows(
             pair_cell.alignment = header_alignment
             for date_index, raw in enumerate(dates):
                 month, day = (list(raw) + ["", ""])[:2]
-                item = grid.get((teacher_name, pair_number, month, day))
+                item = _get_grid_item(grid, (teacher_name, pair_number, month, day))
                 cell = worksheet.cell(row=current_row + pair_number - 1, column=6 + date_index)
                 if not item:
                     continue
@@ -308,7 +341,7 @@ def _fill_teacher_vertical(
             )
 
             for index, week in enumerate(weeks):
-                item = grid.get((teacher_name, week, day_short, pair_number))
+                item = _get_grid_item(grid, (teacher_name, week, day_short, pair_number))
                 if not item:
                     continue
                 cells = [

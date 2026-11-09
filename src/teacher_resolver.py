@@ -75,19 +75,19 @@ def parse_name_identity(value: Any) -> Tuple[str, str, str]:
     return surname, first, middle
 
 
-def format_teacher_initials(value: Any) -> str:
-    raw = normalize_text(value)
-    if not raw:
+def _format_single_teacher_initials(raw: str) -> str:
+    raw_str = re.sub(r"\s+", " ", str(raw or "").replace("\xa0", " ")).strip()
+    if not raw_str:
         return ""
-    surname, first, middle = parse_name_identity(raw)
+    surname, first, middle = parse_name_identity(raw_str)
     if not surname:
-        return raw
+        return raw_str
 
-    tokens = [t for t in re.sub(r"[.,;:()]+", " ", raw).strip().split() if t]
-    orig_surname = surname.capitalize()
-    for t in tokens:
+    orig_tokens = [t for t in re.sub(r"[.,;:()]+", " ", raw_str).strip().split() if t]
+    orig_surname = "-".join(part.capitalize() for part in surname.split("-"))
+    for t in orig_tokens:
         if t.lower().replace("ё", "е") == surname:
-            orig_surname = t
+            orig_surname = "-".join(part.capitalize() for part in t.split("-"))
             break
 
     inits = []
@@ -99,6 +99,24 @@ def format_teacher_initials(value: Any) -> str:
     return f"{orig_surname} {init_str}".strip() if init_str else orig_surname
 
 
+def format_teacher_initials(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        formatted = [_format_single_teacher_initials(str(item)) for item in value if str(item).strip()]
+        return ", ".join(formatted)
+
+    raw_str = str(value or "").strip()
+    if not raw_str:
+        return ""
+
+    parts = [p.strip() for p in re.split(r"(?:[\n,;/\\\\]+|\s+[иИ]\s+)", raw_str) if p.strip()]
+    if not parts:
+        return ""
+    formatted = [_format_single_teacher_initials(part) for part in parts]
+    return ", ".join(formatted)
+
+
 class TeacherLookup(Mapping[str, str]):
     def __init__(self, teachers_config: Sequence[Mapping[str, Any]] | None):
         self._exact: Dict[str, str] = {}
@@ -107,8 +125,8 @@ class TeacherLookup(Mapping[str, str]):
         for teacher in teachers_config or []:
             if not isinstance(teacher, Mapping):
                 continue
-            short = normalize_text(teacher.get("short_name") or teacher.get("full_name"))
-            full = normalize_text(teacher.get("full_name") or short)
+            short = str(teacher.get("short_name") or teacher.get("full_name") or "").strip()
+            full = str(teacher.get("full_name") or short or "").strip()
             if not short:
                 continue
             self._all_short.add(short)
@@ -116,6 +134,8 @@ class TeacherLookup(Mapping[str, str]):
                 if alias:
                     self._exact[alias.casefold().replace("ё", "е")] = short
                     self._exact[TeacherResolver._teacher_key(alias)] = short
+                    self._exact[alias.casefold()] = short
+                    self._exact[alias.strip()] = short
             surname, first, middle = parse_name_identity(full or short)
             if surname:
                 self._by_surname.setdefault(surname, []).append({
@@ -124,11 +144,16 @@ class TeacherLookup(Mapping[str, str]):
                     "middle": middle,
                 })
 
-    def get(self, key: Any, default: Any = "") -> Any:
-        raw = normalize_text(key)
+    def _resolve_single(self, key: Any) -> str:
+        raw = str(key or "").strip()
         if not raw:
-            return default
-        normalized = raw.casefold().replace("ё", "е")
+            return ""
+        if raw in self._exact:
+            return self._exact[raw]
+        raw_case = raw.casefold()
+        if raw_case in self._exact:
+            return self._exact[raw_case]
+        normalized = raw_case.replace("ё", "е")
         if normalized in self._exact:
             return self._exact[normalized]
         teacher_k = TeacherResolver._teacher_key(raw)
@@ -137,7 +162,7 @@ class TeacherLookup(Mapping[str, str]):
 
         surname, first, middle = parse_name_identity(raw)
         if not surname:
-            return default
+            return ""
         variants = self._by_surname.get(surname, [])
         if not variants:
             parts = [p for p in re.sub(r"[.,;:()]+", " ", normalized).split() if p]
@@ -147,7 +172,7 @@ class TeacherLookup(Mapping[str, str]):
                 middle = ""
                 variants = self._by_surname.get(surname, [])
         if not variants:
-            return default
+            return ""
 
         if first and middle:
             matches = [
@@ -156,16 +181,66 @@ class TeacherLookup(Mapping[str, str]):
             ]
             if len(matches) == 1:
                 return matches[0]
-            return default
+            return ""
         if first and not middle:
             matches = [item["short"] for item in variants if item["first"] == first]
             if len(matches) == 1:
                 return matches[0]
-            return default
+            return ""
         if not first:
             if len(variants) == 1:
                 return variants[0]["short"]
+            return ""
+        return ""
+
+    def resolve_all(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+
+        if isinstance(value, (list, tuple, set)):
+            results: List[str] = []
+            for item in value:
+                for teacher in self.resolve_all(item):
+                    if teacher not in results:
+                        results.append(teacher)
+            return results
+
+        raw_str = str(value or "").strip()
+        if not raw_str:
+            return []
+
+        delimiter_pattern = re.compile(r"(?:[\n,;/\\\\]+|\s+[иИ]\s+)")
+        parts = [p.strip() for p in delimiter_pattern.split(raw_str) if p.strip()]
+        if len(parts) > 1:
+            results: List[str] = []
+            for part in parts:
+                resolved = self._resolve_single(part)
+                if resolved and resolved not in results:
+                    results.append(resolved)
+            return results
+
+        single = self._resolve_single(raw_str)
+        if single:
+            return [single]
+        return []
+
+    def get(self, key: Any, default: Any = "") -> Any:
+        if isinstance(key, (list, tuple, set)):
+            teachers = self.resolve_all(key)
+            return ", ".join(teachers) if teachers else default
+        raw_str = str(key or "").strip()
+        if not raw_str:
             return default
+        delimiter_pattern = re.compile(r"(?:[\n,;/\\\\]+|\s+[иИ]\s+)")
+        if delimiter_pattern.search(raw_str):
+            teachers = self.resolve_all(raw_str)
+            return ", ".join(teachers) if teachers else default
+        single = self._resolve_single(raw_str)
+        if single:
+            return single
+        teachers = self.resolve_all(raw_str)
+        if teachers:
+            return ", ".join(teachers)
         return default
 
     def __getitem__(self, key: Any) -> str:
@@ -278,10 +353,12 @@ class TeacherResolver:
 
     def _index_teachers(self) -> None:
         for teacher in self.teachers_config:
-            if not isinstance(teacher, dict):
+            if not isinstance(teacher, Mapping):
                 continue
-            full = normalize_text(teacher.get("full_name"))
-            short = normalize_text(teacher.get("short_name")) or full
+            full = str(teacher.get("full_name") or "").strip()
+            short = str(teacher.get("short_name") or "").strip() or full
+            if not full:
+                full = short
             source = full or short
             surname, first, middle = self._name_identity(source)
             if not surname or not short:
@@ -290,6 +367,15 @@ class TeacherResolver:
             for alias in (short, full):
                 key = self._teacher_key(alias)
                 self._append_unique(self.teacher_aliases, key, short)
+                alias_norm = alias.casefold().replace("ё", "е")
+                if alias_norm != key:
+                    self._append_unique(self.teacher_aliases, alias_norm, short)
+                alias_case = alias.casefold()
+                if alias_case != key and alias_case != alias_norm:
+                    self._append_unique(self.teacher_aliases, alias_case, short)
+                alias_strip = alias.strip()
+                if alias_strip != key and alias_strip != alias_norm and alias_strip != alias_case:
+                    self._append_unique(self.teacher_aliases, alias_strip, short)
                 identity_key = self._identity_key(alias)
                 self._append_unique(self.teacher_identities, identity_key, short)
             self._append_unique(self.teacher_identities, identity, short)
@@ -321,6 +407,10 @@ class TeacherResolver:
         if not raw:
             return ""
         exact = self.teacher_aliases.get(self._teacher_key(raw), [])
+        if not exact:
+            exact = self.teacher_aliases.get(raw.casefold().replace("ё", "е"), [])
+        if not exact:
+            exact = self.teacher_aliases.get(raw.casefold(), [])
         if len(exact) == 1:
             return exact[0]
         if len(exact) > 1:
@@ -407,6 +497,57 @@ class TeacherResolver:
             prepend=True,
         )
 
+    def _resolve_teacher_list(self, value: Any, *, warn: bool = False) -> List[str]:
+        if value is None:
+            return []
+
+        if isinstance(value, (list, tuple, set)):
+            results: List[str] = []
+            for item in value:
+                for teacher in self._resolve_teacher_list(item, warn=warn):
+                    if teacher not in results:
+                        results.append(teacher)
+            return results
+
+        raw_str = str(value or "").strip()
+        if not raw_str:
+            return []
+
+        delimiter_pattern = re.compile(r"(?:[\n,;/\\\\]+|\s+[иИ]\s+)")
+        parts = [p.strip() for p in delimiter_pattern.split(raw_str) if p.strip()]
+
+        results: List[str] = []
+        if len(parts) > 1:
+            for part in parts:
+                alias = self._resolve_teacher_alias(part, warn=warn)
+                if alias:
+                    if alias not in results:
+                        results.append(alias)
+                    continue
+
+                extracted = self._extract_teachers(part)
+                if extracted:
+                    for t in extracted:
+                        if t not in results:
+                            results.append(t)
+        else:
+            single = self._resolve_teacher_alias(raw_str, warn=warn)
+            if single:
+                return [single]
+            extracted = self._extract_teachers(raw_str)
+            if extracted:
+                for t in extracted:
+                    if t not in results:
+                        results.append(t)
+
+        if not results:
+            extracted = self._extract_teachers(raw_str)
+            for t in extracted:
+                if t not in results:
+                    results.append(t)
+
+        return results
+
     def set_teacher_overrides(self, values: Mapping[str, Any] | None) -> Dict[str, str]:
         """Apply hard assignments and role preferences from one compatible map.
 
@@ -420,9 +561,23 @@ class TeacherResolver:
         for raw_subject, raw_teacher in dict(values or {}).items():
             role, preference_subject = self._preference_key(raw_subject)
             if role:
-                teacher = self._resolve_teacher_alias(raw_teacher, warn=True)
-                if teacher:
-                    self._register_preference(role, preference_subject, teacher)
+                teachers = self._resolve_teacher_list(raw_teacher, warn=True)
+                if teachers:
+                    key = self._subject_key(preference_subject)
+                    if key:
+                        pref = self.teacher_assignment_preferences.setdefault(
+                            key, {"lecturer": [], "other": [], "reserve": []}
+                        )
+                        for t in teachers:
+                            if t not in pref[role]:
+                                pref[role].append(t)
+                    self._register_subject_candidates(
+                        preference_subject,
+                        lecturers=teachers if role == "lecturer" else (),
+                        others=teachers if role == "other" else (),
+                        reserves=teachers if role == "reserve" else (),
+                        prepend=True,
+                    )
                 elif normalize_text(raw_teacher):
                     self.warnings.append(
                         f"Настройка для «{preference_subject}» пропущена: "
@@ -433,15 +588,29 @@ class TeacherResolver:
             subject_key = self._subject_key(raw_subject)
             if not subject_key or not normalize_text(raw_teacher):
                 continue
-            teacher = self._resolve_teacher_alias(raw_teacher, warn=True)
-            if not teacher:
-                if not self.teachers_by_surname.get(self._name_identity(raw_teacher)[0]):
+            teachers = self._resolve_teacher_list(raw_teacher, warn=True)
+            if not teachers:
+                raw_text = str(raw_teacher or "")
+                tokens = [t.strip() for t in re.split(r"(?:[\n,;/\\\\]|\s+[иИ]\s+)", raw_text) if t.strip()]
+                has_known_surname = False
+                for tok in tokens:
+                    s, _, _ = self._name_identity(tok)
+                    if s and self.teachers_by_surname.get(s):
+                        has_known_surname = True
+                        break
+                if not has_known_surname:
                     self.warnings.append(
                         f"Ручное назначение для «{normalize_text(raw_subject)}» пропущено: "
                         f"преподаватель «{normalize_text(raw_teacher)}» не найден в пространстве."
                     )
                 continue
-            normalized[subject_key] = teacher
+            normalized[subject_key] = ", ".join(teachers)
+            self._register_subject_candidates(
+                raw_subject,
+                lecturers=teachers,
+                others=teachers,
+                prepend=True,
+            )
         self.teacher_overrides = normalized
         return dict(normalized)
 
@@ -450,49 +619,80 @@ class TeacherResolver:
         if not text:
             return []
         searchable = text.lower().replace("ё", "е")
-        found: List[str] = []
+        found_with_pos: List[Tuple[int, str]] = []
         ambiguous: List[Tuple[str, List[str]]] = []
         for surname, variants in self.teachers_by_surname.items():
             if not re.search(rf"(?<![\w-]){re.escape(surname)}(?![\w-])", searchable, re.I):
                 continue
-            precise = [
-                item["short"]
-                for item in variants
-                if any(pattern.search(text) for pattern in item["patterns"])
-            ]
-            precise = list(dict.fromkeys(precise))
+
+            precise_items: List[Tuple[int, str]] = []
+            for item in variants:
+                best_p = -1
+                for pattern in item["patterns"]:
+                    m = pattern.search(text)
+                    if m and (best_p == -1 or m.start() < best_p):
+                        best_p = m.start()
+                if best_p != -1:
+                    precise_items.append((best_p, item["short"]))
+
+            precise_dedup: Dict[str, int] = {}
+            for pos, short in sorted(precise_items, key=lambda x: x[0]):
+                if short not in precise_dedup:
+                    precise_dedup[short] = pos
+            precise = list(precise_dedup.keys())
+
             if precise:
                 if len(precise) == 1:
-                    found.extend(precise)
+                    found_with_pos.append((precise_dedup[precise[0]], precise[0]))
                 else:
                     occurrences = len(re.findall(rf"(?<![\w-]){re.escape(surname)}(?![\w-])", searchable, re.I))
                     if occurrences >= len(precise):
-                        found.extend(precise)
+                        for short in precise:
+                            found_with_pos.append((precise_dedup[short], short))
                     else:
                         ambiguous.append((surname, precise))
                 continue
 
-            single_matches = [
-                item["short"]
-                for item in variants
-                if any(p.search(text) for p in item.get("single_patterns", []))
-            ]
-            single_matches = list(dict.fromkeys(single_matches))
+            single_items: List[Tuple[int, str]] = []
+            for item in variants:
+                best_p = -1
+                for p in item.get("single_patterns", []):
+                    m = p.search(text)
+                    if m and (best_p == -1 or m.start() < best_p):
+                        best_p = m.start()
+                if best_p != -1:
+                    single_items.append((best_p, item["short"]))
+
+            single_dedup: Dict[str, int] = {}
+            for pos, short in sorted(single_items, key=lambda x: x[0]):
+                if short not in single_dedup:
+                    single_dedup[short] = pos
+            single_matches = list(single_dedup.keys())
+
             if single_matches:
                 if len(single_matches) == 1:
-                    found.extend(single_matches)
+                    found_with_pos.append((single_dedup[single_matches[0]], single_matches[0]))
                 else:
-                    ambiguous.append((surname, single_matches))
+                    occurrences = len(re.findall(rf"(?<![\w-]){re.escape(surname)}(?![\w-])", searchable, re.I))
+                    if occurrences >= len(single_matches):
+                        for short in single_matches:
+                            found_with_pos.append((single_dedup[short], short))
+                    else:
+                        ambiguous.append((surname, single_matches))
                 continue
 
             if len(variants) == 1:
-                found.append(variants[0]["short"])
+                m = re.search(rf"(?<![\w-]){re.escape(surname)}(?![\w-])", searchable, re.I)
+                pos = m.start() if m else len(text)
+                found_with_pos.append((pos, variants[0]["short"]))
             else:
                 ambiguous.append((surname, [item["short"] for item in variants]))
 
         for surname, variants in ambiguous:
             self._ambiguous(surname, variants)
-        return list(dict.fromkeys(found))
+
+        found_with_pos.sort(key=lambda x: x[0])
+        return list(dict.fromkeys(t for _, t in found_with_pos))
 
     @staticmethod
     def _put_candidate(bucket: List[str], teacher: str, *, prepend: bool) -> None:
@@ -527,7 +727,8 @@ class TeacherResolver:
             ("other", others),
             ("reserve", reserves),
         ):
-            for raw in values:
+            ordered = list(reversed(values)) if prepend else list(values)
+            for raw in ordered:
                 teacher = self._resolve_teacher_alias(raw) or normalize_text(raw)
                 if not teacher:
                     continue
@@ -578,17 +779,31 @@ class TeacherResolver:
 
         manual = self.teacher_overrides.get(self._subject_key(subject))
         if manual:
-            key = (week, day, pair, manual)
-            occupied = self.occupancy.get(key)
-            if occupied and occupied != subject:
+            manual_teachers = [t.strip() for t in manual.split(",") if t.strip()]
+            if manual_teachers:
+                if role == "lecturer":
+                    for teacher in manual_teachers:
+                        if self.occupancy.get((week, day, pair, teacher)) == subject:
+                            return teacher
+                counter_key = (subject, lesson_type)
+                start = self.subject_counters.get(counter_key, 0)
+                for shift in range(len(manual_teachers)):
+                    index = (start + shift) % len(manual_teachers)
+                    teacher = manual_teachers[index]
+                    key = (week, day, pair, teacher)
+                    if key not in self.occupancy:
+                        self.occupancy[key] = subject
+                        self.subject_counters[counter_key] = (index + 1) % len(manual_teachers)
+                        return teacher
+                teacher = manual_teachers[start % len(manual_teachers)]
+                occupied = self.occupancy.get((week, day, pair, teacher), "другая дисциплина")
+                self.subject_counters[counter_key] = (start + 1) % len(manual_teachers)
                 self.warnings.append(
-                    f"Ручное назначение: {manual} уже занят на {occupied} "
+                    f"Ручное назначение: {teacher} уже занят на {occupied} "
                     f"(неделя {week}, {day}, {pair} пара); коллизия будет "
                     "перепроверена общим графом назначений."
                 )
-            else:
-                self.occupancy[key] = subject
-            return manual
+                return teacher
 
         entry = self.teacher_candidate_catalog.get(self._subject_key(subject), {})
         configured = entry.get(role, [])
@@ -600,9 +815,10 @@ class TeacherResolver:
         ))
         if not teachers:
             return "Unknown"
-        for teacher in teachers:
-            if self.occupancy.get((week, day, pair, teacher)) == subject:
-                return teacher
+        if role == "lecturer":
+            for teacher in teachers:
+                if self.occupancy.get((week, day, pair, teacher)) == subject:
+                    return teacher
         counter_key = (subject, lesson_type)
         start = self.subject_counters.get(counter_key, 0)
         for shift in range(len(teachers)):

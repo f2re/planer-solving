@@ -46,6 +46,33 @@ def _configured_weeks(start_date: datetime, end_date: datetime) -> List[int]:
     return weeks
 
 
+def _get_grid_lessons(
+    schedule_grid: Dict[tuple[int, str, int, int], List[Lesson]],
+    week_num: int,
+    teacher: str,
+    day_index: int,
+    pair_index: int,
+) -> List[Lesson]:
+    direct = schedule_grid.get((week_num, teacher, day_index, pair_index))
+    if direct:
+        return direct
+    variants = [
+        teacher.replace("ё", "е").replace("Ё", "Е"),
+        teacher.replace("е", "ё").replace("Е", "Ё"),
+    ]
+    for v in variants:
+        if v != teacher:
+            alt = schedule_grid.get((week_num, v, day_index, pair_index))
+            if alt:
+                return alt
+    norm_target = teacher.casefold().replace("ё", "е")
+    for (w, t, d, p), l_list in schedule_grid.items():
+        if w == week_num and d == day_index and p == pair_index:
+            if t.casefold().replace("ё", "е") == norm_target:
+                return l_list
+    return []
+
+
 def generate_weekly_semester_schedule(
     teachers_config: List[Dict[str, Any]],
     lessons: List[Lesson],
@@ -151,9 +178,12 @@ def generate_weekly_semester_schedule(
 
                 for day_index in range(6):
                     column = 5 + day_index
-                    slot_lessons = schedule_grid.get(
-                        (week_num, teacher_short, day_index, pair_index),
-                        [],
+                    slot_lessons = _get_grid_lessons(
+                        schedule_grid,
+                        week_num,
+                        teacher_short,
+                        day_index,
+                        pair_index,
                     )
                     if not slot_lessons:
                         continue

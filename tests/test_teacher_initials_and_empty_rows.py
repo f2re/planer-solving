@@ -381,3 +381,123 @@ def test_sqlite_workspace_store_import_teachers_ignores_empty_records(tmp_path: 
     assert len(teachers) == 2
     short_names = {t["short_name"] for t in teachers}
     assert short_names == {"Иванов И.И.", "Петров П.П."}
+
+
+def test_format_teacher_initials_multiple_teachers():
+    assert format_teacher_initials("Иванов Иван Иванович, Петров Петр Петрович") == "Иванов И.И., Петров П.П."
+    assert format_teacher_initials("Иванов И.И.; Петров П.П.") == "Иванов И.И., Петров П.П."
+    assert format_teacher_initials("Иванов И.И. / Петров П.П.") == "Иванов И.И., Петров П.П."
+    assert format_teacher_initials("Иванов И.И.\nПетров П.П.") == "Иванов И.И., Петров П.П."
+    assert format_teacher_initials("Иванов И.И. и Петров П.П.") == "Иванов И.И., Петров П.П."
+    assert format_teacher_initials(["Иванов Иван Иванович", "Петров Пётр Петрович"]) == "Иванов И.И., Петров П.П."
+
+
+def test_teacher_lookup_resolve_all_and_get():
+    teachers = [
+        {"short_name": "Иванов И.И.", "full_name": "Иванов Иван Иванович"},
+        {"short_name": "Петров П.П.", "full_name": "Петров Пётр Петрович"},
+        {"short_name": "Сидоров С.С.", "full_name": "Сидоров Сергей Сергеевич"},
+    ]
+    lookup = TeacherLookup(teachers)
+
+    # Single match
+    assert lookup.resolve_all("Иванов Иван Иванович") == ["Иванов И.И."]
+    assert lookup.get("Иванов Иван Иванович") == "Иванов И.И."
+
+    # Delimiters in string
+    assert lookup.resolve_all("Иванов И.И., Петров П.П.") == ["Иванов И.И.", "Петров П.П."]
+    assert lookup.get("Иванов И.И., Петров П.П.") == "Иванов И.И., Петров П.П."
+    assert lookup.resolve_all("Иванов И.И.; Петров П.П. / Сидоров С.С.") == [
+        "Иванов И.И.", "Петров П.П.", "Сидоров С.С."
+    ]
+    assert lookup.resolve_all("Иванов И.И. и Петров П.П.") == ["Иванов И.И.", "Петров П.П."]
+    assert lookup.resolve_all("Иванов И.И.\nПетров П.П.") == ["Иванов И.И.", "Петров П.П."]
+    assert lookup.resolve_all(r"Иванов И.И.\Петров П.П.") == ["Иванов И.И.", "Петров П.П."]
+
+    # List / tuple
+    assert lookup.resolve_all(["Иванов И.И.", "Петров П.П."]) == ["Иванов И.И.", "Петров П.П."]
+    assert lookup.get(["Иванов И.И.", "Петров П.П."]) == "Иванов И.И., Петров П.П."
+    assert lookup.get(("Иванов И.И.",)) == "Иванов И.И."
+
+    # Empty / unknown
+    assert lookup.resolve_all("") == []
+    assert lookup.resolve_all(None) == []
+    assert lookup.get("Неизвестный Н.Н.", default="Def") == "Def"
+
+
+def test_extract_teachers_preserves_order_and_handles_single_initial_occurrences(tmp_path: Path):
+    teachers_file = tmp_path / "teachers.json"
+    teachers_file.write_text(
+        json.dumps([
+            {"short_name": "Иванов А.А.", "full_name": "Иванов Алексей Алексеевич"},
+            {"short_name": "Иванов Б.Б.", "full_name": "Иванов Борис Борисович"},
+            {"short_name": "Сидоров С.С.", "full_name": "Сидоров Сергей Сергеевич"},
+        ], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    resolver = TeacherResolver(str(teachers_file))
+
+    # Order preservation: Сидоров first, then Иванов
+    extracted = resolver._extract_teachers("Сидоров С.С., Иванов А.А.")
+    assert extracted == ["Сидоров С.С.", "Иванов А.А."]
+
+    extracted2 = resolver._extract_teachers("Иванов А.А., Сидоров С.С.")
+    assert extracted2 == ["Иванов А.А.", "Сидоров С.С."]
+
+    # Multiple single initial matches with occurrences >= len(single_matches)
+    extracted3 = resolver._extract_teachers("Иванов А., Иванов Б.")
+    assert extracted3 == ["Иванов А.А.", "Иванов Б.Б."]
+
+    # Reverse order of single matches
+    extracted4 = resolver._extract_teachers("Иванов Б., Иванов А.")
+    assert extracted4 == ["Иванов Б.Б.", "Иванов А.А."]
+
+
+def test_resolve_teacher_list(tmp_path: Path):
+    teachers_file = tmp_path / "teachers.json"
+    teachers_file.write_text(
+        json.dumps([
+            {"short_name": "Иванов И.И.", "full_name": "Иванов Иван Иванович"},
+            {"short_name": "Петров П.П.", "full_name": "Петров Пётр Петрович"},
+            {"short_name": "Сидоров С.С.", "full_name": "Сидоров Сергей Сергеевич"},
+        ], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    resolver = TeacherResolver(str(teachers_file))
+
+    # From string with various delimiters
+    assert resolver._resolve_teacher_list("Иванов И.И., Петров П.П.") == ["Иванов И.И.", "Петров П.П."]
+    assert resolver._resolve_teacher_list("Иванов И.И. и Сидоров С.С.") == ["Иванов И.И.", "Сидоров С.С."]
+    assert resolver._resolve_teacher_list("Иванов / Петров / Сидоров") == [
+        "Иванов И.И.", "Петров П.П.", "Сидоров С.С."
+    ]
+
+    # From sequence
+    assert resolver._resolve_teacher_list(["Иванов Иван Иванович", "Петров П.П."]) == [
+        "Иванов И.И.", "Петров П.П."
+    ]
+
+    # Deduplication
+    assert resolver._resolve_teacher_list("Иванов И.И., Иванов Иван Иванович") == ["Иванов И.И."]
+
+
+def test_teacher_assignment_rules_multiple_teachers():
+    teachers = [
+        {"short_name": "Иванов И.И.", "full_name": "Иванов Иван Иванович"},
+        {"short_name": "Петров П.П.", "full_name": "Петров Пётр Петрович"},
+        {"short_name": "Сидоров С.С.", "full_name": "Сидоров Сергей Сергеевич"},
+    ]
+    lookup = TeacherLookup(teachers)
+
+    rule = normalize_rule(
+        {
+            "subject": "Математика",
+            "lecturer": ["И.И. Иванов", "Петров Пётр"],
+            "practice": "Петров П.П., Сидоров Сергей",
+            "reserve": "Сидоров С.С.",
+        },
+        aliases=lookup,
+    )
+    assert rule["lecturer"] == "Иванов И.И., Петров П.П."
+    assert rule["practice"] == "Петров П.П., Сидоров С.С."
+    assert rule["reserve"] == "Сидоров С.С."

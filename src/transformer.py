@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .data_loader import Lesson
 from .schedule_period import MONTH_NAMES, ResolvedScheduleCalendar, resolve_schedule_calendar
+from .teacher_resolver import TeacherLookup
 
 
 UNASSIGNED_TEACHER = "Не назначен"
@@ -37,6 +38,8 @@ def transform_to_teacher_grid(
         for (week, day_name), value in calendar.week_day_to_date.items()
     }
 
+    teacher_lookup = TeacherLookup(teachers_config) if teachers_config else None
+
     grid_raw = {}
     grid_vertical = {}
     unassigned_found = False
@@ -44,6 +47,10 @@ def transform_to_teacher_grid(
         teacher = _teacher_name(lesson.teacher)
         if teacher == UNASSIGNED_TEACHER:
             unassigned_found = True
+        elif teacher_lookup:
+            canonical = teacher_lookup.get(teacher)
+            if canonical:
+                teacher = canonical
         month_day = week_day_to_full_date.get((lesson.week, lesson.day_of_week))
         if not month_day:
             continue
@@ -80,7 +87,10 @@ def transform_to_teacher_grid(
     }
     semester_info = lessons[0].semester_info if lessons else ''
     year_info = lessons[0].year_info if lessons else ''
-    teacher_names = [teacher['short_name'] for teacher in teachers_config]
+    teacher_names = [
+        str(teacher.get('short_name') or teacher.get('full_name') or '').strip()
+        for teacher in teachers_config
+    ]
     if unassigned_found and UNASSIGNED_TEACHER not in teacher_names:
         teacher_names.append(UNASSIGNED_TEACHER)
     return {
